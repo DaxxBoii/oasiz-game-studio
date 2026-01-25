@@ -67,7 +67,7 @@
         left: 0;
         right: 0;
         top: 0;
-        z-index: 20;
+        z-index: 70;
         pointer-events: none;
         padding-top: calc(var(--safeTop) + env(safe-area-inset-top));
         padding-left: calc(var(--safePadX) + env(safe-area-inset-left));
@@ -1162,9 +1162,8 @@
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.35);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        background: transparent;
+        pointer-events: none;
       }
 
       #settingsModal.visible {
@@ -1178,9 +1177,7 @@
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 0.35);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
+        background: transparent;
       }
 
       #infoModal.visible {
@@ -1198,6 +1195,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        pointer-events: auto;
       }
 
       .settingsCardContent {
@@ -1490,80 +1488,93 @@
         }
       }
 
-      /* Mobile controls */
+      /* Mobile Controls - Default state */
       #mobileControls {
         position: fixed;
-        inset: 0;
-        z-index: 30;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 50;
         pointer-events: none;
+        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+        padding-left: calc(var(--safePadX) + env(safe-area-inset-left));
+        padding-right: calc(var(--safePadX) + env(safe-area-inset-right));
         display: none;
       }
-
+      
       #mobileControls:not(.hidden) {
-        display: block !important;
-      }
-
-      @media (pointer: coarse) {
-        .joystickWrap {
-          display: block;
-        }
-        
-        .actionWrap {
-          display: block;
-        }
+        display: block;
       }
 
       .joystickWrap {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        width: 200px;
-        height: 200px;
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 100px;
+        height: 100px;
         pointer-events: auto;
-        background: rgba(255, 0, 0, 0.3);
-        border: 3px solid red;
+        z-index: 50;
       }
 
       .joyBase {
-        width: 200px;
-        height: 200px;
+        width: 100px;
+        height: 100px;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        background: rgba(255, 255, 255, 0.15);
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
         position: relative;
       }
 
       .joyStick {
-        width: 84px;
-        height: 84px;
+        width: 42px;
+        height: 42px;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.5);
         position: absolute;
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
+        transition: transform 0.1s ease-out;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       }
 
       .actionWrap {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        margin-top: 250px;
+        position: fixed;
+        left: 20px;
+        bottom: 20px;
         pointer-events: auto;
-        background: rgba(0, 255, 0, 0.3);
-        border: 3px solid green;
+        z-index: 50;
+      }
+
+      /* Player 2 Controls (top corners, only visible in LOCAL_2P mode) */
+      .joystickWrap.player2 {
+        left: 20px;
+        top: 120px;
+        right: auto;
+        bottom: auto;
+      }
+
+      .actionWrap.player2 {
+        right: 20px;
+        top: 120px;
+        left: auto;
+        bottom: auto;
+      }
+
+      /* Hide player 2 controls by default (only show in LOCAL_2P mode via JavaScript) */
+      .joystickWrap.player2,
+      .actionWrap.player2 {
+        display: none;
       }
 
       .actionBtn {
-        width: 200px;
-        height: 200px;
-        border-radius: 48px;
+        width: 100px;
+        height: 100px;
+        border-radius: 24px;
         border: 1px solid rgba(255, 255, 255, 0.18);
         background: linear-gradient(180deg, rgba(80, 230, 255, 0.22), rgba(80, 230, 255, 0.08));
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
@@ -1651,12 +1662,29 @@
           gap: var(--ui-hud-spacing-mobile, var(--hudGap));
         }
 
-        .joystickWrap {
-          display: block;
+        /* Force player 1 mobile controls to be visible on mobile (not player 2) */
+        .joystickWrap:not(.player2) {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
         }
         
-        .actionWrap {
-          display: block;
+        .actionWrap:not(.player2) {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+        
+        /* Ensure player 2 controls respect JavaScript visibility control */
+        .joystickWrap.player2,
+        .actionWrap.player2 {
+          display: none !important;
+        }
+        
+        #mobileControls {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
         }
       }
 
@@ -2100,7 +2128,44 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settingsModal" aria-hidden="true">
+    <div id="settingsModal" inert>
+      <!-- Mobile Controls inside settings modal -->
+      <div id="mobileControls" class="hidden">
+        <!-- Player 1 Controls (bottom corners) -->
+        <div class="joystickWrap" id="joyWrap">
+          <div class="joyBase">
+            <div class="joyStick" id="joyStick"></div>
+          </div>
+        </div>
+
+        <div class="actionWrap">
+          <button id="btnBoost" class="actionBtn" aria-label="Boost">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Player 2 Controls (top corners, only visible in LOCAL_2P mode) -->
+        <div class="joystickWrap player2" id="joyWrapP2">
+          <div class="joyBase">
+            <div class="joyStick" id="joyStickP2"></div>
+          </div>
+        </div>
+
+        <div class="actionWrap player2" id="actionWrapP2">
+          <button id="btnBoostP2" class="actionBtn" aria-label="Boost Player 2">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
+
       <div class="settingsCard" role="dialog" aria-label="Settings">
         <div class="settingsHeader">
           <h2>Settings</h2>
@@ -2145,7 +2210,7 @@
     </div>
 
     <!-- Info Modal -->
-    <div id="infoModal" aria-hidden="true">
+    <div id="infoModal" inert>
       <div class="settingsCard" role="dialog" aria-label="Controls and Tips">
         <div class="settingsHeader">
           <h2>Controls & Tips</h2>
@@ -2167,24 +2232,6 @@
       </div>
     </div>
 
-    <!-- Mobile Controls -->
-    <div id="mobileControls" class="hidden">
-      <div class="joystickWrap" id="joyWrap">
-        <div class="joyBase">
-          <div class="joyStick" id="joyStick"></div>
-        </div>
-      </div>
-
-      <div class="actionWrap">
-        <button id="btnBoost" class="actionBtn" aria-label="Boost">
-          <svg viewBox="0 0 24 24">
-            <path
-              d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"
-            />
-          </svg>
-        </button>
-      </div>
-    </div>
 
     <div id="fade"></div>
 

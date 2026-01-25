@@ -860,8 +860,11 @@ class GoalDuelGame {
 
   private keys = new Set<string>();
   private joy: JoyState = { active: false, id: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
+  private joyP2: JoyState = { active: false, id: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
   private boostTouch = false;
+  private boostTouchP2 = false;
   private boostCharge = 1.0; // 0.0 to 1.0, starts full
+  private boostChargeP2 = 1.0; // Player 2 boost charge
   private boostChargeRate = 0.15; // Charge per second (slower - takes ~6.7 seconds to fill)
   private boostDrainRate = 1.5; // Drain per second when boosting (drains in ~0.67 seconds)
 
@@ -994,6 +997,10 @@ class GoalDuelGame {
   private elJoyWrap = document.getElementById("joyWrap") as HTMLDivElement;
   private elJoyStick = document.getElementById("joyStick") as HTMLDivElement;
   private elBtnBoost = document.getElementById("btnBoost") as HTMLButtonElement;
+  // Player 2 controls (for LOCAL_2P mode)
+  private elJoyWrapP2 = document.getElementById("joyWrapP2") as HTMLDivElement;
+  private elJoyStickP2 = document.getElementById("joyStickP2") as HTMLDivElement;
+  private elBtnBoostP2 = document.getElementById("btnBoostP2") as HTMLButtonElement;
   
   private elPhysicsPanel = document.getElementById("physicsPanel") as HTMLDivElement;
   private elPhysicsPanelContent = document.getElementById("physicsPanelContent") as HTMLDivElement;
@@ -1010,6 +1017,7 @@ class GoalDuelGame {
   private selectedCarIndex = 0;
   private playerCarName = "blue";
   private botCarName = "red";
+  private local2PPlayer1Selected = false; // Track if first player has selected in local 2P mode
   private botCountry = "us"; // Bot's selected country
   private matchMode: MatchMode = "BOT";
   private pendingMode: MatchMode = "BOT";
@@ -1222,8 +1230,8 @@ class GoalDuelGame {
     this.elImgMenu.src = urlMenu;
     this.elImgEndPlay.src = urlPlay;
     this.elImgEndMenu.src = urlMenu;
-    this.elImgMenuBtn.src = urlBack;
-    this.elImgSettingsBtn.src = urlSettings;
+    if (this.elImgMenuBtn) this.elImgMenuBtn.src = urlBack;
+    if (this.elImgSettingsBtn) this.elImgSettingsBtn.src = urlSettings;
     // Panel backgrounds removed - using fog overlay instead
     this.stadiumBg.onerror = () => {
       console.error("[Game] Failed to load stadium background");
@@ -1412,12 +1420,35 @@ class GoalDuelGame {
         this.audio.ensure();
         this.audio.uiTap();
         this.triggerHaptic("light");
-        this.setCarSkin(name);
-        this.fadeScene(() => {
-          this.showCarPicker(false);
-          this.startSearching(this.pendingMode);
-          this.pendingMode = "BOT";
-        });
+        
+        if (this.pendingMode === "LOCAL_2P") {
+          // For local 2P mode
+          if (!this.local2PPlayer1Selected) {
+            // First player selects car
+            this.setCarSkin(name);
+            this.local2PPlayer1Selected = true;
+            this.fadeScene(() => {
+              // Keep car picker open for second player, update title
+              this.showCarPicker(true);
+            });
+          } else {
+            // Second player selects car (this becomes botCarName for local 2P)
+            this.botCarName = name;
+            this.fadeScene(() => {
+              this.showCarPicker(false);
+              // Start match directly for local 2P
+              this.startMatch();
+            });
+          }
+        } else {
+          // For BOT mode
+          this.setCarSkin(name);
+          this.fadeScene(() => {
+            this.showCarPicker(false);
+            this.startSearching(this.pendingMode);
+            this.pendingMode = "BOT";
+          });
+        }
       });
 
       this.elCarGrid.appendChild(btn);
@@ -1448,6 +1479,20 @@ class GoalDuelGame {
     if (open) {
       // Rebuild UI when opening to ensure car images are loaded
       this.buildCarUI();
+      // Update title for local 2P mode
+      if (this.pendingMode === "LOCAL_2P") {
+        const carTitle = this.elCarStage.querySelector(".countryTitle");
+        const carSub = this.elCarStage.querySelector(".countrySub");
+        if (carTitle && carSub) {
+          if (this.local2PPlayer1Selected) {
+            carTitle.textContent = "Player 2: Choose your car";
+            carSub.textContent = "Tap a car to start the match";
+          } else {
+            carTitle.textContent = "Player 1: Choose your car";
+            carSub.textContent = "Tap a car to continue";
+          }
+        }
+      }
       this.elCarStage.classList.remove("hidden");
     } else {
       this.elCarStage.classList.add("hidden");
@@ -1494,9 +1539,12 @@ class GoalDuelGame {
     this.elBtnLocal.addEventListener("click", () => {
       tap();
       this.pendingMode = "LOCAL_2P";
+      this.local2PPlayer1Selected = false;
+      this.playerCarName = ""; // Reset player car selection
       this.fadeScene(() => {
-        this.refreshCountryUI();
-        this.showCountryPicker(true);
+        // Skip country picker for local 2P, go straight to car picker
+        this.refreshCarUI();
+        this.showCarPicker(true);
       });
     });
 
@@ -1534,10 +1582,13 @@ class GoalDuelGame {
       });
     });
 
-    this.elBtnSettings.addEventListener("click", () => {
-      tap();
-      this.showSettings(true);
-    });
+    if (this.elBtnSettings) {
+      this.elBtnSettings.addEventListener("click", () => {
+        tap();
+        // Settings panel temporarily disabled
+       this.showSettings(true);
+      });
+    }
 
     // Physics panel (internal buttons only, no toggle)
     this.elBtnTogglePhysicsPanel.addEventListener("click", () => {
@@ -1607,10 +1658,12 @@ class GoalDuelGame {
 
     // Physics settings sliders - now handled dynamically in buildPhysicsPanel()
 
-    this.elBtnMenu.addEventListener("click", () => {
-      tap();
-      this.toMenu();
-    });
+    if (this.elBtnMenu) {
+      this.elBtnMenu.addEventListener("click", () => {
+        tap();
+        this.toMenu();
+      });
+    }
 
     this.elBtnSkipReplay.addEventListener("click", () => {
       tap();
@@ -1646,15 +1699,25 @@ class GoalDuelGame {
     if (open) {
       this.syncSettingsUI();
       this.elSettingsModal.classList.add("visible");
-      this.elSettingsModal.setAttribute("aria-hidden", "false");
-      // Hide mobile controls when settings is open
-      this.elMobileControls.classList.add("hidden");
+      this.elSettingsModal.removeAttribute("inert");
+      // Show the settings card when opening settings
+      const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+      if (settingsCard) {
+        (settingsCard as HTMLElement).style.display = "";
+      }
     } else {
-      this.elSettingsModal.classList.remove("visible");
-      this.elSettingsModal.setAttribute("aria-hidden", "true");
-      // Show mobile controls when settings is closed (if on mobile and in playing state)
-      if (isMobile() && (this.state === "PLAYING" || this.state === "GOAL")) {
-        this.elMobileControls.classList.remove("hidden");
+      // Hide the settings card when closing, but keep modal visible for controls during gameplay
+      const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+      if (settingsCard) {
+        (settingsCard as HTMLElement).style.display = "none";
+      }
+      // Keep the modal visible for controls if in playing state
+      if (this.state === "PLAYING" || this.state === "GOAL") {
+        this.elSettingsModal.classList.add("visible");
+        this.elSettingsModal.removeAttribute("inert");
+      } else {
+        this.elSettingsModal.classList.remove("visible");
+        this.elSettingsModal.setAttribute("inert", "");
       }
     }
   }
@@ -2015,10 +2078,10 @@ class GoalDuelGame {
   private showInfo(open: boolean): void {
     if (open) {
       this.elInfoModal.classList.add("visible");
-      this.elInfoModal.setAttribute("aria-hidden", "false");
+      this.elInfoModal.removeAttribute("inert");
     } else {
       this.elInfoModal.classList.remove("visible");
-      this.elInfoModal.setAttribute("aria-hidden", "true");
+      this.elInfoModal.setAttribute("inert", "");
     }
   }
 
@@ -2040,68 +2103,97 @@ class GoalDuelGame {
       this.keys.delete(e.key.toLowerCase());
     });
 
-    // Mobile joystick
-    const setJoyStick = (dx: number, dy: number) => {
-      const maxR = 30; // Reduced to match smaller joystick size
-      const len = Math.hypot(dx, dy);
-      const s = len > maxR ? maxR / Math.max(1, len) : 1;
-      const px = dx * s;
-      const py = dy * s;
-      this.elJoyStick.style.transform =
-        "translate(calc(-50% + " + px.toFixed(1) + "px), calc(-50% + " + py.toFixed(1) + "px))";
-
-      const nx = clamp(px / maxR, -1, 1);
-      const ny = clamp(py / maxR, -1, 1);
-      // Up = accelerate, Down = reverse
-      this.playerInput.throttle = clamp(-ny, -1, 1);
-      // Left/right = steer
-      this.playerInput.steer = clamp(nx, -1, 1);
+    // Mobile joystick - completely rewritten
+    const maxRadius = 30;
+    
+    const updateJoystick = (dx: number, dy: number) => {
+      const distance = Math.hypot(dx, dy);
+      const scale = distance > maxRadius ? maxRadius / distance : 1;
+      const px = dx * scale;
+      const py = dy * scale;
+      
+      if (this.elJoyStick) {
+        this.elJoyStick.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+      }
+      
+      const normalizedX = clamp(px / maxRadius, -1, 1);
+      const normalizedY = clamp(py / maxRadius, -1, 1);
+      
+      this.playerInput.throttle = clamp(-normalizedY, -1, 1);
+      this.playerInput.steer = clamp(normalizedX, -1, 1);
     };
 
-    const onStart = (x: number, y: number, id: number) => {
+    const handleJoystickStart = (x: number, y: number, pointerId: number) => {
+      if (this.state !== "PLAYING" && this.state !== "GOAL") return;
+      
+      const rect = this.elJoyWrap.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      
       this.joy.active = true;
-      this.joy.id = id;
-      this.joy.baseX = x;
-      this.joy.baseY = y;
+      this.joy.id = pointerId;
+      this.joy.baseX = centerX;
+      this.joy.baseY = centerY;
       this.joy.dx = 0;
       this.joy.dy = 0;
-      setJoyStick(0, 0);
+      
+      updateJoystick(0, 0);
       this.triggerHaptic("light");
+      this.audio.ensure();
     };
-    const onMove = (x: number, y: number) => {
+
+    const handleJoystickMove = (x: number, y: number) => {
       if (!this.joy.active) return;
-      this.joy.dx = x - this.joy.baseX;
-      this.joy.dy = y - this.joy.baseY;
-      setJoyStick(this.joy.dx, this.joy.dy);
+      
+      const dx = x - this.joy.baseX;
+      const dy = y - this.joy.baseY;
+      
+      this.joy.dx = dx;
+      this.joy.dy = dy;
+      updateJoystick(dx, dy);
     };
-    const onEnd = () => {
+
+    const handleJoystickEnd = () => {
       this.joy.active = false;
       this.joy.id = null;
       this.joy.dx = 0;
       this.joy.dy = 0;
       this.playerInput.throttle = 0;
       this.playerInput.steer = 0;
-      setJoyStick(0, 0);
+      
+      if (this.elJoyStick) {
+        this.elJoyStick.style.transform = "translate(-50%, -50%)";
+      }
     };
 
-    const joyEl = this.elJoyWrap;
-    joyEl.addEventListener("pointerdown", (e) => {
-      if (this.state !== "PLAYING") return;
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-      onStart(e.clientX, e.clientY, e.pointerId);
-      this.audio.ensure();
-      if (this.settings.music) this.audio.startMusic();
-    });
-    joyEl.addEventListener("pointermove", (e) => {
-      if (!this.joy.active) return;
-      if (this.joy.id !== e.pointerId) return;
-      onMove(e.clientX, e.clientY);
-    });
-    joyEl.addEventListener("pointerup", (e) => {
-      if (this.joy.id !== e.pointerId) return;
-      onEnd();
-    });
-    joyEl.addEventListener("pointercancel", () => onEnd());
+    // Bind joystick events
+    if (this.elJoyWrap) {
+      this.elJoyWrap.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        handleJoystickStart(e.clientX, e.clientY, e.pointerId);
+      });
+      
+      this.elJoyWrap.addEventListener("pointermove", (e) => {
+        if (!this.joy.active || this.joy.id !== e.pointerId) return;
+        e.preventDefault();
+        handleJoystickMove(e.clientX, e.clientY);
+      });
+      
+      this.elJoyWrap.addEventListener("pointerup", (e) => {
+        if (this.joy.id === e.pointerId) {
+          e.preventDefault();
+          handleJoystickEnd();
+        }
+      });
+      
+      this.elJoyWrap.addEventListener("pointercancel", (e) => {
+        if (this.joy.id === e.pointerId) {
+          e.preventDefault();
+          handleJoystickEnd();
+        }
+      });
+    }
 
     // Boost button
     const boostDown = () => {
@@ -2127,6 +2219,125 @@ class GoalDuelGame {
     });
     this.elBtnBoost.addEventListener("pointerup", () => boostUp());
     this.elBtnBoost.addEventListener("pointercancel", () => boostUp());
+
+    // Player 2 joystick (for LOCAL_2P mode)
+    const updateJoystickP2 = (dx: number, dy: number) => {
+      const distance = Math.hypot(dx, dy);
+      const scale = distance > maxRadius ? maxRadius / distance : 1;
+      const px = dx * scale;
+      const py = dy * scale;
+      
+      if (this.elJoyStickP2) {
+        this.elJoyStickP2.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+      }
+      
+      const normalizedX = clamp(px / maxRadius, -1, 1);
+      const normalizedY = clamp(py / maxRadius, -1, 1);
+      
+      this.botInput.throttle = clamp(-normalizedY, -1, 1);
+      this.botInput.steer = clamp(normalizedX, -1, 1);
+    };
+
+    const handleJoystickStartP2 = (x: number, y: number, pointerId: number) => {
+      if (this.state !== "PLAYING" && this.state !== "GOAL") return;
+      if (this.matchMode !== "LOCAL_2P") return;
+      
+      const rect = this.elJoyWrapP2.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      
+      this.joyP2.active = true;
+      this.joyP2.id = pointerId;
+      this.joyP2.baseX = centerX;
+      this.joyP2.baseY = centerY;
+      this.joyP2.dx = 0;
+      this.joyP2.dy = 0;
+      
+      updateJoystickP2(0, 0);
+      this.triggerHaptic("light");
+      this.audio.ensure();
+    };
+
+    const handleJoystickMoveP2 = (x: number, y: number) => {
+      if (!this.joyP2.active) return;
+      
+      const dx = x - this.joyP2.baseX;
+      const dy = y - this.joyP2.baseY;
+      
+      this.joyP2.dx = dx;
+      this.joyP2.dy = dy;
+      updateJoystickP2(dx, dy);
+    };
+
+    const handleJoystickEndP2 = () => {
+      this.joyP2.active = false;
+      this.joyP2.id = null;
+      this.joyP2.dx = 0;
+      this.joyP2.dy = 0;
+      this.botInput.throttle = 0;
+      this.botInput.steer = 0;
+      
+      if (this.elJoyStickP2) {
+        this.elJoyStickP2.style.transform = "translate(-50%, -50%)";
+      }
+    };
+
+    // Bind player 2 joystick events
+    if (this.elJoyWrapP2) {
+      this.elJoyWrapP2.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        handleJoystickStartP2(e.clientX, e.clientY, e.pointerId);
+      });
+      
+      this.elJoyWrapP2.addEventListener("pointermove", (e) => {
+        if (!this.joyP2.active || this.joyP2.id !== e.pointerId) return;
+        e.preventDefault();
+        handleJoystickMoveP2(e.clientX, e.clientY);
+      });
+      
+      this.elJoyWrapP2.addEventListener("pointerup", (e) => {
+        if (this.joyP2.id === e.pointerId) {
+          e.preventDefault();
+          handleJoystickEndP2();
+        }
+      });
+      
+      this.elJoyWrapP2.addEventListener("pointercancel", (e) => {
+        if (this.joyP2.id === e.pointerId) {
+          e.preventDefault();
+          handleJoystickEndP2();
+        }
+      });
+    }
+
+    // Player 2 boost button
+    const boostDownP2 = () => {
+      if (this.state !== "PLAYING") return;
+      if (this.matchMode !== "LOCAL_2P") return;
+      // Only allow boost if charge is full
+      if (this.boostChargeP2 >= 1.0) {
+        this.botInput.boost = true;
+        this.boostTouchP2 = true;
+        this.audio.ensure();
+        this.audio.boost();
+        this.triggerHaptic("light");
+        this.elBtnBoostP2.classList.add("active");
+      }
+    };
+    const boostUpP2 = () => {
+      this.botInput.boost = false;
+      this.boostTouchP2 = false;
+      this.elBtnBoostP2.classList.remove("active");
+    };
+    if (this.elBtnBoostP2) {
+      this.elBtnBoostP2.addEventListener("pointerdown", (e) => {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        boostDownP2();
+      });
+      this.elBtnBoostP2.addEventListener("pointerup", () => boostUpP2());
+      this.elBtnBoostP2.addEventListener("pointercancel", () => boostUpP2());
+    }
   }
 
   private rebuildWorldWithNewPhysics(): void {
@@ -2605,6 +2816,7 @@ class GoalDuelGame {
     this.goalBurst = [];
     this.matchLimit = Math.max(10, Math.floor(limitSec ?? 90));
     this.boostCharge = 1.0; // Reset boost charge to full
+    this.boostChargeP2 = 1.0; // Reset player 2 boost charge to full
     
     // Reset bot stuck detection
     this.botPositionHistory = [];
@@ -2651,12 +2863,29 @@ class GoalDuelGame {
     this.replayData = []; // Clear old replay
     this.tireTraces = []; // Clear tire traces
     this.lastTireTraceTime = 0;
-    // Show mobile controls immediately on mobile
-    if (isMobile()) {
-      this.elMobileControls.classList.remove("hidden");
-    } else {
-      this.elMobileControls.classList.add("hidden");
+    // Show mobile controls at the beginning of the match (they're inside settings modal, so show the modal container but hide the card)
+    this.elSettingsModal.classList.add("visible");
+    this.elSettingsModal.removeAttribute("inert");
+    this.elMobileControls.classList.remove("hidden");
+    // Hide the settings card during gameplay
+    const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+    if (settingsCard) {
+      (settingsCard as HTMLElement).style.display = "none";
     }
+    
+    // Ensure player 2 controls are hidden in BOT mode (use !important to override CSS)
+    if (this.matchMode === "BOT") {
+      if (this.elJoyWrapP2) {
+        this.elJoyWrapP2.style.setProperty("display", "none", "important");
+      }
+      if (this.elBtnBoostP2) {
+        const actionWrapP2 = document.getElementById("actionWrapP2");
+        if (actionWrapP2) {
+          actionWrapP2.style.setProperty("display", "none", "important");
+        }
+      }
+    }
+    
     this.setState("PLAYING");
     this.startCountdown();
   }
@@ -2844,7 +3073,15 @@ class GoalDuelGame {
       this.elEnd.classList.add("hidden");
       this.elHudRoot.classList.add("hidden");
       this.elHudPills.classList.add("hidden");
+      // Hide mobile controls in menu - hide the settings modal container and controls
+      this.elSettingsModal.classList.remove("visible");
+      this.elSettingsModal.setAttribute("inert", "");
       this.elMobileControls.classList.add("hidden");
+      // Ensure settings card is also hidden
+      const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+      if (settingsCard) {
+        (settingsCard as HTMLElement).style.display = "none";
+      }
       this.elSearchingOverlay.classList.add("hidden");
       // Music should already be playing, just ensure it continues
       if (!instant) {
@@ -2865,8 +3102,10 @@ class GoalDuelGame {
       this.elHudRoot.classList.remove("hidden");
       this.elHudPills.classList.remove("hidden");
       this.elSearchingOverlay.classList.add("hidden");
-      if (isMobile()) this.elMobileControls.classList.remove("hidden");
-      else this.elMobileControls.classList.add("hidden");
+      // Show mobile controls when playing (same logic as settings - always show if playing)
+      this.elMobileControls.classList.remove("hidden");
+      // Update mobile controls visibility to show/hide player 2 controls based on match mode
+      this.updateMobileControlsVisibility();
       // Music continues playing
     } else if (s === "GAME_OVER") {
       this.elStart.classList.add("hidden");
@@ -2948,6 +3187,79 @@ class GoalDuelGame {
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    
+    // Update mobile controls visibility on resize
+    this.updateMobileControlsVisibility();
+  }
+
+  private updateMobileControlsVisibility(): void {
+    // Hide controls in menu, show if playing/goal
+    if (this.state === "MENU") {
+      // Safely hide everything in menu
+      this.elSettingsModal.classList.remove("visible");
+      this.elSettingsModal.setAttribute("inert", "");
+      this.elMobileControls.classList.add("hidden");
+      const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+      if (settingsCard) {
+        (settingsCard as HTMLElement).style.display = "none";
+      }
+      // Hide player 2 controls (use !important to override CSS)
+      if (this.elJoyWrapP2) {
+        this.elJoyWrapP2.style.setProperty("display", "none", "important");
+      }
+      if (this.elBtnBoostP2) {
+        const actionWrapP2 = document.getElementById("actionWrapP2");
+        if (actionWrapP2) {
+          actionWrapP2.style.setProperty("display", "none", "important");
+        }
+      }
+    } else if (this.state === "PLAYING" || this.state === "GOAL") {
+      // Show controls during gameplay
+      this.elSettingsModal.classList.add("visible");
+      this.elSettingsModal.removeAttribute("inert");
+      this.elMobileControls.classList.remove("hidden");
+      const settingsCard = this.elSettingsModal.querySelector(".settingsCard");
+      if (settingsCard) {
+        (settingsCard as HTMLElement).style.display = "none";
+      }
+      // Show/hide player 2 controls based on match mode (use !important to override CSS)
+      if (this.matchMode === "LOCAL_2P") {
+        if (this.elJoyWrapP2) {
+          this.elJoyWrapP2.style.setProperty("display", "block", "important");
+        }
+        if (this.elBtnBoostP2) {
+          const actionWrapP2 = document.getElementById("actionWrapP2");
+          if (actionWrapP2) {
+            actionWrapP2.style.setProperty("display", "block", "important");
+          }
+        }
+      } else {
+        if (this.elJoyWrapP2) {
+          this.elJoyWrapP2.style.setProperty("display", "none", "important");
+        }
+        if (this.elBtnBoostP2) {
+          const actionWrapP2 = document.getElementById("actionWrapP2");
+          if (actionWrapP2) {
+            actionWrapP2.style.setProperty("display", "none", "important");
+          }
+        }
+      }
+    } else {
+      // Hide for all other states
+      this.elSettingsModal.classList.remove("visible");
+      this.elSettingsModal.setAttribute("inert", "");
+      this.elMobileControls.classList.add("hidden");
+      // Hide player 2 controls (use !important to override CSS)
+      if (this.elJoyWrapP2) {
+        this.elJoyWrapP2.style.setProperty("display", "none", "important");
+      }
+      if (this.elBtnBoostP2) {
+        const actionWrapP2 = document.getElementById("actionWrapP2");
+        if (actionWrapP2) {
+          actionWrapP2.style.setProperty("display", "none", "important");
+        }
+      }
+    }
   }
 
   private buildEnvironment(): void {
@@ -3276,6 +3588,27 @@ class GoalDuelGame {
         } else {
           this.elBtnBoost.classList.remove("ready");
         }
+      } else if (this.matchMode === "LOCAL_2P") {
+        // Player 2 boost charge handling during countdown
+        if (input.boost) {
+          if (this.boostChargeP2 <= 0) {
+            this.botInput.boost = false;
+            this.boostTouchP2 = false;
+            if (this.elBtnBoostP2) this.elBtnBoostP2.classList.remove("active");
+          } else {
+            this.boostChargeP2 = Math.max(0, this.boostChargeP2 - this.boostDrainRate * dt);
+          }
+        } else {
+          this.boostChargeP2 = Math.min(1.0, this.boostChargeP2 + this.boostChargeRate * dt);
+        }
+        if (this.elBtnBoostP2) {
+          this.elBtnBoostP2.style.setProperty("--boost-fill", `${this.boostChargeP2 * 100}%`);
+          if (this.boostChargeP2 >= 1.0) {
+            this.elBtnBoostP2.classList.add("ready");
+          } else {
+            this.elBtnBoostP2.classList.remove("ready");
+          }
+        }
       }
       // Prevent car movement during countdown
       Body.setVelocity(body, { x: 0, y: 0 });
@@ -3308,6 +3641,33 @@ class GoalDuelGame {
         this.elBtnBoost.classList.add("ready");
       } else {
         this.elBtnBoost.classList.remove("ready");
+      }
+    } else if (this.matchMode === "LOCAL_2P") {
+      // Player 2 boost charge handling
+      if (input.boost) {
+        if (this.boostChargeP2 <= 0) {
+          // Out of charge, disable boost
+          actualBoost = false;
+          this.botInput.boost = false;
+          this.boostTouchP2 = false;
+          if (this.elBtnBoostP2) this.elBtnBoostP2.classList.remove("active");
+        } else {
+          // Drain charge while boosting
+          this.boostChargeP2 = Math.max(0, this.boostChargeP2 - this.boostDrainRate * dt);
+        }
+      } else {
+        // Recharge when not boosting
+        this.boostChargeP2 = Math.min(1.0, this.boostChargeP2 + this.boostChargeRate * dt);
+      }
+      
+      // Update button fill visual
+      if (this.elBtnBoostP2) {
+        this.elBtnBoostP2.style.setProperty("--boost-fill", `${this.boostChargeP2 * 100}%`);
+        if (this.boostChargeP2 >= 1.0) {
+          this.elBtnBoostP2.classList.add("ready");
+        } else {
+          this.elBtnBoostP2.classList.remove("ready");
+        }
       }
     }
     
@@ -3734,8 +4094,10 @@ class GoalDuelGame {
     const maxSpeed = this.settings.carMaxSpeedBoost;
     const speedRatio = Math.min(playerSpeed / maxSpeed, 1.0);
     
-    // Zoom in more when accelerating (higher speed) - small adjustment
+    // In BOT mode: zoom OUT on acceleration (higher speed = zoom out more)
+    // In LOCAL_2P mode: zoom IN on acceleration (higher speed = zoom in more)
     const speedZoomAdjust = speedRatio * this.settings.cameraZoomSpeedFactor;
+    const speedZoomFactor = this.matchMode === "BOT" ? -speedZoomAdjust : speedZoomAdjust;
     
     // Zoom based on ball distance (closer ball = zoom in more) - small adjustment
     const ballDist = Vector.magnitude(Vector.sub(this.ball.position, this.playerCar.position));
@@ -3744,7 +4106,7 @@ class GoalDuelGame {
     const ballZoomAdjust = (1.0 - distRatio) * this.settings.cameraZoomBallFactor;
     
     // Base zoom at 1.20, with small adjustments added
-    this.targetZoom = 1.20 + speedZoomAdjust + ballZoomAdjust;
+    this.targetZoom = 1.20 + speedZoomFactor + ballZoomAdjust;
     
     // Smooth zoom transition
     const zoomSmooth = this.settings.cameraZoomSmoothness;
