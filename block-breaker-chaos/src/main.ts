@@ -20,6 +20,7 @@ interface Block {
 
 interface Ball {
   body: Matter.Body;
+  angleVariation: number;
 }
 
 interface Particle {
@@ -399,7 +400,10 @@ class BlockBreakerGame {
     const vy = Math.sin(this.launcher.angle) * this.launcher.power;
     Body.setVelocity(ball, { x: vx, y: vy });
     
-    this.balls.push({ body: ball });
+    this.balls.push({ 
+      body: ball,
+      angleVariation: (Math.random() - 0.5) * 0.5
+    });
     World.add(this.world, ball);
     
     this.triggerHaptic('medium');
@@ -538,7 +542,7 @@ class BlockBreakerGame {
       );
       
       if (speed < 5) {
-        const angle = Math.atan2(ball.body.velocity.y, ball.body.velocity.x) + (Math.random() - 0.5) * 0.5;
+        const angle = Math.atan2(ball.body.velocity.y, ball.body.velocity.x) + ball.angleVariation;
         Body.setVelocity(ball.body, {
           x: Math.cos(angle) * 10,
           y: Math.sin(angle) * 10
@@ -556,7 +560,7 @@ class BlockBreakerGame {
       
       if (Math.abs(ball.body.velocity.x) < 2 && Math.abs(ball.body.velocity.y) > 5) {
         Body.setVelocity(ball.body, {
-          x: ball.body.velocity.x + (Math.random() - 0.5) * 4,
+          x: ball.body.velocity.x + ball.angleVariation * 4,
           y: ball.body.velocity.y
         });
       }
