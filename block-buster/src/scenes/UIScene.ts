@@ -25,12 +25,11 @@ export default class UIScene extends Phaser.Scene {
     /* START-USER-CODE */
     private moneyDiv!: HTMLElement | null;
     private levelDiv!: HTMLElement | null;
-    private reloadBtn!: HTMLElement | null;
     private damageBtn!: HTMLElement | null;
     private ballsBtn!: HTMLElement | null;
     private duplicateBtn!: HTMLElement | null;
-    private rearshotBtn!: HTMLElement | null;
     private laserBtn!: HTMLElement | null;
+    private burstBtn!: HTMLElement | null;
 
     // Settings UI
     private btnSettings!: HTMLElement | null;
@@ -52,13 +51,10 @@ export default class UIScene extends Phaser.Scene {
         // Get HTML Elements
         this.moneyDiv = document.getElementById('hud-money');
         this.levelDiv = document.getElementById('hud-level');
-        this.reloadBtn = document.getElementById('btn-reload');
         this.damageBtn = document.getElementById('btn-damage');
         this.ballsBtn = document.getElementById('btn-balls');
         this.duplicateBtn = document.getElementById('btn-duplicate');
-        this.rearshotBtn = document.getElementById('btn-rearshot');
         this.laserBtn = document.getElementById('btn-laser');
-        console.log("Rear Shot Button found:", !!this.rearshotBtn);
 
         // Settings Elements
         this.btnSettings = document.getElementById('btn-settings');
@@ -78,12 +74,6 @@ export default class UIScene extends Phaser.Scene {
         gameScene.events.emit('request-shop-update');
 
         // Setup Buttons
-        if (this.reloadBtn) {
-            this.reloadBtn.onclick = () => {
-                gameScene.events.emit('request-upgrade', 'reload');
-                this.animateBtn(this.reloadBtn!);
-            };
-        }
 
         if (this.damageBtn) {
             this.damageBtn.onclick = () => {
@@ -106,19 +96,14 @@ export default class UIScene extends Phaser.Scene {
             };
         }
 
-        if (this.rearshotBtn) {
-            this.rearshotBtn.onclick = () => {
-                gameScene.events.emit('request-upgrade', 'rearshot');
-                this.animateBtn(this.rearshotBtn!);
-            };
-        }
-
         if (this.laserBtn) {
             this.laserBtn.onclick = () => {
                 gameScene.events.emit('request-upgrade', 'laser');
                 this.animateBtn(this.laserBtn!);
             };
         }
+
+
 
         // Settings Logic
         this.loadSettings();
@@ -139,6 +124,20 @@ export default class UIScene extends Phaser.Scene {
         if (this.toggleFX) this.toggleFX.onchange = () => this.saveSettings();
         if (this.toggleHaptics) this.toggleHaptics.onchange = () => this.saveSettings();
 
+        // Burst Button
+        this.burstBtn = document.getElementById('btn-burst');
+        if (this.burstBtn) {
+            this.animateBtn(this.burstBtn);
+            this.burstBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                gameScene.events.emit('request-upgrade', 'burst');
+            });
+            this.burstBtn.addEventListener('mousedown', (e) => {
+                e.preventDefault(); e.stopPropagation();
+                gameScene.events.emit('request-upgrade', 'burst');
+            });
+        }
+
         // Game Over Logic
         if (this.btnRestart) {
             this.btnRestart.onclick = () => {
@@ -158,52 +157,63 @@ export default class UIScene extends Phaser.Scene {
 
 
         gameScene.events.on('update-money', (amount: number) => {
-            if (this.moneyDiv) this.moneyDiv.innerText = 'MONEY: $' + amount;
+            if (this.moneyDiv) this.moneyDiv.innerText = 'MONEY: $' + Math.floor(amount);
         }, this);
 
         gameScene.events.on('update-level', (level: number) => {
             if (this.levelDiv) this.levelDiv.innerText = 'LEVEL: ' + level;
         }, this);
 
-        gameScene.events.on('update-shop-prices', (prices: { reload: number, damage: number, balls: number, duplicate: number, rearshot: number, laser: number, reloadMax?: boolean, ballsMax?: boolean, duplicateMax?: boolean, rearshotMax?: boolean, laserMax?: boolean }) => {
-            if (this.reloadBtn) {
-                const priceText = prices.reloadMax ? 'MAX' : `$${prices.reload}`;
-                this.reloadBtn.innerHTML = `
-                    <span class="text-[8px] mb-1 text-white">RELOAD</span>
-                    <span class="text-[10px] text-yellow-300">${priceText}</span>
-                `;
-            }
+        gameScene.events.on('update-shop-prices', (prices: { damage: number, balls: number, duplicate: number, burst: number, laser: number, duplicateMax?: boolean, burstMax?: boolean, laserMax?: boolean, locked?: boolean, timeLocked?: boolean }) => {
+            const isBallLocked = prices.locked === true;
+            const isInitialLocked = prices.timeLocked === true;
+
+            const toggleLock = (btn: HTMLElement | null, forceLocked: boolean = false) => {
+                if (btn) {
+                    if (forceLocked) {
+                        btn.classList.add('opacity-50', 'pointer-events-none', 'grayscale');
+                    } else {
+                        btn.classList.remove('opacity-50', 'pointer-events-none', 'grayscale');
+                    }
+                }
+            };
+
             if (this.damageBtn) {
+                toggleLock(this.damageBtn, isInitialLocked || isBallLocked);
                 this.damageBtn.innerHTML = `
                     <span class="text-[8px] mb-1 text-white">DAMAGE</span>
-                    <span class="text-[10px] text-yellow-300">$${prices.damage}</span>
+                    <span class="text-[10px] text-yellow-300">$${Math.round(prices.damage)}</span>
                 `;
             }
             if (this.ballsBtn) {
-                const priceText = prices.ballsMax ? 'MAX' : `$${prices.balls}`;
+                // Balls button is ONLY locked during the first 5 seconds
+                toggleLock(this.ballsBtn, isInitialLocked);
                 this.ballsBtn.innerHTML = `
                     <span class="text-[8px] mb-1 text-white">BALLS</span>
-                    <span class="text-[10px] text-yellow-300">${priceText}</span>
+                    <span class="text-[10px] text-yellow-300">${Math.round(prices.balls)}</span>
                 `;
             }
             if (this.duplicateBtn) {
-                const priceText = prices.duplicateMax ? 'MAX' : `$${prices.duplicate}`;
+                toggleLock(this.duplicateBtn, isInitialLocked || isBallLocked);
+                const priceText = prices.duplicateMax ? 'MAX' : `$${Math.round(prices.duplicate)}`;
                 this.duplicateBtn.innerHTML = `
                     <span class="text-[8px] mb-1 text-white">DUPLICATE</span>
                     <span class="text-[10px] text-purple-300">${priceText}</span>
                 `;
             }
-            if (this.rearshotBtn) {
-                const priceText = prices.rearshotMax ? 'MAX' : `$${prices.rearshot}`;
-                this.rearshotBtn.innerHTML = `
-                    <span class="text-[8px] mb-1 text-white">REAR SHOT</span>
-                    <span class="text-[10px] text-orange-300">${priceText}</span>
+            if (this.laserBtn) {
+                toggleLock(this.laserBtn, isInitialLocked || isBallLocked);
+                const priceText = prices.laserMax ? 'MAX' : `$${Math.round(prices.laser)}`;
+                this.laserBtn.innerHTML = `
+                    <span class="text-[8px] mb-1 text-white">LASER</span>
+                    <span class="text-[10px] text-red-300">${priceText}</span>
                 `;
             }
-            if (this.laserBtn) {
-                const priceText = prices.laserMax ? 'MAX' : `$${prices.laser}`;
-                this.laserBtn.innerHTML = `
-                    <span class="text-[8px] mb-1 text-white">LASER BEAM</span>
+            if (this.burstBtn) {
+                toggleLock(this.burstBtn, isInitialLocked || isBallLocked);
+                const priceText = `$${Math.round(prices.burst)}`;
+                this.burstBtn.innerHTML = `
+                    <span class="text-[8px] mb-1 text-white">BURST</span>
                     <span class="text-[10px] text-red-300">${priceText}</span>
                 `;
             }
@@ -216,6 +226,8 @@ export default class UIScene extends Phaser.Scene {
             // Ensure we remove any 'hidden' class if it was manually added before
             uiLayer.classList.remove('hidden');
         }
+
+        gameScene.events.emit('request-shop-update');
     }
 
     loadSettings() {
