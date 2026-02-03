@@ -56,6 +56,7 @@ export default class Level extends Phaser.Scene {
 	private isWaitingForGameOver: boolean = false;
 	private isMenuOpen: boolean = true;
 	private lastTrailSpawnTime: number = 0;
+	private indicatorGraphics: Phaser.GameObjects.Graphics | undefined;
 
 	create() {
 		// --- Explicit State Resets ---
@@ -71,11 +72,15 @@ export default class Level extends Phaser.Scene {
 		this.isMenuOpen = true;
 
 		// Matter.js settings
-		// Matter.js settings - Reduced iterations for better mobile performance
-		this.matter.world.engine.positionIterations = 8;
-		this.matter.world.engine.velocityIterations = 8;
-		this.matter.world.engine.constraintIterations = 8;
+		// Matter.js settings - Higher iterations to prevent tunneling through smoother terrain
+		this.matter.world.engine.positionIterations = 12;
+		this.matter.world.engine.velocityIterations = 12;
+		this.matter.world.engine.constraintIterations = 12;
 		this.matter.world.engine.enableSleeping = false;
+
+		// Indicator Graphics
+		this.indicatorGraphics = this.add.graphics();
+		this.indicatorGraphics.setDepth(100);
 
 		const width = this.scale.width;
 		const height = this.scale.height;
@@ -185,11 +190,11 @@ export default class Level extends Phaser.Scene {
 
 		const ballRadius = 15;
 		this.ball = this.matter.add.circle(this.spawnPoint.x, this.spawnPoint.y, ballRadius, {
-			restitution: 0.45,
-			friction: 0.001,
-			frictionAir: 0.0004,
+			restitution: 0.55, // Extra bounce for smoother "aksın gitsin" feel
+			friction: 0.0005,
+			frictionAir: 0.0003,
 			frictionStatic: 0,
-			density: 0.002,
+			density: 0.0018,
 			render: { fillColor: 0xffffff }
 		});
 
@@ -279,12 +284,33 @@ export default class Level extends Phaser.Scene {
 		const holeY = this.data.get('holeY');
 		if (this.flagGraphics) this.flagGraphics.destroy();
 		this.flagGraphics = this.add.graphics();
-		this.flagGraphics.setDepth(10); // Terrainin önünde ama topun arkasında olabilir
-		this.flagGraphics.lineStyle(6, 0xCCCCCC, 1).beginPath()
-			.moveTo(holeX, holeY).lineTo(holeX, holeY - 140).strokePath();
+		this.flagGraphics.setDepth(10);
+
+		// Flag pole - Metallic Gradient look
+		this.flagGraphics.lineStyle(4, 0x333333, 0.4).lineBetween(holeX + 3, holeY, holeX + 3, holeY - 145); // Shadow
+		this.flagGraphics.lineStyle(5, 0xDDDDDD, 1).lineBetween(holeX, holeY, holeX, holeY - 140);
+		this.flagGraphics.lineStyle(2, 0xFFFFFF, 0.8).lineBetween(holeX - 1, holeY, holeX - 1, holeY - 140); // Highlight
+
+		// Flag Shadow
+		this.flagGraphics.fillStyle(0x000000, 0.2).beginPath()
+			.moveTo(holeX + 4, holeY - 140)
+			.lineTo(holeX + 54, holeY - 110)
+			.lineTo(holeX + 4, holeY - 80)
+			.closePath().fillPath();
+
+		// Red Flag Cloth
 		this.flagGraphics.fillStyle(0xFF0000, 1).beginPath()
-			.moveTo(holeX, holeY - 140).lineTo(holeX + 50, holeY - 110)
-			.lineTo(holeX, holeY - 80).closePath().fillPath();
+			.moveTo(holeX, holeY - 140)
+			.lineTo(holeX + 50, holeY - 110)
+			.lineTo(holeX, holeY - 80)
+			.closePath().fillPath();
+
+		// Flag Highlight
+		this.flagGraphics.fillStyle(0xFFFFFF, 0.1).beginPath()
+			.moveTo(holeX, holeY - 140)
+			.lineTo(holeX + 45, holeY - 110)
+			.lineTo(holeX, holeY - 125)
+			.closePath().fillPath();
 	}
 
 	private onPointerDown(pointer: Phaser.Input.Pointer) {
@@ -400,9 +426,17 @@ export default class Level extends Phaser.Scene {
 		});
 	}
 
-	update(time: number, delta: number) {
-		// PERFECT DELTA SYNC: Manually step physics to match real-time (PC speed) on any mobile device
-		this.matter.world.step(delta);
+	private accumulator: number = 0;
+	private readonly fixedDelta: number = 1000 / 60; // 60 FPS fixed step for stability
+
+	update(_time: number, delta: number) {
+		// FIXED SUB-STEPPING: Prevents tunneling and "weird" physics on mobile
+		// It splits one big laggy frame into multiple precise small physics steps
+		this.accumulator += delta;
+		while (this.accumulator >= this.fixedDelta) {
+			this.matter.world.step(this.fixedDelta);
+			this.accumulator -= this.fixedDelta;
+		}
 
 		if (!this.ball || this.isGameOver) return;
 
@@ -478,6 +512,78 @@ export default class Level extends Phaser.Scene {
 		} else {
 			// Top tekrar hareket ederse (veya haklar dolarsa) bekleme sürecini iptal et
 			this.isWaitingForGameOver = false;
+		}
+
+		// Update Off-screen Indicator
+		this.updateIndicator();
+	}
+
+	private updateIndicator() {
+		if (!this.ball || !this.indicatorGraphics) return;
+
+		this.indicatorGraphics.clear();
+
+		const cam = this.cameras.main;
+		const ballX = this.ball.position.x;
+		const ballY = this.ball.position.y;
+
+		// Screen bounds in world space
+		const left = cam.scrollX;
+		const right = cam.scrollX + this.scale.width;
+		const top = cam.scrollY;
+		const bottom = cam.scrollY + this.scale.height;
+
+		const padding = 50;
+		const isOffscreen = ballX < left || ballX > right || ballY < top || ballY > bottom;
+
+		if (isOffscreen && !this.isTransitioning && !this.isGameOver) {
+			// Clamped position on screen edges
+			const targetX = Phaser.Math.Clamp(ballX, left + padding, right - padding);
+			const targetY = Phaser.Math.Clamp(ballY, top + padding, bottom - padding);
+
+			// Draw Arrow pointing to ball
+			const angle = Phaser.Math.Angle.Between(targetX, targetY, ballX, ballY);
+
+			// Draw 3D-effect Arrow (White with Black border/shadow)
+			const screenX = targetX - cam.scrollX;
+			const screenY = targetY - cam.scrollY;
+			const size = 20;
+
+			// Calculate rotated points for the arrow
+			const p1 = Phaser.Math.Rotate({ x: 12, y: 0 }, angle);
+			const p2 = Phaser.Math.Rotate({ x: -size, y: -size }, angle);
+			const p3 = Phaser.Math.Rotate({ x: -size, y: size }, angle);
+
+			// 3D Shadow (Extra offset)
+			this.indicatorGraphics.fillStyle(0x000000, 0.3);
+			this.indicatorGraphics.beginPath();
+			this.indicatorGraphics.moveTo(screenX + p1.x + 4, screenY + p1.y + 4);
+			this.indicatorGraphics.lineTo(screenX + p2.x + 4, screenY + p2.y + 4);
+			this.indicatorGraphics.lineTo(screenX + p3.x + 4, screenY + p3.y + 4);
+			this.indicatorGraphics.closePath();
+			this.indicatorGraphics.fillPath();
+
+			// Border (Black)
+			this.indicatorGraphics.lineStyle(6, 0x000000, 1);
+			this.indicatorGraphics.fillStyle(0x000000, 1);
+			this.indicatorGraphics.beginPath();
+			this.indicatorGraphics.moveTo(screenX + p1.x, screenY + p1.y);
+			this.indicatorGraphics.lineTo(screenX + p2.x, screenY + p2.y);
+			this.indicatorGraphics.lineTo(screenX + p3.x, screenY + p3.y);
+			this.indicatorGraphics.closePath();
+			this.indicatorGraphics.strokePath();
+			this.indicatorGraphics.fillPath();
+
+			// Main Arrow (White)
+			this.indicatorGraphics.lineStyle(2, 0xffffff, 1);
+			this.indicatorGraphics.fillStyle(0xffffff, 1);
+			this.indicatorGraphics.beginPath();
+			this.indicatorGraphics.moveTo(screenX + p1.x, screenY + p1.y);
+			this.indicatorGraphics.lineTo(screenX + p2.x, screenY + p2.y);
+			this.indicatorGraphics.lineTo(screenX + p3.x, screenY + p3.y);
+			this.indicatorGraphics.closePath();
+			this.indicatorGraphics.fillPath();
+			this.indicatorGraphics.strokePath();
 		}
 	}
 

@@ -17,7 +17,7 @@ export default class TerrainGenerator {
     public generateTerrain(startY?: number, offsetX: number = 0, difficulty: number = 1): TerrainInstance {
         const width = this.scene.scale.width;
         const height = this.scene.scale.height;
-        const totalPoints = 400; // Increased for better smoothness
+        const totalPoints = 80; // Larger segments for better stability and less edges
         const gap = width / totalPoints;
         const points: { x: number, y: number }[] = [];
 
@@ -35,11 +35,11 @@ export default class TerrainGenerator {
         let baseHeight = targetBaseHeight;
         const localSeedOffset = this.currentSeedOffset;
 
-        // Difficulty scaling
-        const amp1 = 40 * difficulty;
-        const amp2 = 15 * difficulty;
-        const freq1 = 0.05 * (1 + (difficulty - 1) * 0.1);
-        const freq2 = 0.15 * (1 + (difficulty - 1) * 0.1);
+        // Significantly increased bumpiness as requested
+        const amp1 = 65 * difficulty;
+        const amp2 = 30 * difficulty;
+        const freq1 = 0.06 * (1 + (difficulty - 1) * 0.1);
+        const freq2 = 0.18 * (1 + (difficulty - 1) * 0.1);
 
         if (startY !== undefined) {
             const x0 = offsetX;
@@ -60,7 +60,7 @@ export default class TerrainGenerator {
             const globalI = localSeedOffset + i;
 
             const distanceToHole = Math.abs(x - holeX);
-            const holeFlatZoneRadius = holeWidth * 1.5;
+            const holeFlatZoneRadius = holeWidth * 4;
             const holeFlatMultiplier = Math.min(1, (distanceToHole / holeFlatZoneRadius) ** 2);
 
             const distanceToSpawn = Math.abs(x - spawnX);
@@ -70,11 +70,11 @@ export default class TerrainGenerator {
             const wave1 = Math.sin(globalI * freq1) * amp1 * flatMultiplier;
             const wave2 = Math.sin(globalI * freq2) * amp2 * flatMultiplier;
 
-            // Subtle Funnel effect: More natural slope
-            const funnelRadius = holeWidth * 2.5;
+            // Smooth natural slope towards the hole (no sharp bowl effect)
+            const funnelRadius = holeWidth * 5;
             const funnelStrength = 20;
             const funnelAdjustment = distanceToHole < funnelRadius
-                ? (1 - (distanceToHole / funnelRadius)) * funnelStrength
+                ? (Math.cos((distanceToHole / funnelRadius) * Math.PI) + 1) * 0.5 * funnelStrength
                 : 0;
 
             let y = baseHeight + wave1 + wave2 + funnelAdjustment;
@@ -105,21 +105,21 @@ export default class TerrainGenerator {
         const soilColors = [0x3E2723, 0x4E342E, 0x5D4037, 0x6D4C41, 0x795548];
 
         for (let j = soilColors.length - 1; j >= 0; j--) {
-            const offset = (soilColors.length - 1 - j) * 60;
+            const offset = (soilColors.length - 1 - j) * 40; // Tighter layers like the image
             graphics.fillStyle(soilColors[j], 1);
             graphics.beginPath();
-            graphics.moveTo(offsetX - 2, height);
+            graphics.moveTo(offsetX - 2, height + 100);
             graphics.lineTo(points[0].x - 2, points[0].y + offset);
             for (let i = 1; i < points.length; i++) {
                 graphics.lineTo(points[i].x, points[i].y + offset);
             }
             graphics.lineTo(points[points.length - 1].x + 2, points[points.length - 1].y + offset);
-            graphics.lineTo(offsetX + width + 2, height);
+            graphics.lineTo(offsetX + width + 2, height + 100);
             graphics.closePath();
             graphics.fillPath();
         }
 
-        const grassThickness = 45;
+        const grassThickness = 35; // Thicker grass as seen in the image
         graphics.fillStyle(0x8BC34A, 1);
         graphics.beginPath();
         graphics.moveTo(points[0].x - 2, points[0].y);
@@ -186,13 +186,13 @@ export default class TerrainGenerator {
             const physicsX = centerX - Math.sin(angle) * offsetY;
             const physicsY = centerY + Math.cos(angle) * offsetY;
 
-            const seg = this.scene.matter.add.rectangle(physicsX, physicsY, segmentLength + 4, segmentThickness, {
+            const seg = this.scene.matter.add.rectangle(physicsX, physicsY, segmentLength + 10, segmentThickness, {
                 isStatic: true,
                 angle: angle,
-                friction: 0.005, // Much lower for sliding feel
-                restitution: 0.1,
+                friction: 0.002,
+                restitution: 0.4,
                 label: 'terrain',
-                chamfer: { radius: 6 } // Smoother transitions
+                chamfer: { radius: 0 } // Straight edges with overlap prevent "snagging"
             });
             bodies.push(seg);
         }
