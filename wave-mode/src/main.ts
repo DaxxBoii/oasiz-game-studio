@@ -35,7 +35,7 @@ interface Wheel {
   x: number;
   y: number;
   radius: number;
-  kind?: "blackhole" | "galaxy";
+  kind?: "blackhole" | "galaxy" | "supernova";
 }
 
 interface Chunk {
@@ -64,7 +64,7 @@ interface Block {
   h: number;
   seed: number; // stable visual variety (avoid Math.random() in render)
   spikes: SpikeTri[];
-  kind?: "ship" | "nebula";
+  kind?: "ship" | "nebula" | "asteroid";
 }
 
 
@@ -1026,7 +1026,16 @@ class LevelGen {
       if (x - w * 0.5 < chunk.xStart + 40) continue;
       if (x + w * 0.5 > chunk.xEnd - 40) continue;
 
-      const kind: Block["kind"] = Math.random() < pNebulaVariant ? "nebula" : "ship";
+      // Choose block type: nebula, asteroid (spinning rock), or ship
+      const r = Math.random();
+      let kind: Block["kind"];
+      if (r < pNebulaVariant) {
+        kind = "nebula";
+      } else if (r < pNebulaVariant + lerp(0.18, 0.32, diff)) {
+        kind = "asteroid";
+      } else {
+        kind = "ship";
+      }
       const block: Block = { x, y, w, h, seed: Math.random(), spikes: [], kind };
       // NOTE: Spikes are ground/ceiling only. Floating obstacles never add spikes.
       chunk.blocks.push(block);
@@ -1038,8 +1047,9 @@ class LevelGen {
     // Low chance early, higher chance later
     const diff = this.difficulty01(meters);
     const pWheel = lerp(0.12, 0.30, diff);
-    // Galaxy is a *variant* of wheel hazards (blackholes) so it appears as often as wheels do.
-    const pGalaxyVariant = lerp(0.28, 0.52, diff);
+    // Galaxy and supernova are *variants* of wheel hazards (blackholes) so they appear as often as wheels do.
+    const pGalaxyVariant = lerp(0.22, 0.40, diff);
+    const pSupernovaVariant = lerp(0.20, 0.36, diff);
 
     // Wheels: max 1 early, max 2 later; keep spacing from other obstacles.
     const maxWheels = diff < 0.65 ? 1 : 2;
@@ -1079,7 +1089,16 @@ class LevelGen {
         if (y - radius < c.topY + 10) continue;
         if (y + radius > c.bottomY - 10) continue;
 
-        const kind: Wheel["kind"] = Math.random() < pGalaxyVariant ? "galaxy" : "blackhole";
+        // Choose wheel type: galaxy, supernova, or blackhole
+        const r = Math.random();
+        let kind: Wheel["kind"];
+        if (r < pGalaxyVariant) {
+          kind = "galaxy";
+        } else if (r < pGalaxyVariant + pSupernovaVariant) {
+          kind = "supernova";
+        } else {
+          kind = "blackhole";
+        }
         chunk.wheels.push({ x, y, radius, kind });
         return;
       }
@@ -2097,26 +2116,97 @@ class WaveModeGame {
     if (!chunk) return false;
 
     const r = CONFIG.WAVE_SIZE * 0.55;
+    const r2 = r * r;
+    const maxCheckDist = 200; // Only check obstacles within this distance
+    const maxCheckDist2 = maxCheckDist * maxCheckDist;
 
     // Walls (top & bottom polylines) are lethal (no sliding).
     if (this.hitPolyline(worldX, worldY, r, chunk.top)) return true;
     if (this.hitPolyline(worldX, worldY, r, chunk.bottom)) return true;
 
-    // Blocks (solid rectangular obstacles)
+    // Blocks (solid rectangular obstacles) - spatial culling
     for (const b of chunk.blocks) {
-      const x0 = b.x - b.w * 0.5;
-      const y0 = b.y;
-      if (circleIntersectsRect(worldX, worldY, r, x0, y0, b.w, b.h)) return true;
+      const dx = worldX - b.x;
+      const dy = worldY - (b.y + b.h * 0.5);
+      const dist2 = dx * dx + dy * dy;
+      
+      // Nebula and asteroid blocks use circular collision based on core size, not full rectangle
+      const blockKind = b.kind ?? "ship";
+      if (blockKind === "nebula") {
+        // Core radius: Math.max(18, Math.min(b.w, b.h) * 0.62) * 0.62
+        const coreR = Math.max(18, Math.min(b.w, b.h) * 0.62) * 0.62;
+        const combinedR = coreR + r;
+        const combinedR2 = combinedR * combinedR;
+        
+        // Quick distance check
+        if (dist2 > maxCheckDist2 + combinedR2) continue;
+        
+        // Pixel-perfect circle-circle collision for nebula core
+        if (dist2 <= combinedR2) return true;
+      } else if (blockKind === "asteroid") {
+        // Asteroid uses circular collision based on average size
+        const coreR = Math.min(b.w, b.h) * 0.5;
+        const combinedR = coreR + r;
+        const combinedR2 = combinedR * combinedR;
+        
+        // Quick distance check
+        if (dist2 > maxCheckDist2 + combinedR2) continue;
+        
+        // Pixel-perfect circle-circle collision for asteroid
+        if (dist2 <= combinedR2) return true;
+      } else {
+        // Regular ship blocks use rectangle collision
+        // Quick distance check before expensive rect collision
+        if (dist2 > maxCheckDist2 + (b.w * b.w + b.h * b.h) * 0.25) continue;
+        
+        const x0 = b.x - b.w * 0.5;
+        const y0 = b.y;
+        if (circleIntersectsRect(worldX, worldY, r, x0, y0, b.w, b.h)) return true;
+      }
     }
 
-    // Spikes (including block spikes)
+    // Spikes (including block spikes) - spatial culling
     for (const s of chunk.spikes) {
+      // Quick AABB check for triangle
+      const minX = Math.min(s.ax, s.bx, s.cx);
+      const maxX = Math.max(s.ax, s.bx, s.cx);
+      const minY = Math.min(s.ay, s.by, s.cy);
+      const maxY = Math.max(s.ay, s.by, s.cy);
+      
+      // Check if circle is near triangle's bounding box
+      const closestX = clamp(worldX, minX, maxX);
+      const closestY = clamp(worldY, minY, maxY);
+      const dist2 = (worldX - closestX) * (worldX - closestX) + (worldY - closestY) * (worldY - closestY);
+      if (dist2 > maxCheckDist2) continue;
+      
       if (circleIntersectsTri(worldX, worldY, r, s)) return true;
     }
 
-    // Rolling wheels (circular hazard)
+    // Rolling wheels (circular hazard) - pixel-perfect with spatial culling
     for (const w of chunk.wheels) {
-      if (dist2(worldX, worldY, w.x, w.y) <= (w.radius + r) * (w.radius + r)) return true;
+      const dx = worldX - w.x;
+      const dy = worldY - w.y;
+      const dist2 = dx * dx + dy * dy;
+      
+      // Galaxy uses core radius (0.58), supernova uses core radius (0.65), blackhole uses event horizon (0.92)
+      const wheelKind = w.kind ?? "blackhole";
+      let collisionRadius: number;
+      if (wheelKind === "galaxy") {
+        collisionRadius = w.radius * 0.58; // Galaxy core
+      } else if (wheelKind === "supernova") {
+        collisionRadius = w.radius * 0.65; // Supernova core
+      } else {
+        collisionRadius = w.radius * 0.92; // Blackhole event horizon
+      }
+      
+      const combinedR = collisionRadius + r;
+      const combinedR2 = combinedR * combinedR;
+      
+      // Quick distance check
+      if (dist2 > maxCheckDist2 + combinedR2) continue;
+      
+      // Pixel-perfect circle-circle collision
+      if (dist2 <= combinedR2) return true;
     }
 
     return false;
@@ -2491,13 +2581,43 @@ class WaveModeGame {
     // draw walls for visible chunks
     const visibleStart = this.scrollX - 200;
     const visibleEnd = this.scrollX + this.viewW() + 600;
+    const visibleTop = this.camY - 100;
+    const visibleBottom = this.camY + this.viewH() + 100;
 
     for (const c of this.chunks) {
       if (c.xEnd < visibleStart || c.xStart > visibleEnd) continue;
       this.drawWalls(c);
-      for (const b of c.blocks) this.drawBlock(b);
-      this.drawSpikes(c.spikes);
-      this.drawWheels(c.wheels);
+      
+      // Spatial culling for obstacles - only render if in viewport
+      for (const b of c.blocks) {
+        const x0 = b.x - b.w * 0.5;
+        const y0 = b.y;
+        if (x0 + b.w < visibleStart || x0 > visibleEnd) continue;
+        if (y0 + b.h < visibleTop || y0 > visibleBottom) continue;
+        this.drawBlock(b);
+      }
+      
+      // Spikes - only render if in viewport
+      const visibleSpikes: SpikeTri[] = [];
+      for (const s of c.spikes) {
+        const minX = Math.min(s.ax, s.bx, s.cx);
+        const maxX = Math.max(s.ax, s.bx, s.cx);
+        const minY = Math.min(s.ay, s.by, s.cy);
+        const maxY = Math.max(s.ay, s.by, s.cy);
+        if (maxX < visibleStart || minX > visibleEnd) continue;
+        if (maxY < visibleTop || minY > visibleBottom) continue;
+        visibleSpikes.push(s);
+      }
+      this.drawSpikes(visibleSpikes);
+      
+      // Wheels - only render if in viewport
+      const visibleWheels: Wheel[] = [];
+      for (const w of c.wheels) {
+        if (w.x + w.radius < visibleStart || w.x - w.radius > visibleEnd) continue;
+        if (w.y + w.radius < visibleTop || w.y - w.radius > visibleBottom) continue;
+        visibleWheels.push(w);
+      }
+      this.drawWheels(visibleWheels);
     }
 
     ctx.restore();
@@ -2571,11 +2691,11 @@ class WaveModeGame {
         const pulse = 0.6 + 0.4 * Math.sin(time * 1.8 + seed * 40.0);
         const spin = time * (0.9 + seed * 1.6);
         
-        // Outer glow
+        // Outer glow (optimized)
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.shadowColor = this.runtimePalette.waveGlow;
-        ctx.shadowBlur = 44;
+        ctx.shadowBlur = 30; // Reduced from 44 for performance
         ctx.globalAlpha = 0.26 + 0.18 * pulse;
         ctx.strokeStyle = this.runtimePalette.trail;
         ctx.lineWidth = Math.max(7, Math.floor(r * 0.26));
@@ -2584,21 +2704,21 @@ class WaveModeGame {
         ctx.stroke();
         ctx.restore();
         
-        // Spiral arms
+        // Spiral arms (optimized: reduced segments)
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.shadowColor = this.runtimePalette.waveGlow;
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 14; // Reduced from 20 for performance
         ctx.globalAlpha = 0.30 + 0.16 * pulse;
         ctx.strokeStyle = "rgba(255,255,255,0.26)";
         ctx.lineWidth = 3;
-        const arms = 3;
+        const arms = 2; // Reduced from 3 to 2
         ctx.rotate(spin * 0.35);
         for (let i = 0; i < arms; i++) {
           const a0 = (i / arms) * Math.PI * 2;
           ctx.beginPath();
-          for (let s = 0; s <= 18; s++) {
-            const t = s / 18;
+          for (let s = 0; s <= 12; s++) { // Reduced from 18 to 12
+            const t = s / 12;
             const ang = a0 + t * 3.1 + spin * 0.6;
             const rr = r * (0.18 + t * 0.92);
             const x = Math.cos(ang) * rr;
@@ -2634,12 +2754,12 @@ class WaveModeGame {
         ctx.stroke();
         ctx.restore();
         
-        // Orbiting sparks (pixel-friendly)
+        // Orbiting sparks (pixel-friendly) - reduced count for performance
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.shadowColor = this.runtimePalette.waveGlow;
-        ctx.shadowBlur = 12;
-        for (let i = 0; i < 10; i++) {
+        ctx.shadowBlur = 8; // Reduced from 12 for performance
+        for (let i = 0; i < 6; i++) { // Reduced from 10 to 6
           const h = hash01(seed * 100.0 + i * 12.7);
           const a = time * (1.2 + h * 2.8) + i * 0.7 + seed * 10.0;
           const rr = r * (1.05 + h * 0.95);
@@ -2648,6 +2768,97 @@ class WaveModeGame {
           const s = 1 + Math.floor(h * 3);
           ctx.globalAlpha = 0.10 + 0.22 * (0.5 + 0.5 * Math.sin(a * 1.7));
           ctx.fillStyle = i % 3 === 0 ? "rgba(255,255,255,0.9)" : this.runtimePalette.trail;
+          ctx.fillRect(Math.round(sx - s * 0.5), Math.round(sy - s * 0.5), s, s);
+        }
+        ctx.restore();
+        
+        ctx.restore();
+        continue;
+      }
+      
+      // Supernova variant
+      if (kind === "supernova") {
+        const seed = hash01(w.x * 0.0037 + w.y * 0.0049 + w.radius * 0.11);
+        const seed2 = hash01(seed * 91.7 + 0.123);
+        
+        ctx.save();
+        ctx.translate(w.x, w.y);
+        
+        const r = w.radius;
+        const pulse = 0.7 + 0.3 * Math.sin(time * 3.0 + seed * 25.0);
+        const spin = time * (2.2 + seed * 1.8);
+        
+        // Massive explosion glow (expanding outward)
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = "rgba(255,200,100,0.8)";
+        ctx.shadowBlur = 60;
+        ctx.globalAlpha = 0.4 + 0.3 * pulse;
+        ctx.strokeStyle = "rgba(255,180,80,0.6)";
+        ctx.lineWidth = Math.max(12, Math.floor(r * 0.5));
+        ctx.beginPath();
+        ctx.arc(0, 0, r * (1.0 + 0.15 * pulse), 0, Math.PI * 2);
+        ctx.stroke();
+        
+        ctx.shadowBlur = 40;
+        ctx.globalAlpha = 0.3 + 0.2 * pulse;
+        ctx.strokeStyle = "rgba(255,220,140,0.5)";
+        ctx.lineWidth = Math.max(8, Math.floor(r * 0.35));
+        ctx.beginPath();
+        ctx.arc(0, 0, r * (1.05 + 0.1 * pulse), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        
+        // Shockwave rings (expanding)
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = "rgba(255,255,255,0.4)";
+        ctx.shadowBlur = 20;
+        ctx.globalAlpha = 0.25 + 0.15 * pulse;
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 3; i++) {
+          const ringR = r * (0.7 + i * 0.3 + pulse * 0.2);
+          const ringAlpha = 0.3 * (1 - i * 0.3) * pulse;
+          ctx.globalAlpha = ringAlpha;
+          ctx.beginPath();
+          ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+        
+        // Core (bright white/yellow)
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = "rgba(255,255,255,0.9)";
+        ctx.shadowBlur = 30;
+        ctx.globalAlpha = 0.8 + 0.2 * pulse;
+        const core = ctx.createRadialGradient(0, 0, r * 0.05, 0, 0, r * 0.65);
+        core.addColorStop(0.0, "rgba(255,255,255,1.0)");
+        core.addColorStop(0.2, "rgba(255,240,180,0.9)");
+        core.addColorStop(0.5, "rgba(255,200,100,0.7)");
+        core.addColorStop(1.0, "rgba(255,150,50,0.3)");
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        
+        // Ejecta particles (exploding outward)
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowColor = "rgba(255,200,100,0.6)";
+        ctx.shadowBlur = 16;
+        for (let i = 0; i < 12; i++) {
+          const h = hash01(seed * 100.0 + i * 8.3);
+          const a = spin * 0.5 + (i / 12) * Math.PI * 2 + seed * 5.0;
+          const speed = 0.8 + h * 1.2;
+          const rr = r * (0.3 + pulse * 0.7 + h * 0.5);
+          const sx = Math.cos(a) * rr;
+          const sy = Math.sin(a) * rr;
+          const s = 2 + Math.floor(h * 4);
+          ctx.globalAlpha = 0.4 + 0.4 * pulse;
+          ctx.fillStyle = h < 0.5 ? "rgba(255,255,255,0.9)" : "rgba(255,200,100,0.8)";
           ctx.fillRect(Math.round(sx - s * 0.5), Math.round(sy - s * 0.5), s, s);
         }
         ctx.restore();
@@ -2670,11 +2881,11 @@ class WaveModeGame {
       const spin = time * (1.4 + seed * 1.2);
       const pulse = 0.65 + 0.35 * Math.sin(time * 2.0 + seed * 30.0);
 
-      // Big bloom / gravity glow
+      // Big bloom / gravity glow (optimized: reduced shadow blur)
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.shadowColor = this.runtimePalette.waveGlow;
-      ctx.shadowBlur = 46;
+      ctx.shadowBlur = 32; // Reduced from 46 for performance
       ctx.globalAlpha = 0.28 + 0.18 * pulse;
       ctx.strokeStyle = this.runtimePalette.trail;
       ctx.lineWidth = Math.max(8, Math.floor(r * 0.40));
@@ -2682,7 +2893,7 @@ class WaveModeGame {
       ctx.arc(0, 0, r * 1.08, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.shadowBlur = 22;
+      ctx.shadowBlur = 16; // Reduced from 22 for performance
       ctx.globalAlpha = 0.18 + 0.12 * pulse;
       ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.lineWidth = Math.max(5, Math.floor(r * 0.22));
@@ -2710,7 +2921,7 @@ class WaveModeGame {
 
       // Inner hot ring
       ctx.shadowColor = this.runtimePalette.waveGlow;
-      ctx.shadowBlur = 20;
+      ctx.shadowBlur = 14; // Reduced from 20 for performance
       ctx.globalAlpha = 0.30 + 0.22 * pulse;
       ctx.strokeStyle = "rgba(255,255,255,0.22)";
       ctx.lineWidth = Math.max(2, Math.floor(r * 0.10));
@@ -2729,7 +2940,7 @@ class WaveModeGame {
 
       ctx.globalCompositeOperation = "lighter";
       ctx.shadowColor = "rgba(255,255,255,0.20)";
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 8; // Reduced from 12 for performance
       ctx.strokeStyle = "rgba(255,255,255,0.16)";
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -2737,15 +2948,15 @@ class WaveModeGame {
       ctx.stroke();
       ctx.restore();
 
-      // Lensing arcs (suggest bending light)
+      // Lensing arcs (suggest bending light) - reduced for performance
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.shadowColor = this.runtimePalette.waveGlow;
-      ctx.shadowBlur = 18;
+      ctx.shadowBlur = 12; // Reduced from 18 for performance
       ctx.globalAlpha = 0.16 + 0.12 * pulse;
       ctx.strokeStyle = "rgba(255,255,255,0.22)";
       ctx.lineWidth = 2;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) { // Reduced from 3 to 2
         const a0 = (time * 0.9 + seed * 10 + i * 2.1) % (Math.PI * 2);
         const arcR = r * (1.20 + i * 0.18);
         ctx.beginPath();
@@ -2754,12 +2965,12 @@ class WaveModeGame {
       }
       ctx.restore();
 
-      // Orbiting sparks (pixel-friendly squares), deterministic
+      // Orbiting sparks (pixel-friendly squares), deterministic - reduced count for performance
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.shadowColor = this.runtimePalette.waveGlow;
-      ctx.shadowBlur = 12;
-      for (let i = 0; i < 10; i++) {
+      ctx.shadowBlur = 8; // Reduced from 12 for performance
+      for (let i = 0; i < 6; i++) { // Reduced from 10 to 6
         const h = hash01(seed * 100.0 + i * 12.7);
         const a = time * (1.2 + h * 2.8) + i * 0.7 + seed * 10.0;
         const rr = r * (1.05 + h * 0.95);
@@ -2863,8 +3074,13 @@ class WaveModeGame {
   }
 
   private drawBlock(b: Block): void {
-    if ((b.kind ?? "ship") === "nebula") {
+    const blockKind = b.kind ?? "ship";
+    if (blockKind === "nebula") {
       this.drawNebulaBlock(b);
+      return;
+    }
+    if (blockKind === "asteroid") {
+      this.drawAsteroidBlock(b);
       return;
     }
     const ctx = this.ctx;
@@ -3087,6 +3303,148 @@ class WaveModeGame {
       ctx.lineTo(Math.cos(a + 0.55) * r1, Math.sin(a + 0.55) * r1 * 0.85);
       ctx.stroke();
     }
+
+    ctx.restore();
+  }
+
+  // Asteroid variant (spinning rock) - uses circular collision
+  private drawAsteroidBlock(b: Block): void {
+    const ctx = this.ctx;
+    const seed = b.seed;
+    const time = performance.now() * 0.001;
+
+    const frac = (v: number): number => v - Math.floor(v);
+    const hash01 = (v: number): number => frac(Math.sin(v) * 43758.5453123);
+    const s1 = hash01(seed * 91.7 + b.x * 0.0031 + b.y * 0.0047);
+    const s2 = hash01(seed * 33.3 + b.x * 0.0019);
+    const s3 = hash01(seed * 17.1 + b.y * 0.0027);
+    const pulse = 0.7 + 0.3 * Math.sin(time * 1.6 + seed * 15.0);
+
+    const cx = b.x;
+    const cy = b.y + b.h * 0.5;
+    const r = Math.min(b.w, b.h) * 0.5;
+    const spin = time * (0.8 + s1 * 0.6);
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(spin);
+
+    // Big outer glow (space crystal/energy)
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = this.runtimePalette.waveGlow;
+    ctx.shadowBlur = 42;
+    ctx.globalAlpha = 0.32 + 0.18 * pulse;
+    ctx.strokeStyle = this.runtimePalette.trail;
+    ctx.lineWidth = Math.max(8, Math.floor(r * 0.4));
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.15, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    ctx.shadowBlur = 24;
+    ctx.globalAlpha = 0.22 + 0.12 * pulse;
+    ctx.strokeStyle = "rgba(255,255,255,0.24)";
+    ctx.lineWidth = Math.max(5, Math.floor(r * 0.25));
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.08, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Rock surface with craters and bumps (irregular shape) - space-themed colors
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    const rockGrad = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, r);
+    rockGrad.addColorStop(0.0, "rgba(180,220,255,0.85)");
+    rockGrad.addColorStop(0.4, "rgba(100,160,220,0.75)");
+    rockGrad.addColorStop(0.8, "rgba(40,80,140,0.85)");
+    rockGrad.addColorStop(1.0, "rgba(20,40,80,0.95)");
+    ctx.fillStyle = rockGrad;
+    ctx.strokeStyle = "rgba(200,240,255,0.6)";
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+
+    // Draw irregular rock shape using multiple points
+    ctx.beginPath();
+    const points = 12;
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const variance = 0.75 + 0.25 * hash01(seed * 100 + i * 7.3);
+      const rr = r * variance;
+      const x = Math.cos(angle) * rr;
+      const y = Math.sin(angle) * rr;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Add craters and surface details (darker spots)
+    ctx.globalCompositeOperation = "multiply";
+    for (let i = 0; i < 4; i++) {
+      const ca = (i / 4) * Math.PI * 2 + s2 * 2.0;
+      const cr = r * (0.15 + 0.15 * hash01(seed * 200 + i * 11.7));
+      const cx2 = Math.cos(ca) * r * (0.3 + 0.3 * hash01(seed * 300 + i * 13.1));
+      const cy2 = Math.sin(ca) * r * (0.3 + 0.3 * hash01(seed * 400 + i * 17.3));
+      ctx.fillStyle = "rgba(10,30,60,0.5)";
+      ctx.beginPath();
+      ctx.arc(cx2, cy2, cr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Glowing highlight edges
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = this.runtimePalette.waveGlow;
+    ctx.shadowBlur = 16;
+    ctx.strokeStyle = "rgba(200,240,255,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * Math.PI * 2;
+      const variance = 0.75 + 0.25 * hash01(seed * 100 + i * 7.3);
+      const rr = r * variance;
+      const x = Math.cos(angle) * rr;
+      const y = Math.sin(angle) * rr;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    // Inner glow core
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = this.runtimePalette.waveGlow;
+    ctx.shadowBlur = 20;
+    ctx.globalAlpha = 0.4 + 0.3 * pulse;
+    const coreGrad = ctx.createRadialGradient(0, 0, r * 0.1, 0, 0, r * 0.6);
+    coreGrad.addColorStop(0.0, "rgba(255,255,255,0.3)");
+    coreGrad.addColorStop(0.5, this.runtimePalette.trail);
+    coreGrad.addColorStop(1.0, "rgba(0,0,0,0)");
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Orbiting crystal fragments (glowing particles)
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowColor = this.runtimePalette.waveGlow;
+    ctx.shadowBlur = 10;
+    for (let i = 0; i < 6; i++) {
+      const h = hash01(seed * 50.0 + i * 9.1);
+      const a = spin * 0.8 + (i / 6) * Math.PI * 2 + seed * 3.0;
+      const rr = r * (1.05 + h * 0.3);
+      const sx = Math.cos(a) * rr;
+      const sy = Math.sin(a) * rr;
+      const s = 1 + Math.floor(h * 2);
+      ctx.globalAlpha = 0.3 + 0.4 * pulse;
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.9)" : this.runtimePalette.trail;
+      ctx.fillRect(Math.round(sx - s * 0.5), Math.round(sy - s * 0.5), s, s);
+    }
+    ctx.restore();
 
     ctx.restore();
   }
