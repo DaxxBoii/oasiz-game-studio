@@ -70,7 +70,7 @@
             text-shadow: 2px 2px 0 rgba(0,0,0,0.70), 0 0 10px rgba(120,255,244,0.20);
         }
         #distance { font-size: 18px; }
-        #highScore { font-size: 10px; opacity: 0.88; }
+        #highScore { display: none; }
 
         /* Pixel buttons (menus + overlays) */
         #ui .menuBtn,
@@ -226,13 +226,11 @@
         }
 
         #distance {
-            font-size: 32px;
+            font-size: 18px;
         }
 
         #highScore {
-            margin-top: 4px;
-            font-size: 18px;
-            opacity: 0.85;
+            display: none;
         }
 
         #pauseBtn {
@@ -439,27 +437,27 @@
         /* Title + Start button animations (smooth, but still pixel-UI friendly) */
         @keyframes titleFloat {
             0%   { transform: translateY(0px); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
-            50%  { transform: translateY(-4px); filter: drop-shadow(0 0 14px rgba(120,255,244,0.18)); }
+            50%  { transform: translateY(-8px); filter: drop-shadow(0 0 24px rgba(120,255,244,0.45)); }
             100% { transform: translateY(0px); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
         }
 
         @keyframes titleIn {
-            0%   { opacity: 0; transform: translateY(10px) scale(0.98); }
-            100% { opacity: 1; transform: translateY(0px) scale(1); }
+            0%   { opacity: 0; transform: translateY(20px) scale(0.92); filter: blur(4px); }
+            100% { opacity: 1; transform: translateY(0px) scale(1); filter: blur(0px); }
         }
 
         @keyframes startPulse {
-            0%   { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 18px rgba(120,255,244,0.18); transform: translateY(0); }
-            50%  { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 30px rgba(120,255,244,0.34); transform: translateY(-1px); }
-            100% { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 18px rgba(120,255,244,0.18); transform: translateY(0); }
+            0%   { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 24px rgba(120,255,244,0.28); transform: translateY(0); }
+            50%  { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 48px rgba(120,255,244,0.55); transform: translateY(-3px); }
+            100% { box-shadow: 0 0 0 3px rgba(0,0,0,0.85) inset, 0 0 24px rgba(120,255,244,0.28); transform: translateY(0); }
         }
 
         #startOverlay:not(.leaving) .menuTitle {
-            animation: titleIn 0.55s cubic-bezier(0.2, 0.9, 0.2, 1) both, titleFloat 2.9s ease-in-out infinite;
+            animation: titleIn 0.55s cubic-bezier(0.2, 0.9, 0.2, 1) both, titleFloat 2.2s ease-in-out infinite;
         }
 
         #startOverlay:not(.leaving) #playBtn {
-            animation: startPulse 1.65s ease-in-out infinite;
+            animation: startPulse 1.3s ease-in-out infinite;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -597,7 +595,7 @@
             font-size: clamp(34px, 7.2vw, 56px);
             letter-spacing: 0.06em;
             margin: 0 0 10px 0;
-            text-shadow: 0 0 24px rgba(0, 255, 255, 0.40), 0 0 54px rgba(0, 255, 255, 0.18);
+            text-shadow: 0 0 32px rgba(0, 255, 255, 0.65), 0 0 72px rgba(0, 255, 255, 0.32);
             background: linear-gradient(45deg, #eaffff, #00ffff, #ffff7a);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -659,16 +657,16 @@
             left: -60%;
             width: 40%;
             height: 180%;
-            background: linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.32), rgba(255,255,255,0.0));
+            background: linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.55), rgba(255,255,255,0.0));
             transform: rotate(20deg);
             opacity: 0.0;
             transition: opacity 0.25s ease;
         }
 
         .menuBtn:hover {
-            transform: translateY(-2px);
-            background: rgba(255,255,255,0.12);
-            box-shadow: 0 0 28px rgba(0, 255, 255, 0.22);
+            transform: translateY(-4px);
+            background: rgba(255,255,255,0.16);
+            box-shadow: 0 0 42px rgba(0, 255, 255, 0.38);
         }
 
         .menuBtn:hover::before {
@@ -685,26 +683,26 @@
             opacity: 0.0;
             transform: rotate(20deg) translateX(-20%);
             background:
-                radial-gradient(circle at 18% 40%, rgba(255,255,255,0.85) 0 1px, rgba(255,255,255,0.0) 2px),
-                radial-gradient(circle at 38% 70%, rgba(255,255,255,0.55) 0 1px, rgba(255,255,255,0.0) 2px),
-                radial-gradient(circle at 66% 30%, rgba(255,255,255,0.65) 0 1px, rgba(255,255,255,0.0) 2px),
-                radial-gradient(circle at 78% 62%, rgba(255,255,255,0.45) 0 1px, rgba(255,255,255,0.0) 2px),
-                linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.22), rgba(255,255,255,0.0));
+                radial-gradient(circle at 18% 40%, rgba(255,255,255,1.0) 0 1px, rgba(255,255,255,0.0) 2px),
+                radial-gradient(circle at 38% 70%, rgba(255,255,255,0.75) 0 1px, rgba(255,255,255,0.0) 2px),
+                radial-gradient(circle at 66% 30%, rgba(255,255,255,0.85) 0 1px, rgba(255,255,255,0.0) 2px),
+                radial-gradient(circle at 78% 62%, rgba(255,255,255,0.65) 0 1px, rgba(255,255,255,0.0) 2px),
+                linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.38), rgba(255,255,255,0.0));
             mix-blend-mode: screen;
-            filter: drop-shadow(0 0 8px rgba(0,255,255,0.12));
-            animation: btnGlitter 2.2s ease-in-out infinite;
+            filter: drop-shadow(0 0 12px rgba(0,255,255,0.20));
+            animation: btnGlitter 1.6s ease-in-out infinite;
         }
 
         .menuBtn.primary::after {
-            filter: drop-shadow(0 0 10px rgba(0,255,255,0.22));
-            animation-duration: 1.85s;
+            filter: drop-shadow(0 0 16px rgba(0,255,255,0.35));
+            animation-duration: 1.3s;
         }
 
         @keyframes btnGlitter {
             0%   { opacity: 0.00; transform: rotate(20deg) translateX(-26%); }
-            22%  { opacity: 0.65; }
-            45%  { opacity: 0.18; }
-            70%  { opacity: 0.52; }
+            22%  { opacity: 0.95; }
+            45%  { opacity: 0.35; }
+            70%  { opacity: 0.80; }
             100% { opacity: 0.00; transform: rotate(20deg) translateX(26%); }
         }
 
@@ -721,11 +719,11 @@
             background: linear-gradient(45deg, rgba(0,255,255,0.92), rgba(255,255,0,0.88));
             color: rgba(0,0,0,0.90);
             border: none;
-            box-shadow: 0 0 26px rgba(0,255,255,0.35);
+            box-shadow: 0 0 38px rgba(0,255,255,0.50);
         }
 
         .menuBtn.primary:hover {
-            box-shadow: 0 0 34px rgba(0,255,255,0.55);
+            box-shadow: 0 0 52px rgba(0,255,255,0.75);
         }
 
         .menuFooter {
@@ -1035,7 +1033,7 @@
             }
 
             #distance {
-                font-size: 32px;
+                font-size: 18px;
             }
 
             .overlay h1 {
@@ -1054,14 +1052,28 @@
 
         /* Mobile landscape mode (including forced landscape): zoomed-out gameplay needs a smaller HUD */
         #game-container.landscapeMode #hud {
-            font-size: 18px;
+            font-size: 12px;
+            top: calc(env(safe-area-inset-top) + 120px) !important;
+            left: 50% !important;
+            right: auto !important;
+            transform: translateX(-50%) !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
         #game-container.landscapeMode #distance {
-            font-size: 24px !important;
+            font-size: 6px !important;
+        }
+        
+        /* Extra small for mobile landscape specifically */
+        @media (pointer: coarse) {
+            #game-container.landscapeMode #distance {
+                font-size: 6px !important;
+            }
         }
         #game-container.landscapeMode #highScore {
-            font-size: 12px !important;
-            opacity: 0.86;
+            display: none !important;
         }
 
         /* Very short screens (landscape phones): keep menu compact so it doesn't get cut off */
@@ -1286,7 +1298,7 @@
             <div class="overlay-content">
                 <h1>GAME OVER</h1>
                 <p id="finalDistance">Distance: 0m</p>
-                <p id="bestDistance">Best: 0m</p>
+                <p id="bestDistance" style="display: none;">Best: 0m</p>
                 <p id="newRecord" style="display: none; color: #00ffff; font-weight: bold;">NEW RECORD!</p>
                 <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
                     <button id="restartBtn">RESTART</button>
