@@ -283,7 +283,7 @@ PLEASE TEST ON THE OASIZ APP FOR PERFORMANCE, TESTING ON WEBBROWSER OR SIMULATOR
 
 Create a `.env` file in the root directory (or set these in your shell):
 
-Easiest way is to just copy env.example directly and change the email to your account email (the email that is used to create your account)
+Easiest way is to just copy env.example directly (copy them exactly) and change the email to your account email (the email that is used to create your account)
 
 ```bash
 # Required - get these from the Oasiz team
