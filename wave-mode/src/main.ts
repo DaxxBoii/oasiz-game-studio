@@ -1162,6 +1162,7 @@ class WaveModeGame {
   private speedMul = 1;
   private isSlidingOnSurface = false; // true when clamped to roof/ground
   private slidingSurface: "top" | "bottom" | null = null; // which surface we were clamped to last frame
+  private prevRoofSlopeUp = false; // track if we were sliding up a roof slope last frame
 
   private camY = 0;
   private shakeT = 0;
@@ -1348,6 +1349,7 @@ class WaveModeGame {
     this.trail = [];
     this.holding = false;
     this.prevHolding = false;
+    this.prevRoofSlopeUp = false;
 
     // Randomize starting palette offset for very different colors each game
     this.paletteOffset = Math.random() * PALETTE_KEYFRAMES.length;
@@ -1970,7 +1972,8 @@ class WaveModeGame {
         // - Sloped: only allow if we were already roof-sliding AND we're moving UP (hold)
         //   AND the roof segment is sloping UP (or essentially flat).
         const roofSlopeUpOrFlat = info.topDy <= 0.1;
-        const topAllowsSlide = info.topFlat || (wasSlidingTop && movingUp && roofSlopeUpOrFlat);
+        const isSlidingUpSlope = !info.topFlat && movingUp && roofSlopeUpOrFlat;
+        const topAllowsSlide = info.topFlat || (wasSlidingTop && isSlidingUpSlope);
         if (topAllowsSlide) {
           worldY = minY;
           this.waveWorldY = worldY;
@@ -1979,7 +1982,14 @@ class WaveModeGame {
           if (!wasSlidingTop) {
             triggerHaptic(this.settings, "light");
           }
+          // Haptic feedback when transitioning to sliding up a roof slope
+          if (wasSlidingTop && isSlidingUpSlope && !this.prevRoofSlopeUp) {
+            triggerHaptic(this.settings, "light");
+          }
           this.slidingSurface = "top";
+          this.prevRoofSlopeUp = isSlidingUpSlope;
+        } else {
+          this.prevRoofSlopeUp = false;
         }
       } else if (worldY > maxY) {
         // Ground:
@@ -1992,6 +2002,10 @@ class WaveModeGame {
           this.isSlidingOnSurface = true;
           this.slidingSurface = "bottom";
         }
+        this.prevRoofSlopeUp = false;
+      } else {
+        // Not touching roof or ground
+        this.prevRoofSlopeUp = false;
       }
     }
 
