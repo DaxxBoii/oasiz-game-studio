@@ -33,15 +33,15 @@ export default class TerrainGenerator {
 
         // Choose hole position - SCALED UP
         const holeX = offsetX + Phaser.Math.Between(width * 0.7, width * 0.9);
-        const holeWidth = 60; // Better balance for 15 radius ball
-        const holeDepth = 140;
+        const holeWidth = 45; // Smaller hole for more challenge
+        const holeDepth = 100; // Shallower hole
 
-        // Spawn position
-        const spawnX = offsetX + 100;
+        // Spawn position - moved right to avoid UI overlap
+        const spawnX = offsetX + 250;
         const spawnFlatZone = 120;
 
-        // Base height setup
-        const targetBaseHeight = height / 2;
+        // Base height setup - positioned at 70% of screen height for more sky
+        const targetBaseHeight = height * 0.7;
         let baseHeight = targetBaseHeight;
         const localSeedOffset = this.currentSeedOffset;
 
@@ -97,12 +97,19 @@ export default class TerrainGenerator {
             const wave2 = Math.sin(globalI * freq2) * amp2 * flatMultiplier;
             const wave3 = Math.sin(globalI * freq3) * amp3 * flatMultiplier;
 
-            // Smooth natural slope towards the hole (no sharp bowl effect)
-            const funnelRadius = holeWidth * 5;
-            const funnelStrength = 20;
-            const funnelAdjustment = distanceToHole < funnelRadius
-                ? (Math.cos((distanceToHole / funnelRadius) * Math.PI) + 1) * 0.5 * funnelStrength
-                : 0;
+            // Valley effect: raised hills on both sides of the hole so ball rolls down into it.
+            // The hole sits at the bottom of a valley formed by two "landcakes" (raised ridges).
+            const valleyRadius = holeWidth * 8; // Total valley width
+            const valleyDepth = 60; // How deep the valley is (positive = terrain goes UP on sides)
+            let valleyAdjustment = 0;
+            if (distanceToHole < valleyRadius) {
+                // Valley profile: terrain is LOW at hole center, HIGH at valley edges
+                // Uses cosine to create smooth raised ridges on both sides
+                const valleyProgress = distanceToHole / valleyRadius; // 0 at hole, 1 at edge
+                // Raise terrain on the sides, dip at center
+                valleyAdjustment = -(Math.cos(valleyProgress * Math.PI) + 1) * 0.5 * valleyDepth;
+                // valleyAdjustment is negative at edges (terrain goes UP) and 0 at center
+            }
 
             // Force a hill at the end of the map
             const endZoneStart = totalPoints - 15;
@@ -113,7 +120,7 @@ export default class TerrainGenerator {
                 endHillAdjustment = -(hillProgress * hillProgress * 150);
             }
 
-            let y = currentBaseHeight + wave1 + wave2 + wave3 + funnelAdjustment + endHillAdjustment;
+            let y = currentBaseHeight + wave1 + wave2 + wave3 + valleyAdjustment + endHillAdjustment;
 
             if (i === 0 && startY !== undefined) y = startY;
 
@@ -242,13 +249,14 @@ export default class TerrainGenerator {
                 const physicsX = centerX - Math.sin(angle) * offsetY;
                 const physicsY = centerY + Math.cos(angle) * offsetY;
 
-                const seg = this.scene.matter.add.rectangle(physicsX, physicsY, segmentLength + 10, segmentThickness, {
+                const seg = this.scene.matter.add.rectangle(physicsX, physicsY, segmentLength + 30, segmentThickness, {
                     isStatic: true,
                     angle: angle,
-                    friction: 0.002,
-                    restitution: 0.4,
+                    friction: 0.005,
+                    frictionStatic: 0.01,  // Low static friction - prevents ball sticking on slopes
+                    restitution: 0.05,     // Near-zero bounce - ball lands and rolls
                     label: 'terrain',
-                    chamfer: { radius: 0 } // Straight edges with overlap prevent "snagging"
+                    chamfer: { radius: 5 } // Rounded edges smooth segment transitions
                 });
                 bodies.push(seg);
             }

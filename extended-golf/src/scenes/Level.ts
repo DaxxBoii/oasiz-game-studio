@@ -57,11 +57,17 @@ export default class Level extends Phaser.Scene {
 	private stopTimestamp: number = 0;
 	private isWaitingForGameOver: boolean = false;
 	private isMenuOpen: boolean = true;
-	private lastTrailSpawnTime: number = 0;
 	private indicatorGraphics: Phaser.GameObjects.Graphics | undefined;
 	private sky: Phaser.GameObjects.Graphics | undefined;
+	private trailPositions: { x: number, y: number }[] = [];
+	private trailGraphics: Phaser.GameObjects.Graphics | undefined;
+	private lastTrailSpawnTime: number = 0;
+	private readonly MAX_TRAIL_LENGTH: number = 20;
 
 	create() {
+		// #region agent log
+		fetch('http://127.0.0.1:7245/ingest/997351de-2588-4a8c-ab40-731c1e4f75c0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Level.ts:create',message:'Level create() called',data:{hadOldModal:!!this.settingsModal},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H2'})}).catch(()=>{});
+		// #endregion
 		// --- Explicit State Resets ---
 		this.isGameOver = false;
 		this.shotsRemaining = 2;
@@ -73,6 +79,7 @@ export default class Level extends Phaser.Scene {
 		this.stopTimestamp = 0;
 		this.lastSettledPos = undefined;
 		this.isMenuOpen = true;
+		this.trailPositions = [];
 
 		// Matter.js settings
 		// Matter.js settings - Higher iterations to prevent tunneling through smoother terrain
@@ -89,16 +96,13 @@ export default class Level extends Phaser.Scene {
 		const width = this.scale.width;
 		const height = this.scale.height;
 
-		// --- Audio Setup ---
+		// --- Audio Setup (add sound reference only, don't play yet - iOS requires user gesture) ---
 		if (!this.sound.get('GolfBgMusic')) {
 			this.bgMusic = this.sound.add('GolfBgMusic', { loop: true, volume: 0.4 });
 		} else {
 			this.bgMusic = this.sound.get('GolfBgMusic');
 		}
-
-		if (localStorage.getItem('golf_settings_music') === 'true' && this.bgMusic && !this.bgMusic.isPlaying) {
-			this.bgMusic.play();
-		}
+		// Music will start in resumeFromMenu() after user clicks PLAY
 
 		// Background & Decoration
 		// Fetch current theme from registry
@@ -163,8 +167,20 @@ export default class Level extends Phaser.Scene {
 		// Pass theme to generator
 		this.currentTerrain = this.terrainGen.generateTerrain(undefined, 0, initialDifficulty, theme);
 
+		// Clean up old SettingsModal before creating new one (prevents duplicate DOM listeners on restart)
+		if (this.settingsModal) {
+			this.settingsModal.destroy();
+		}
 		this.settingsModal = new SettingsModal(this);
 		this.settingsModal.create();
+
+		// Clean up on scene shutdown/restart to prevent stale DOM handlers
+		this.events.once('shutdown', () => {
+			console.log('[Level] Scene shutdown - cleaning up');
+			this.settingsModal?.destroy();
+			this.input.removeAllListeners();
+			this.scale.off('resize', this.onResize, this);
+		});
 
 		this.drawFlag();
 
@@ -172,6 +188,9 @@ export default class Level extends Phaser.Scene {
 		this.isMenuOpen = true;
 		this.matter.world.pause();
 		this.scene.launch('Menu');
+
+		// Handle resize events for dynamic viewport
+		this.scale.on('resize', this.onResize, this);
 
 		// Smooth Entry
 		this.cameras.main.fadeIn(500, 0, 0, 0);
@@ -187,6 +206,11 @@ export default class Level extends Phaser.Scene {
 
 		// Show Settings only during gameplay
 		this.settingsModal?.setVisible(true);
+
+		// Start background music now (after user gesture - required for iOS)
+		if (localStorage.getItem('golf_settings_music') === 'true' && this.bgMusic && !this.bgMusic.isPlaying) {
+			this.bgMusic.play();
+		}
 
 		// Start gameplay with a delay/animation
 		this.startGameplay();
@@ -211,6 +235,29 @@ export default class Level extends Phaser.Scene {
 		}
 	}
 
+	private onResize() {
+		const width = this.scale.width;
+		const height = this.scale.height;
+
+		// Update sky to fill new viewport
+		if (this.sky) {
+			const season = this.registry.get('season') as SeasonType || 'spring';
+			const time = this.registry.get('time') as TimeType || 'day';
+			const theme = ThemeManager.getColors(season, time);
+			this.sky.clear();
+			this.sky.fillStyle(theme.sky, 1);
+			this.sky.fillRect(0, 0, width, height);
+		}
+
+		// Update shot visuals position
+		if (this.shotVisuals && this.shotVisuals.length > 0) {
+			const startY = height - 30;
+			this.shotVisuals.forEach((ball, i) => {
+				ball.setY(startY);
+			});
+		}
+	}
+
 	private createBallObject() {
 		// Cleanup old visual if it exists
 		if (this.ballVisual) {
@@ -224,11 +271,11 @@ export default class Level extends Phaser.Scene {
 
 		const ballRadius = 15;
 		this.ball = this.matter.add.circle(this.spawnPoint.x, this.spawnPoint.y, ballRadius, {
-			restitution: 0.55,
-			friction: 0.0005,
-			frictionAir: 0.0003,
-			frictionStatic: 0,
-			density: 0.0018,
+			restitution: 0.08,    // Minimal bounce - ball lands and rolls
+			friction: 0.005,      // Enough friction for natural rolling (not sliding)
+			frictionAir: 0.0008,  // Low air drag for longer carries
+			frictionStatic: 0.005, // Very low static friction to prevent sticking on slopes
+			density: 0.003,       // Slightly lighter for smoother momentum transfer
 			render: { fillColor: ballColor }
 		});
 
@@ -255,6 +302,10 @@ export default class Level extends Phaser.Scene {
 		this.graphics.setDepth(100); // Drag arrow always on top
 		this.dragStartPoint = new Phaser.Math.Vector2(0, 0);
 
+		// Trail graphics for the ribbon effect
+		this.trailGraphics = this.add.graphics();
+		this.trailGraphics.setDepth(40);
+
 		this.createUI();
 		this.scoreText?.setAlpha(0);
 		this.shotVisuals.forEach(v => v.setAlpha(0));
@@ -269,6 +320,29 @@ export default class Level extends Phaser.Scene {
 
 				if (isHoleHit && !this.data.get('isWon')) {
 					// Optional: Play a "plop" sound if needed, but win is delayed 1s
+				}
+
+				// Ball-terrain bounce haptic feedback
+				const isTerrainBounce =
+					(bodyA.label === 'terrain' && bodyB === this.ball) ||
+					(bodyB.label === 'terrain' && bodyA === this.ball);
+
+				if (isTerrainBounce && !this.isGameOver && !this.data.get('isWon')) {
+					// Check haptics setting
+					if (localStorage.getItem('golf_settings_haptics') !== 'false') {
+						// Scale haptic intensity by impact velocity
+						const velocity = this.ball ? Math.sqrt(this.ball.velocity.x ** 2 + this.ball.velocity.y ** 2) : 0;
+
+						if (typeof (window as any).triggerHaptic === "function") {
+							if (velocity > 8) {
+								(window as any).triggerHaptic("heavy");
+							} else if (velocity > 4) {
+								(window as any).triggerHaptic("medium");
+							} else if (velocity > 1) {
+								(window as any).triggerHaptic("light");
+							}
+						}
+					}
 				}
 			});
 		});
@@ -365,15 +439,26 @@ export default class Level extends Phaser.Scene {
 	private onPointerMove(pointer: Phaser.Input.Pointer) {
 		if (this.isDragging && this.ball && this.graphics) {
 			this.graphics.clear().fillStyle(0xffffff, 1);
-			const pullX = (this.ball.position.x - this.cameras.main.scrollX) - pointer.x;
-			const pullY = this.ball.position.y - pointer.y;
-			const vx = pullX * 0.022 * 3.75;
-			const vy = pullY * 0.022 * 3.75;
-			for (let i = 0; i < 15; i++) {
-				const t = (i + 1) * 3;
+			let pullX = (this.ball.position.x - this.cameras.main.scrollX) - pointer.x;
+			let pullY = this.ball.position.y - pointer.y;
+
+			// Cap the max drag distance so the line doesn't stretch too far
+			const maxDrag = 150;
+			const dragDist = Math.sqrt(pullX * pullX + pullY * pullY);
+			if (dragDist > maxDrag) {
+				pullX = (pullX / dragDist) * maxDrag;
+				pullY = (pullY / dragDist) * maxDrag;
+			}
+
+			const vx = pullX * 0.2;
+			const vy = pullY * 0.2;
+			for (let i = 0; i < 10; i++) {
+				const t = (i + 1) * 1.2;
 				const px = this.ball.position.x + vx * t;
-				const py = this.ball.position.y + vy * t + 0.5 * 1 * t * t * 0.05;
-				this.graphics.beginPath().arc(px, py, 4, 0, Math.PI * 2).fillPath();
+				const py = this.ball.position.y + vy * t + 0.5 * 2 * t * t * 0.05;
+				const alpha = 1 - (i / 10) * 0.6;
+				this.graphics.fillStyle(0xffffff, alpha);
+				this.graphics.beginPath().arc(px, py, 3.5 - i * 0.25, 0, Math.PI * 2).fillPath();
 			}
 		}
 	}
@@ -382,11 +467,20 @@ export default class Level extends Phaser.Scene {
 		if (this.isDragging && this.ball && this.graphics) {
 			this.isDragging = false;
 			this.graphics.clear();
-			// SNAPPY LAUNCH: Reduced force multiplier by 1.5x for better control
-			// SNAPPY LAUNCH: Using setVelocity instead of applyForce to prevent FPS-dependent distance
-			// Power increased by 1.3x as requested (0.096 -> 0.125)
-			const velX = (this.ball.position.x - (pointer.x + this.cameras.main.scrollX)) * 0.125;
-			const velY = (this.ball.position.y - pointer.y) * 0.125;
+			// Higher multiplier = less drag distance needed for same power
+			let pullX = this.ball.position.x - (pointer.x + this.cameras.main.scrollX);
+			let pullY = this.ball.position.y - pointer.y;
+
+			// Cap drag distance to match the visual cap
+			const maxDrag = 150;
+			const dragDist = Math.sqrt(pullX * pullX + pullY * pullY);
+			if (dragDist > maxDrag) {
+				pullX = (pullX / dragDist) * maxDrag;
+				pullY = (pullY / dragDist) * maxDrag;
+			}
+
+			const velX = pullX * 0.2;
+			const velY = pullY * 0.2;
 			this.matter.body.setVelocity(this.ball, { x: velX, y: velY });
 			this.shotsRemaining--;
 			this.updateShotVisuals();
@@ -397,6 +491,10 @@ export default class Level extends Phaser.Scene {
 
 	private handleWin() {
 		this.data.set('isWon', true);
+
+		// Clear trail on win
+		this.trailPositions = [];
+		this.trailGraphics?.clear();
 
 		// 1. Disable Physics & Animate ball to bottom
 		if (this.ball && this.ballVisual) {
@@ -545,17 +643,19 @@ export default class Level extends Phaser.Scene {
 				this.stopTimestamp = this.time.now;
 				this.lastSettledPos = { x: this.ball.position.x, y: this.ball.position.y };
 			} else {
-				// Zaten bekliyoruz, 2 saniye geçti mi kontrol et
+				// Already waiting — check if 800ms have passed
 				const elapsed = this.time.now - this.stopTimestamp;
-				if (elapsed >= 2000) {
-					// 2 saniye doldu, konumu tekrar kontrol et
+				if (elapsed >= 800) {
+					// Time's up, check if ball really stopped
 					const distMoved = Phaser.Math.Distance.Between(
 						this.ball!.position.x, this.ball!.position.y,
 						this.lastSettledPos!.x, this.lastSettledPos!.y
 					);
 
 					if (distMoved < 2) {
-						// Gerçekten durmuş!
+						// #region agent log
+						fetch('http://127.0.0.1:7245/ingest/997351de-2588-4a8c-ab40-731c1e4f75c0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Level.ts:gameOverDetect',message:'Game over triggered',data:{elapsed,distMoved,ballX:this.ball?.position.x,ballY:this.ball?.position.y},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+						// #endregion
 						this.handleGameOver();
 					} else {
 						// Hala hareket ediyor veya kaymış, bekleme durumunu sıfırla tekrar ölçmeye başla
@@ -663,6 +763,84 @@ export default class Level extends Phaser.Scene {
 			obj.x = this.spawnPoint.x;
 			obj.y = this.spawnPoint.y;
 		}
+		// Clear trail when ball resets
+		this.trailPositions = [];
+		this.trailGraphics?.clear();
+	}
+
+	private updateTrail(velocity: number) {
+		if (!this.ball || !this.trailGraphics) return;
+
+		// Only add trail points when ball is moving fast enough
+		if (this.ballMoving && velocity > 0.5) {
+			// Add current position to the front of the trail
+			this.trailPositions.unshift({ x: this.ball.position.x, y: this.ball.position.y });
+
+			// Limit trail length
+			if (this.trailPositions.length > this.MAX_TRAIL_LENGTH) {
+				this.trailPositions.pop();
+			}
+		} else {
+			// Gradually shrink trail when ball slows down
+			if (this.trailPositions.length > 0) {
+				this.trailPositions.pop();
+			}
+		}
+
+		// Clear and redraw the trail
+		this.trailGraphics.clear();
+
+		if (this.trailPositions.length < 2) return;
+
+		const ballRadius = 15;
+
+		// Draw tapered ribbon trail
+		for (let i = 0; i < this.trailPositions.length - 1; i++) {
+			const current = this.trailPositions[i];
+			const next = this.trailPositions[i + 1];
+
+			// Calculate progress along the trail (0 = near ball, 1 = end of trail)
+			const progress = i / (this.trailPositions.length - 1);
+
+			// Taper the width: thick near ball, thin at end
+			const width = ballRadius * (1 - progress * 0.85);
+
+			// Fade alpha along the trail
+			const alpha = 0.6 * (1 - progress * 0.9);
+
+			// Calculate perpendicular direction for ribbon width
+			const dx = next.x - current.x;
+			const dy = next.y - current.y;
+			const len = Math.sqrt(dx * dx + dy * dy);
+			if (len < 0.1) continue;
+
+			const perpX = -dy / len;
+			const perpY = dx / len;
+
+			// Calculate the four corners of this ribbon segment
+			const x1 = current.x + perpX * width;
+			const y1 = current.y + perpY * width;
+			const x2 = current.x - perpX * width;
+			const y2 = current.y - perpY * width;
+
+			const nextProgress = (i + 1) / (this.trailPositions.length - 1);
+			const nextWidth = ballRadius * (1 - nextProgress * 0.85);
+
+			const x3 = next.x - perpX * nextWidth;
+			const y3 = next.y + perpY * nextWidth;
+			const x4 = next.x + perpX * nextWidth;
+			const y4 = next.y - perpY * nextWidth;
+
+			// Draw the quad segment with gradient-like color (white fading)
+			this.trailGraphics.fillStyle(0xffffff, alpha);
+			this.trailGraphics.beginPath();
+			this.trailGraphics.moveTo(x1, y1);
+			this.trailGraphics.lineTo(x2, y2);
+			this.trailGraphics.lineTo(x3, y3);
+			this.trailGraphics.lineTo(x4, y4);
+			this.trailGraphics.closePath();
+			this.trailGraphics.fillPath();
+		}
 	}
 
 	private handleGameOver() {
@@ -670,6 +848,8 @@ export default class Level extends Phaser.Scene {
 		this.isGameOver = true;
 
 		this.playSFX('GameOver');
+		// Close settings panel if it was open, then hide the gear button
+		this.settingsModal?.close();
 		this.settingsModal?.setVisible(false);
 
 		// Hide gameplay HUD
@@ -745,6 +925,9 @@ export default class Level extends Phaser.Scene {
 		}).setOrigin(0.5).setDepth(5004).setInteractive({ useHandCursor: true });
 
 		retryBtn.on('pointerdown', () => {
+			// #region agent log
+			fetch('http://127.0.0.1:7245/ingest/997351de-2588-4a8c-ab40-731c1e4f75c0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Level.ts:retryBtn',message:'RETRY button pressed - about to restart scene',data:{score:this.registry.get('score'),isGameOver:this.isGameOver},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
+			// #endregion
 			if (typeof (window as any).triggerHaptic === "function") (window as any).triggerHaptic("light");
 			this.playSFX('ButtonClick');
 			this.registry.set('score', 0);
