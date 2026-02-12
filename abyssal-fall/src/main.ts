@@ -149,6 +149,10 @@ class Game {
   private settings: Settings = { music: true, fx: true, haptics: true };
   private isMobile: boolean = false;
   
+  // Animation frame tracking for iOS WebView reliability
+  private animFrameId: number = 0;
+  private isVisible: boolean = true;
+  
   // Menu animation entities
   private menuEnemies: BaseEnemy[] = [];
   private menuWeedsDrawn: boolean = false;
@@ -174,6 +178,9 @@ class Game {
     this.initDitherPattern();
     this.loadTextures();
     this.initMenuEntities();
+    
+    // Ensure DOM is in correct initial state (handles WebView soft reloads)
+    this.resetDOMState();
     
     // Start game loop
     this.gameLoop();
@@ -292,6 +299,35 @@ class Game {
     window.addEventListener("resize", () => {
       this.resizeCanvas();
     });
+    
+    // iOS WebView: also listen to visualViewport resize events
+    if ((window as any).visualViewport) {
+      (window as any).visualViewport.addEventListener("resize", () => {
+        this.resizeCanvas();
+      });
+    }
+    
+    // Handle visibility changes (iOS WebView backgrounding)
+    // When the app comes back to foreground, rAF may have stopped - restart it
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        console.log("[Game] Visibility restored, ensuring game loop is running");
+        this.isVisible = true;
+        this.resizeCanvas();
+        this.ensureGameLoopRunning();
+      } else {
+        this.isVisible = false;
+      }
+    });
+    
+    // iOS WebView specific: pageshow event fires when navigating back
+    window.addEventListener("pageshow", (e) => {
+      if ((e as PageTransitionEvent).persisted) {
+        console.log("[Game] Page restored from bfcache, restarting loop");
+        this.resizeCanvas();
+        this.ensureGameLoopRunning();
+      }
+    });
   }
   
   private handleTouchStart(e: TouchEvent): void {
@@ -322,6 +358,12 @@ class Game {
     this.updateInputFromTouches();
   }
   
+  /** Get CSS display width of the canvas (not the buffer width) */
+  private getDisplayWidth(): number {
+    const vv = (window as any).visualViewport;
+    return vv ? Math.round(vv.width) : window.innerWidth;
+  }
+  
   private updateInputFromTouches(): void {
     // Reset input
     this.input.left = false;
@@ -329,7 +371,8 @@ class Game {
     this.input.shoot = false;
     this.input.jump = false;
     
-    const screenWidth = this.canvas.width;
+    // Use CSS pixel screen width (not buffer width which is DPR-scaled)
+    const screenWidth = this.getDisplayWidth();
     const leftZone = screenWidth * 0.33;
     const rightZone = screenWidth * 0.67;
     
@@ -352,7 +395,8 @@ class Game {
   }
   
   private handleMouseInput(clientX: number, clientY: number): void {
-    const screenWidth = this.canvas.width;
+    // Use CSS pixel screen width (not buffer width which is DPR-scaled)
+    const screenWidth = this.getDisplayWidth();
     const leftZone = screenWidth * 0.33;
     const rightZone = screenWidth * 0.67;
     
@@ -372,8 +416,22 @@ class Game {
   }
   
   private resizeCanvas(): void {
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
+    // Use visualViewport for accurate dimensions in iOS WebViews,
+    // falling back to window.innerWidth/Height
+    const vv = (window as any).visualViewport;
+    const w = vv ? Math.round(vv.width) : window.innerWidth;
+    const h = vv ? Math.round(vv.height) : window.innerHeight;
+    
+    // Use device pixel ratio for crisp rendering but cap it to avoid huge buffers
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    
+    // Set canvas buffer size
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    
+    // Set CSS display size to match viewport exactly
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
     
     // Calculate scale to fit internal resolution
     const scaleX = this.canvas.width / CONFIG.INTERNAL_WIDTH;
@@ -383,6 +441,9 @@ class Game {
     // Center the game
     this.offsetX = (this.canvas.width - CONFIG.INTERNAL_WIDTH * this.scale) / 2;
     this.offsetY = (this.canvas.height - CONFIG.INTERNAL_HEIGHT * this.scale) / 2;
+    
+    // Ensure crisp pixel rendering after resize
+    this.ctx.imageSmoothingEnabled = false;
     
     // Position HP bar and ammo slider centered between wall edge and screen edge
     this.positionSideBars();
@@ -395,17 +456,17 @@ class Game {
     const hpBar = document.getElementById("hp-bar");
     const ammoSlider = document.getElementById("ammo-slider");
     
-    // The game's sand wall occupies WALL_WIDTH (32px) on each side in internal coords
-    // In screen coords, the left wall inner edge is at: offsetX + WALL_WIDTH * scale
-    // The left screen edge is at: 0
-    // Center the HP bar between 0 and (offsetX + WALL_WIDTH * scale)
+    // Convert buffer coordinates to CSS pixel coordinates for DOM positioning
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     
-    const leftWallScreenEdge = this.offsetX + CONFIG.WALL_WIDTH * this.scale;
+    // The game's sand wall occupies WALL_WIDTH (32px) on each side in internal coords
+    // In CSS screen coords, the left wall inner edge is at: (offsetX + WALL_WIDTH * scale) / dpr
+    const leftWallScreenEdge = (this.offsetX + CONFIG.WALL_WIDTH * this.scale) / dpr;
     const leftCenter = leftWallScreenEdge / 2;
     
-    // Right wall inner edge in screen coords: offsetX + (INTERNAL_WIDTH - WALL_WIDTH) * scale
-    const rightWallScreenEdge = this.offsetX + (CONFIG.INTERNAL_WIDTH - CONFIG.WALL_WIDTH) * this.scale;
-    const rightEdge = this.canvas.width;
+    // Right wall inner edge in CSS screen coords
+    const rightWallScreenEdge = (this.offsetX + (CONFIG.INTERNAL_WIDTH - CONFIG.WALL_WIDTH) * this.scale) / dpr;
+    const rightEdge = this.canvas.width / dpr;
     const rightCenter = rightWallScreenEdge + (rightEdge - rightWallScreenEdge) / 2;
     
     if (hpBar) {
@@ -604,6 +665,33 @@ class Game {
   
   private initMenuEntities(): void {
     // Menu initialization (currently empty - no enemies on menu)
+  }
+  
+  /** Reset DOM elements to their initial state.
+   *  Handles iOS WebView soft reloads where the DOM may retain
+   *  stale classes/styles from a previous game session. */
+  private resetDOMState(): void {
+    // Show start screen, hide game-over screen
+    document.getElementById("start-screen")?.classList.remove("hidden");
+    document.getElementById("game-over-screen")?.classList.add("hidden");
+    
+    // Hide gameplay UI
+    const hud = document.getElementById("hud");
+    if (hud) hud.style.display = "none";
+    document.getElementById("settings-btn")?.classList.add("hidden");
+    document.getElementById("ammo-slider")?.classList.add("hidden");
+    document.getElementById("hp-bar")?.classList.add("hidden");
+    
+    // Hide settings modal
+    document.getElementById("settings-modal")?.classList.add("hidden");
+    
+    // Reset HP bubbles
+    const bubbles = document.querySelectorAll(".hp-bubble");
+    bubbles.forEach((bubble) => {
+      bubble.classList.remove("popped", "empty");
+    });
+    
+    console.log("[Game] DOM state reset for clean initialization");
   }
   
   private drawTitleWeeds(): void {
@@ -3146,15 +3234,31 @@ class Game {
   private gameLoop(): void {
     this.update();
     this.draw();
-    requestAnimationFrame(() => this.gameLoop());
+    this.animFrameId = requestAnimationFrame(() => this.gameLoop());
+  }
+  
+  /** Restart the game loop if it was stopped (e.g., iOS WebView tab switch) */
+  private ensureGameLoopRunning(): void {
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+    }
+    this.gameLoop();
   }
 }
 
-// Initialize game when DOM is ready
+// Initialize game when DOM is ready (singleton to prevent duplicate game loops in WebViews)
+let gameInstance: Game | null = null;
+
+function initGame(): void {
+  if (gameInstance) {
+    console.log("[Game] Game instance already exists, skipping duplicate init");
+    return;
+  }
+  gameInstance = new Game();
+}
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => {
-    new Game();
-  });
+  document.addEventListener("DOMContentLoaded", initGame);
 } else {
-  new Game();
+  initGame();
 }
