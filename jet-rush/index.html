@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Jet Rush</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --text-main: rgba(255, 255, 255, 0.95);
+        --text-soft: rgba(255, 255, 255, 0.55);
+        --accent: #00d4ff;
+        --accent-glow: rgba(0, 212, 255, 0.4);
+        --danger: #ff4466;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        touch-action: none;
+        background: #000;
+        font-family: "Space Grotesk", sans-serif;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      #gameContainer {
+        position: fixed;
+        inset: 0;
+        z-index: 3;
+      }
+
+      #gameContainer canvas {
+        display: block;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      /* ── Start Screen ── */
+
+      #startScreen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 20;
+        cursor: pointer;
+        background: radial-gradient(ellipse at 50% 40%, rgba(0, 20, 40, 0.6) 0%, rgba(0, 0, 0, 0.85) 100%);
+      }
+
+      .start-title {
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(2.8rem, 14vw, 5.5rem);
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-main);
+        line-height: 1;
+        text-shadow: 0 0 40px var(--accent-glow), 0 0 80px rgba(0, 212, 255, 0.2);
+      }
+
+      .start-subtitle {
+        margin-top: 12px;
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(0.7rem, 3vw, 1rem);
+        font-weight: 500;
+        letter-spacing: 0.3em;
+        text-transform: uppercase;
+        color: var(--accent);
+        opacity: 0.7;
+      }
+
+      .start-cta {
+        margin-top: 40px;
+        font-size: clamp(0.85rem, 3.5vw, 1.1rem);
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+        animation: pulse 2.2s ease-in-out infinite;
+      }
+
+      /* ── Game Over Screen ── */
+
+      #gameOverScreen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 20;
+        cursor: pointer;
+        background: radial-gradient(ellipse at 50% 40%, rgba(40, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.85) 100%);
+      }
+
+      .gameover-label {
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(0.72rem, 3vw, 0.88rem);
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+      }
+
+      .gameover-score {
+        margin-top: 8px;
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(4rem, 22vw, 8rem);
+        font-weight: 700;
+        color: var(--text-main);
+        line-height: 1;
+        text-shadow: 0 0 30px var(--accent-glow);
+      }
+
+      .gameover-cta {
+        margin-top: 36px;
+        font-size: clamp(0.85rem, 3.5vw, 1.1rem);
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+        animation: pulse 2.2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+      }
+
+      /* ── HUD ── */
+
+      #hud {
+        position: fixed;
+        top: 28px;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        pointer-events: none;
+        display: flex;
+        justify-content: center;
+      }
+
+      .hud-score {
+        font-family: "Orbitron", sans-serif;
+        font-size: clamp(1.6rem, 6vw, 2.4rem);
+        font-weight: 700;
+        color: var(--text-main);
+        text-shadow: 0 0 20px var(--accent-glow);
+        letter-spacing: 0.06em;
+      }
+
+      /* ── Settings Button ── */
+
+      .icon-btn {
+        position: fixed;
+        top: 45px;
+        right: 20px;
+        width: 54px;
+        height: 54px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 16px;
+        background: rgba(0, 10, 30, 0.6);
+        color: var(--text-main);
+        display: grid;
+        place-items: center;
+        z-index: 12;
+        transition: transform 0.16s ease, background 0.16s ease;
+        cursor: pointer;
+      }
+
+      .icon-btn:active {
+        transform: scale(0.94);
+      }
+
+      .icon-btn svg {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+      }
+
+      /* ── Settings Modal ── */
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 22px;
+        background: radial-gradient(ellipse at 50% 40%, transparent 20%, rgba(0, 0, 0, 0.7) 100%);
+        backdrop-filter: blur(12px);
+      }
+
+      .modal-card {
+        width: min(100%, 320px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 28px;
+      }
+
+      .modal-title {
+        font-family: "Orbitron", sans-serif;
+        color: var(--text-main);
+        font-size: clamp(1.4rem, 7vw, 2rem);
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .settings-list {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .setting-row {
+        width: 100%;
+        border: none;
+        background: transparent;
+        color: var(--text-main);
+        padding: 14px 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        cursor: pointer;
+        font-family: "Space Grotesk", sans-serif;
+      }
+
+      .setting-row:last-child {
+        border-bottom: none;
+      }
+
+      .setting-name {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .setting-title {
+        font-size: 1rem;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .setting-state {
+        font-size: 0.72rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+      }
+
+      .switch {
+        width: 46px;
+        height: 26px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+        position: relative;
+        flex-shrink: 0;
+        transition: background 0.2s ease;
+      }
+
+      .switch::after {
+        content: "";
+        position: absolute;
+        width: 20px;
+        height: 20px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.5);
+        top: 3px;
+        left: 3px;
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .setting-row.active .switch {
+        background: rgba(0, 212, 255, 0.35);
+      }
+
+      .setting-row.active .switch::after {
+        transform: translateX(20px);
+        background: #ffffff;
+      }
+
+      /* ── Mobile Controls ── */
+
+      .mobile-controls {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 0 20px 120px;
+        pointer-events: none;
+        z-index: 11;
+      }
+
+      .ctrl-group {
+        display: flex;
+        gap: 12px;
+        pointer-events: none;
+      }
+
+      .ctrl-btn {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 10, 30, 0.5);
+        color: var(--text-main);
+        display: grid;
+        place-items: center;
+        pointer-events: auto;
+        transition: transform 0.1s ease, background 0.1s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .ctrl-btn:active {
+        transform: scale(0.92);
+        background: rgba(0, 212, 255, 0.25);
+      }
+
+      .ctrl-btn svg {
+        width: 32px;
+        height: 32px;
+        fill: currentColor;
+      }
+
+      @media (pointer: coarse) {
+        #hud {
+          top: 100px;
+        }
+
+        .icon-btn {
+          top: 120px;
+          right: 16px;
+        }
+
+        .setting-row {
+          min-height: 56px;
+        }
+      }
+
+      @media (pointer: fine) {
+        .mobile-controls {
+          display: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gameContainer"></div>
+
+    <div id="hud" class="hidden">
+      <span id="scoreDisplay" class="hud-score">0</span>
+    </div>
+
+    <button id="settingsBtn" class="icon-btn hidden" aria-label="Settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M19.43 12.98a7.55 7.55 0 0 0 .05-.98 7.55 7.55 0 0 0-.05-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.06 7.06 0 0 0-1.7-.98l-.38-2.65A.5.5 0 0 0 14 1h-4a.5.5 0 0 0-.49.41l-.38 2.65a7.06 7.06 0 0 0-1.7.98l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11a7.55 7.55 0 0 0-.05.98 7.55 7.55 0 0 0 .05.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .6.22l2.49-1a7.06 7.06 0 0 0 1.7.98l.38 2.65a.5.5 0 0 0 .49.41h4a.5.5 0 0 0 .49-.41l.38-2.65a7.06 7.06 0 0 0 1.7-.98l2.49 1a.5.5 0 0 0 .6-.22l2-3.46a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+        />
+      </svg>
+    </button>
+
+    <!-- Start Screen -->
+    <div id="startScreen">
+      <div class="start-title">Jet Rush</div>
+      <div class="start-subtitle">Navigate the void</div>
+      <div class="start-cta">Tap to Fly</div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="hidden">
+      <div class="gameover-label">Distance</div>
+      <div id="finalScore" class="gameover-score">0</div>
+      <div class="gameover-cta">Tap to Retry</div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-title">Settings</div>
+
+        <div class="settings-list">
+          <button id="musicToggle" class="setting-row active">
+            <span class="setting-name">
+              <span class="setting-title">Music</span>
+              <span id="musicState" class="setting-state">On</span>
+            </span>
+            <span class="switch"></span>
+          </button>
+
+          <button id="fxToggle" class="setting-row active">
+            <span class="setting-name">
+              <span class="setting-title">FX</span>
+              <span id="fxState" class="setting-state">On</span>
+            </span>
+            <span class="switch"></span>
+          </button>
+
+          <button id="hapticsToggle" class="setting-row active">
+            <span class="setting-name">
+              <span class="setting-title">Haptics</span>
+              <span id="hapticsState" class="setting-state">On</span>
+            </span>
+            <span class="switch"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="mobileControls" class="mobile-controls hidden">
+      <div class="ctrl-group">
+        <button id="btnLeft" class="ctrl-btn" aria-label="Move Left">
+          <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+      </div>
+      <div class="ctrl-group">
+        <button id="btnRight" class="ctrl-btn" aria-label="Move Right">
+          <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
