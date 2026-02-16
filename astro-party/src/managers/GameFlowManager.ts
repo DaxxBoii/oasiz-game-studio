@@ -1,9 +1,5 @@
 import { NetworkManager } from "../network/NetworkManager";
-import {
-  GamePhase,
-  RoundResultPayload,
-  GAME_CONFIG,
-} from "../types";
+import { GamePhase, RoundResultPayload, GAME_CONFIG } from "../types";
 
 export class GameFlowManager {
   phase: GamePhase = "START";

@@ -271,10 +271,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     }
   }
 
-  function setMapUI(
-    mapId: MapId,
-    source: "local" | "remote" = "local",
-  ): void {
+  function setMapUI(mapId: MapId, source: "local" | "remote" = "local"): void {
     elements.mapBtn0.classList.toggle("active", mapId === 0);
     elements.mapBtn1.classList.toggle("active", mapId === 1);
     elements.mapBtn2.classList.toggle("active", mapId === 2);

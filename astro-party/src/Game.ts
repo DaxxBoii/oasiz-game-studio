@@ -207,7 +207,9 @@ export class Game {
           this.flowMgr.phase === "COUNTDOWN" &&
           this.playerMgr.players.size < 2
         ) {
-          console.log("[Game] Not enough players during countdown, returning to lobby");
+          console.log(
+            "[Game] Not enough players during countdown, returning to lobby",
+          );
           if (this.flowMgr.countdownInterval) {
             clearInterval(this.flowMgr.countdownInterval);
             this.flowMgr.countdownInterval = null;
@@ -280,8 +282,13 @@ export class Game {
             this.clearAllGameState();
           }
 
-          if (phase === "COUNTDOWN" && (oldPhase === "ROUND_END" || oldPhase === "LOBBY")) {
-            console.log("[Game] Non-host: new round starting, clearing old state");
+          if (
+            phase === "COUNTDOWN" &&
+            (oldPhase === "ROUND_END" || oldPhase === "LOBBY")
+          ) {
+            console.log(
+              "[Game] Non-host: new round starting, clearing old state",
+            );
             this.finalScoreSubmittedForMatch = false;
             this.resetForNextRound();
             this.networkSync.clearNetworkEntities();
@@ -381,11 +388,17 @@ export class Game {
         this.lastTransportErrorCode = code;
         this.lastTransportErrorMessage = message;
         if (code === "LOCAL_PLAYER_UNSUPPORTED") {
-          this._onSystemMessage?.("Local players are deferred in this version", 3500);
+          this._onSystemMessage?.(
+            "Local players are deferred in this version",
+            3500,
+          );
           return;
         }
         if (code === "LOCAL_JOIN_UNSUPPORTED") {
-          this._onSystemMessage?.("Join is only available for online rooms", 3000);
+          this._onSystemMessage?.(
+            "Join is only available for online rooms",
+            3000,
+          );
           return;
         }
         if (code === "INVALID_CODE") {
@@ -410,7 +423,6 @@ export class Game {
         }
         this._onSystemMessage?.(message || "Network error", 3500);
       },
-
     });
   }
 
@@ -533,7 +545,9 @@ export class Game {
 
   setNextRngSeed(seed: number | null): void {
     if (!this.network.isSimulationAuthority()) {
-      console.log("[Game.setNextRngSeed] Only simulation authority can set seed");
+      console.log(
+        "[Game.setNextRngSeed] Only simulation authority can set seed",
+      );
       return;
     }
 
@@ -646,14 +660,13 @@ export class Game {
       const keySlot = this.network.getPlayerKeySlot(playerId);
       if (keySlot < 0) continue;
 
-      const input: PlayerInput =
-        this.multiInput?.capture(keySlot) ?? {
-          buttonA: false,
-          buttonB: false,
-          timestamp: nowMs,
-          clientTimeMs: nowMs,
-          inputSequence: 0,
-        };
+      const input: PlayerInput = this.multiInput?.capture(keySlot) ?? {
+        buttonA: false,
+        buttonB: false,
+        timestamp: nowMs,
+        clientTimeMs: nowMs,
+        inputSequence: 0,
+      };
       const nextInputSequence =
         (this.controlledInputSequenceByPlayer.get(playerId) ?? 0) + 1;
       this.controlledInputSequenceByPlayer.set(playerId, nextInputSequence);
@@ -703,7 +716,10 @@ export class Game {
     this.lastPredictedFireAtMs = nowMs;
   }
 
-  private shouldSuppressAuthoritativeSound(type: string, playerId: string): boolean {
+  private shouldSuppressAuthoritativeSound(
+    type: string,
+    playerId: string,
+  ): boolean {
     if (this.network.isSimulationAuthority()) return false;
     if (this.network.getTransportMode() !== "online") return false;
     if (
@@ -716,11 +732,18 @@ export class Game {
     if (!myPlayerId || playerId !== myPlayerId) return false;
 
     const nowMs = performance.now();
-    const suppression = NETWORK_GAME_FEEL_TUNING.localAuthoritativeSoundSuppressionMs;
-    if (type === "fire" && nowMs - this.lastPredictedFireAtMs <= suppression.fire) {
+    const suppression =
+      NETWORK_GAME_FEEL_TUNING.localAuthoritativeSoundSuppressionMs;
+    if (
+      type === "fire" &&
+      nowMs - this.lastPredictedFireAtMs <= suppression.fire
+    ) {
       return true;
     }
-    if (type === "dash" && nowMs - this.lastPredictedDashAtMs <= suppression.dash) {
+    if (
+      type === "dash" &&
+      nowMs - this.lastPredictedDashAtMs <= suppression.dash
+    ) {
       return true;
     }
     return false;
@@ -735,7 +758,8 @@ export class Game {
   }
 
   private shouldSuppressLocalDashParticles(playerId: string): boolean {
-    if (!NETWORK_GAME_FEEL_TUNING.predictedLocalActionCosmetics.dash) return false;
+    if (!NETWORK_GAME_FEEL_TUNING.predictedLocalActionCosmetics.dash)
+      return false;
     const myPlayerId = this.network.getMyPlayerId();
     if (!myPlayerId || playerId !== myPlayerId) return false;
     return performance.now() - this.lastPredictedDashAtMs <= 300;
@@ -1123,7 +1147,10 @@ export class Game {
 
   async addLocalBot(keySlot: number): Promise<boolean> {
     if (!this.supportsLocalPlayers()) {
-      this._onSystemMessage?.("Local players are deferred in this version", 3500);
+      this._onSystemMessage?.(
+        "Local players are deferred in this version",
+        3500,
+      );
       return false;
     }
     return this.botMgr.addLocalBot(
@@ -1227,8 +1254,7 @@ export class Game {
 
     const resultScore = this.roundResult?.roundWinsById?.[myId];
     const fallbackScore = this.playerMgr.players.get(myId)?.roundWins;
-    const rawScore =
-      Number.isFinite(resultScore) ? resultScore : fallbackScore;
+    const rawScore = Number.isFinite(resultScore) ? resultScore : fallbackScore;
 
     if (!Number.isFinite(rawScore)) return;
     const score = Math.max(0, Math.floor(rawScore as number));

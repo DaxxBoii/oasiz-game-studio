@@ -178,10 +178,7 @@ export class ColyseusTransport implements NetworkTransport {
         },
       );
       if (this.isMatchJoinErrorResponse(response)) {
-        this.callbacks?.onTransportError?.(
-          response.error,
-          response.message,
-        );
+        this.callbacks?.onTransportError?.(response.error, response.message);
         console.log(
           "[ColyseusTransport] Join rejected",
           response.error,
@@ -425,7 +422,9 @@ export class ColyseusTransport implements NetworkTransport {
 
   getPlayerColor(playerId: string): { primary: string; glow: string } {
     const meta = this.playerMetaById.get(playerId);
-    const index = Number.isFinite(meta?.colorIndex) ? (meta?.colorIndex as number) : 0;
+    const index = Number.isFinite(meta?.colorIndex)
+      ? (meta?.colorIndex as number)
+      : 0;
     return PLAYER_COLORS[index % PLAYER_COLORS.length];
   }
 
@@ -483,7 +482,10 @@ export class ColyseusTransport implements NetworkTransport {
     return false;
   }
 
-  private async connectSeat(seatReservation: unknown, roomCode: string): Promise<void> {
+  private async connectSeat(
+    seatReservation: unknown,
+    roomCode: string,
+  ): Promise<void> {
     this.client = new Client(this.wsUrl);
     this.room = await this.client.consumeSeatReservation(
       seatReservation as Parameters<Client["consumeSeatReservation"]>[0],
@@ -507,9 +509,12 @@ export class ColyseusTransport implements NetworkTransport {
       this.callbacks?.onGameStateReceived(payload);
     });
 
-    room.onMessage("evt:asteroid_colliders", (payload: AsteroidColliderSync[]) => {
-      this.callbacks?.onAsteroidCollidersReceived?.(payload);
-    });
+    room.onMessage(
+      "evt:asteroid_colliders",
+      (payload: AsteroidColliderSync[]) => {
+        this.callbacks?.onAsteroidCollidersReceived?.(payload);
+      },
+    );
 
     room.onMessage(
       "evt:sound",
@@ -521,7 +526,10 @@ export class ColyseusTransport implements NetworkTransport {
     room.onMessage(
       "evt:screen_shake",
       (payload: { intensity: number; duration: number }) => {
-        this.callbacks?.onScreenShakeReceived(payload.intensity, payload.duration);
+        this.callbacks?.onScreenShakeReceived(
+          payload.intensity,
+          payload.duration,
+        );
       },
     );
 
@@ -547,12 +555,15 @@ export class ColyseusTransport implements NetworkTransport {
       },
     );
 
-    room.onMessage("evt:error", (payload: { code?: string; message?: string }) => {
-      const code = payload.code ?? "ERROR";
-      const message = payload.message ?? "Network error";
-      console.log("[ColyseusTransport]", code, message);
-      this.callbacks?.onTransportError?.(code, message);
-    });
+    room.onMessage(
+      "evt:error",
+      (payload: { code?: string; message?: string }) => {
+        const code = payload.code ?? "ERROR";
+        const message = payload.message ?? "Network error";
+        console.log("[ColyseusTransport]", code, message);
+        this.callbacks?.onTransportError?.(code, message);
+      },
+    );
   }
 
   private bindStateListeners(room: Room): void {
@@ -591,14 +602,26 @@ export class ColyseusTransport implements NetworkTransport {
       ) => (() => void) | void;
       onChange?: (callback: () => void) => (() => void) | void;
       playerOrder?: {
-        onAdd?: (callback: (item: unknown, index: unknown) => void) => (() => void) | void;
-        onRemove?: (callback: (item: unknown, index: unknown) => void) => (() => void) | void;
-        onChange?: (callback: (item: unknown, index: unknown) => void) => (() => void) | void;
+        onAdd?: (
+          callback: (item: unknown, index: unknown) => void,
+        ) => (() => void) | void;
+        onRemove?: (
+          callback: (item: unknown, index: unknown) => void,
+        ) => (() => void) | void;
+        onChange?: (
+          callback: (item: unknown, index: unknown) => void,
+        ) => (() => void) | void;
       };
       players?: {
-        onAdd?: (callback: (item: unknown, key: unknown) => void) => (() => void) | void;
-        onRemove?: (callback: (item: unknown, key: unknown) => void) => (() => void) | void;
-        onChange?: (callback: (item: unknown, key: unknown) => void) => (() => void) | void;
+        onAdd?: (
+          callback: (item: unknown, key: unknown) => void,
+        ) => (() => void) | void;
+        onRemove?: (
+          callback: (item: unknown, key: unknown) => void,
+        ) => (() => void) | void;
+        onChange?: (
+          callback: (item: unknown, key: unknown) => void,
+        ) => (() => void) | void;
       };
     };
     const root = $(state);
@@ -633,17 +656,27 @@ export class ColyseusTransport implements NetworkTransport {
     };
 
     if (typeof root.listen === "function") {
-      trackUnsubscriber(root.listen("leaderPlayerId", () => triggerStateRefresh()));
+      trackUnsubscriber(
+        root.listen("leaderPlayerId", () => triggerStateRefresh()),
+      );
       trackUnsubscriber(root.listen("hostId", () => triggerStateRefresh()));
       trackUnsubscriber(root.listen("phase", () => triggerStateRefresh()));
       trackUnsubscriber(root.listen("mode", () => triggerStateRefresh()));
       trackUnsubscriber(root.listen("baseMode", () => triggerStateRefresh()));
       trackUnsubscriber(root.listen("mapId", () => triggerStateRefresh()));
-      trackUnsubscriber(root.listen("settingsJson", () => triggerStateRefresh()));
-      trackUnsubscriber(root.listen("roundResultJson", () => triggerStateRefresh()));
-      trackUnsubscriber(root.listen("roundResultRevision", () => triggerStateRefresh()));
+      trackUnsubscriber(
+        root.listen("settingsJson", () => triggerStateRefresh()),
+      );
+      trackUnsubscriber(
+        root.listen("roundResultJson", () => triggerStateRefresh()),
+      );
+      trackUnsubscriber(
+        root.listen("roundResultRevision", () => triggerStateRefresh()),
+      );
       trackUnsubscriber(root.listen("countdown", () => triggerStateRefresh()));
-      trackUnsubscriber(root.listen("devModeEnabled", () => triggerStateRefresh()));
+      trackUnsubscriber(
+        root.listen("devModeEnabled", () => triggerStateRefresh()),
+      );
     }
 
     if (root.playerOrder) {
@@ -658,7 +691,9 @@ export class ColyseusTransport implements NetworkTransport {
           this.callbacks?.onPlayerJoined(playerId, joinedIndex);
         }),
       );
-      trackUnsubscriber(root.playerOrder.onChange?.(() => triggerStateRefresh()));
+      trackUnsubscriber(
+        root.playerOrder.onChange?.(() => triggerStateRefresh()),
+      );
       trackUnsubscriber(
         root.playerOrder.onRemove?.((item) => {
           const playerId = typeof item === "string" ? item : "";
@@ -797,7 +832,8 @@ export class ColyseusTransport implements NetworkTransport {
   }
 
   private applyRoundResultFromState(state: RoomStateView): void {
-    const roundResultJson = this.normalizeStateString(state.roundResultJson) ?? "";
+    const roundResultJson =
+      this.normalizeStateString(state.roundResultJson) ?? "";
     const roundResultRevision = Number.isFinite(state.roundResultRevision)
       ? (state.roundResultRevision as number)
       : 0;
@@ -856,7 +892,9 @@ export class ColyseusTransport implements NetworkTransport {
 
     if (playersState instanceof Map) {
       playersState.forEach((value, key) => {
-        out.push(this.normalizePlayerMeta(String(key), value as RoomStatePlayerMeta));
+        out.push(
+          this.normalizePlayerMeta(String(key), value as RoomStatePlayerMeta),
+        );
       });
       return out;
     }
@@ -871,12 +909,16 @@ export class ColyseusTransport implements NetworkTransport {
     return out;
   }
 
-  private normalizePlayerMeta(id: string, value: RoomStatePlayerMeta): PlayerMeta {
+  private normalizePlayerMeta(
+    id: string,
+    value: RoomStatePlayerMeta,
+  ): PlayerMeta {
     const playerId = this.normalizeStateString(value?.id) ?? id;
     const keySlotValue = value?.keySlot;
-    const keySlot = Number.isFinite(keySlotValue) && (keySlotValue as number) >= 0
-      ? (keySlotValue as number)
-      : undefined;
+    const keySlot =
+      Number.isFinite(keySlotValue) && (keySlotValue as number) >= 0
+        ? (keySlotValue as number)
+        : undefined;
 
     return {
       id: playerId,
@@ -886,10 +928,14 @@ export class ColyseusTransport implements NetworkTransport {
         value?.botType === "ai" || value?.botType === "local"
           ? value.botType
           : undefined,
-      colorIndex: Number.isFinite(value?.colorIndex) ? (value.colorIndex as number) : 0,
+      colorIndex: Number.isFinite(value?.colorIndex)
+        ? (value.colorIndex as number)
+        : 0,
       keySlot,
       kills: Number.isFinite(value?.kills) ? (value.kills as number) : 0,
-      roundWins: Number.isFinite(value?.roundWins) ? (value.roundWins as number) : 0,
+      roundWins: Number.isFinite(value?.roundWins)
+        ? (value.roundWins as number)
+        : 0,
       playerState:
         value?.playerState === "ACTIVE" ||
         value?.playerState === "EJECTED" ||
@@ -1037,9 +1083,11 @@ export class ColyseusTransport implements NetworkTransport {
   private resolveWsUrl(): string {
     const fromWindow = (window as unknown as { __COLYSEUS_WS_URL__?: string })
       .__COLYSEUS_WS_URL__;
-    const fromEnv = (import.meta as ImportMeta & {
-      env?: Record<string, string | undefined>;
-    }).env?.VITE_COLYSEUS_WS_URL;
+    const fromEnv = (
+      import.meta as ImportMeta & {
+        env?: Record<string, string | undefined>;
+      }
+    ).env?.VITE_COLYSEUS_WS_URL;
     if (fromWindow && fromWindow.trim().length > 0) return fromWindow;
     if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
     const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
@@ -1049,12 +1097,15 @@ export class ColyseusTransport implements NetworkTransport {
   private resolveHttpUrl(): string {
     const fromWindow = (window as unknown as { __MATCH_HTTP_URL__?: string })
       .__MATCH_HTTP_URL__;
-    const fromEnv = (import.meta as ImportMeta & {
-      env?: Record<string, string | undefined>;
-    }).env?.VITE_MATCH_HTTP_URL;
+    const fromEnv = (
+      import.meta as ImportMeta & {
+        env?: Record<string, string | undefined>;
+      }
+    ).env?.VITE_MATCH_HTTP_URL;
     if (fromWindow && fromWindow.trim().length > 0) return fromWindow;
     if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
-    const proto = window.location.protocol === "https:" ? "https://" : "http://";
+    const proto =
+      window.location.protocol === "https:" ? "https://" : "http://";
     return proto + window.location.hostname + ":2567";
   }
 
@@ -1070,7 +1121,10 @@ export class ColyseusTransport implements NetworkTransport {
     );
   }
 
-  private normalizeJoinError(error: unknown): { code: string; message: string } {
+  private normalizeJoinError(error: unknown): {
+    code: string;
+    message: string;
+  } {
     if (error instanceof HttpRequestError) {
       return {
         code: error.code,
@@ -1125,7 +1179,8 @@ export class ColyseusTransport implements NetworkTransport {
   }
 
   private readInjectedPlayerName(): string | null {
-    const name = (window as unknown as { __PLAYER_NAME__?: string }).__PLAYER_NAME__;
+    const name = (window as unknown as { __PLAYER_NAME__?: string })
+      .__PLAYER_NAME__;
     if (typeof name !== "string") return null;
     const normalized = name.trim();
     return normalized.length > 0 ? normalized : null;

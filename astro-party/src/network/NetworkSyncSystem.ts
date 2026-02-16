@@ -101,12 +101,20 @@ export class NetworkSyncSystem {
 
   private clientArmingMines: Set<string> = new Set();
   private clientExplodedMines: Set<string> = new Set();
-  private clientShipPositions: Map<string, { x: number; y: number; color: string }> =
+  private clientShipPositions: Map<
+    string,
+    { x: number; y: number; color: string }
+  > = new Map();
+  private clientAsteroidStates: Map<
+    string,
+    { x: number; y: number; size: number }
+  > = new Map();
+  private clientPilotPositions: Map<string, { x: number; y: number }> =
     new Map();
-  private clientAsteroidStates: Map<string, { x: number; y: number; size: number }> =
-    new Map();
-  private clientPilotPositions: Map<string, { x: number; y: number }> = new Map();
-  private asteroidColliderVerticesById = new Map<string, Array<{ x: number; y: number }>>();
+  private asteroidColliderVerticesById = new Map<
+    string,
+    Array<{ x: number; y: number }>
+  >();
 
   constructor(
     private network: NetworkManager,
@@ -135,7 +143,8 @@ export class NetworkSyncSystem {
   triggerLocalDashPrediction(playerId: string): void {
     const ship = this.getLocalVisualShip(playerId);
     if (!ship) return;
-    const color = this.playerMgr.players.get(playerId)?.color.primary ?? "#ffffff";
+    const color =
+      this.playerMgr.players.get(playerId)?.color.primary ?? "#ffffff";
     const dodgeAngle =
       ship.angle + ((80 * Math.PI) / 180) * this.latestRotationDirection;
     this.renderer.spawnDashParticles(ship.x, ship.y, dodgeAngle, color, 10);
@@ -144,7 +153,8 @@ export class NetworkSyncSystem {
   triggerLocalFirePrediction(playerId: string): void {
     const ship = this.getLocalVisualShip(playerId);
     if (!ship) return;
-    const color = this.playerMgr.players.get(playerId)?.color.primary ?? "#ffffff";
+    const color =
+      this.playerMgr.players.get(playerId)?.color.primary ?? "#ffffff";
     const muzzleX = ship.x + Math.cos(ship.angle) * 18;
     const muzzleY = ship.y + Math.sin(ship.angle) * 18;
     for (let i = 0; i < 3; i += 1) {
@@ -174,7 +184,10 @@ export class NetworkSyncSystem {
 
     const nowMs = performance.now();
     if (this.lastSnapshotReceivedAtMs > 0) {
-      this.lastSnapshotAgeMs = Math.max(0, nowMs - this.lastSnapshotReceivedAtMs);
+      this.lastSnapshotAgeMs = Math.max(
+        0,
+        nowMs - this.lastSnapshotReceivedAtMs,
+      );
     }
 
     const extrapolationMs = this.clamp(
@@ -182,11 +195,16 @@ export class NetworkSyncSystem {
       0,
       NETWORK_GAME_FEEL_TUNING.remoteSmoothing.extrapolationCapBaseMs,
     );
-    const renderState = this.buildExtrapolatedSnapshotState(frame.state, extrapolationMs);
+    const renderState = this.buildExtrapolatedSnapshotState(
+      frame.state,
+      extrapolationMs,
+    );
 
     this.hostSimTimeMs = frame.hostTimeMs + extrapolationMs;
     this.estimatedHostNowTick =
-      frame.tickDurationMs > 0 ? this.hostSimTimeMs / frame.tickDurationMs : frame.hostTick;
+      frame.tickDurationMs > 0
+        ? this.hostSimTimeMs / frame.tickDurationMs
+        : frame.hostTick;
 
     this.applyDirectSnapshotState(renderState);
     return this.buildRenderState();
@@ -210,7 +228,8 @@ export class NetworkSyncSystem {
       ? Math.floor(hydratedState.hostTick)
       : this.lastAppliedHostTick + 1;
     const normalizedTickDurationMs =
-      Number.isFinite(hydratedState.tickDurationMs) && hydratedState.tickDurationMs > 0
+      Number.isFinite(hydratedState.tickDurationMs) &&
+      hydratedState.tickDurationMs > 0
         ? hydratedState.tickDurationMs
         : NetworkSyncSystem.DEFAULT_TICK_MS;
 
@@ -227,7 +246,8 @@ export class NetworkSyncSystem {
       const interval = receivedAtMs - this.lastSnapshotReceivedAtMs;
       this.snapshotIntervalMs = interval;
       const jitterSample = Math.abs(interval - normalizedTickDurationMs);
-      this.snapshotJitterMs = this.snapshotJitterMs * 0.85 + jitterSample * 0.15;
+      this.snapshotJitterMs =
+        this.snapshotJitterMs * 0.85 + jitterSample * 0.15;
     } else {
       this.snapshotIntervalMs = normalizedTickDurationMs;
       this.snapshotJitterMs = 0;
@@ -257,7 +277,8 @@ export class NetworkSyncSystem {
 
     const myPlayerId = this.network.getMyPlayerId();
     if (myPlayerId && hydratedState.lastProcessedInputSequenceByPlayer) {
-      const ackSequence = hydratedState.lastProcessedInputSequenceByPlayer[myPlayerId];
+      const ackSequence =
+        hydratedState.lastProcessedInputSequenceByPlayer[myPlayerId];
       if (Number.isFinite(ackSequence)) {
         this.latestHostAckSequence = Math.floor(ackSequence as number);
       }
@@ -348,9 +369,10 @@ export class NetworkSyncSystem {
       capturedInputTick: capturedSequence > 0 ? capturedSequence : null,
       latestHostAckTick: ackSequence > 0 ? ackSequence : null,
       inputAckGapTicks: gap > 0 ? gap : null,
-      inputAckGapMs: gap > 0
-        ? gap * NETWORK_GAME_FEEL_TUNING.selfPrediction.inputSendIntervalMs
-        : null,
+      inputAckGapMs:
+        gap > 0
+          ? gap * NETWORK_GAME_FEEL_TUNING.selfPrediction.inputSendIntervalMs
+          : null,
     };
   }
 
@@ -387,7 +409,9 @@ export class NetworkSyncSystem {
 
     return {
       ...state,
-      ships: (state.ships || []).map((ship) => this.extrapolateShip(ship, extrapolationMs)),
+      ships: (state.ships || []).map((ship) =>
+        this.extrapolateShip(ship, extrapolationMs),
+      ),
       pilots: (state.pilots || []).map((pilot) => ({
         ...pilot,
         x: pilot.x + pilot.vx * dtFactor,
@@ -479,10 +503,13 @@ export class NetworkSyncSystem {
 
       let vertices = this.normalizeVertices(asteroid.vertices);
       if (vertices.length >= 3) {
-        this.asteroidColliderVerticesById.set(asteroid.id, vertices.map((point) => ({
-          x: point.x,
-          y: point.y,
-        })));
+        this.asteroidColliderVerticesById.set(
+          asteroid.id,
+          vertices.map((point) => ({
+            x: point.x,
+            y: point.y,
+          })),
+        );
       } else {
         const cached = this.asteroidColliderVerticesById.get(asteroid.id);
         if (cached && cached.length >= 3) {
@@ -525,7 +552,8 @@ export class NetworkSyncSystem {
   private decodeAsteroidVertices(
     encodedVertices: number[] | undefined,
   ): Array<{ x: number; y: number }> {
-    if (!Array.isArray(encodedVertices) || encodedVertices.length < 6) return [];
+    if (!Array.isArray(encodedVertices) || encodedVertices.length < 6)
+      return [];
     const decoded: Array<{ x: number; y: number }> = [];
     for (let i = 0; i + 1 < encodedVertices.length; i += 2) {
       const x = encodedVertices[i];
@@ -539,7 +567,9 @@ export class NetworkSyncSystem {
     return decoded.length >= 3 ? decoded : [];
   }
 
-  private buildFallbackAsteroidVertices(size: number): Array<{ x: number; y: number }> {
+  private buildFallbackAsteroidVertices(
+    size: number,
+  ): Array<{ x: number; y: number }> {
     const pointCount = 8;
     const radius = this.clamp(Number.isFinite(size) ? size : 20, 8, 80);
     const vertices: Array<{ x: number; y: number }> = [];
@@ -566,7 +596,9 @@ export class NetworkSyncSystem {
     }
     for (const shipState of incomingShips) {
       if (!shipState.alive) continue;
-      const color = this.playerMgr.players.get(shipState.playerId)?.color.primary || "#ffffff";
+      const color =
+        this.playerMgr.players.get(shipState.playerId)?.color.primary ||
+        "#ffffff";
       this.clientShipPositions.set(shipState.playerId, {
         x: shipState.x,
         y: shipState.y,
@@ -575,7 +607,9 @@ export class NetworkSyncSystem {
     }
 
     const incomingPilots = state.pilots || [];
-    const currentPilotIds = new Set(incomingPilots.map((pilot) => pilot.playerId));
+    const currentPilotIds = new Set(
+      incomingPilots.map((pilot) => pilot.playerId),
+    );
     for (const [playerId, pilotData] of this.clientPilotPositions) {
       if (!currentPilotIds.has(playerId)) {
         this.renderer.spawnExplosion(pilotData.x, pilotData.y, "#ff0000");
@@ -591,10 +625,16 @@ export class NetworkSyncSystem {
     }
 
     const incomingAsteroids = state.asteroids || [];
-    const currentAsteroidIds = new Set(incomingAsteroids.map((asteroid) => asteroid.id));
+    const currentAsteroidIds = new Set(
+      incomingAsteroids.map((asteroid) => asteroid.id),
+    );
     for (const [asteroidId, asteroidData] of this.clientAsteroidStates) {
       if (!currentAsteroidIds.has(asteroidId)) {
-        this.renderer.spawnExplosion(asteroidData.x, asteroidData.y, GAME_CONFIG.ASTEROID_COLOR);
+        this.renderer.spawnExplosion(
+          asteroidData.x,
+          asteroidData.y,
+          GAME_CONFIG.ASTEROID_COLOR,
+        );
         this.renderer.spawnAsteroidDebris(
           asteroidData.x,
           asteroidData.y,

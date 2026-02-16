@@ -57,7 +57,8 @@ class LocalPlayerState implements NetworkPlayerState {
 export class LocalSharedSimTransport implements NetworkTransport {
   private static readonly MAX_PLAYERS = 4;
   private static readonly SIM_TICK_HZ = 60;
-  private static readonly TICK_DURATION_MS = 1000 / LocalSharedSimTransport.SIM_TICK_HZ;
+  private static readonly TICK_DURATION_MS =
+    1000 / LocalSharedSimTransport.SIM_TICK_HZ;
 
   private callbacks: NetworkCallbacks | null = null;
   private simulation: AstroPartySimulation | null = null;
@@ -125,7 +126,10 @@ export class LocalSharedSimTransport implements NetworkTransport {
       },
     );
 
-    this.simulation.addHuman(this.mySessionId, this.readInjectedPlayerName() ?? undefined);
+    this.simulation.addHuman(
+      this.mySessionId,
+      this.readInjectedPlayerName() ?? undefined,
+    );
 
     this.tickInterval = setInterval(() => {
       if (!this.simulation) return;
@@ -362,7 +366,9 @@ export class LocalSharedSimTransport implements NetworkTransport {
 
   getPlayerColor(playerId: string): { primary: string; glow: string } {
     const meta = this.playerMetaById.get(playerId);
-    const index = Number.isFinite(meta?.colorIndex) ? (meta?.colorIndex as number) : 0;
+    const index = Number.isFinite(meta?.colorIndex)
+      ? (meta?.colorIndex as number)
+      : 0;
     return PLAYER_COLORS[index % PLAYER_COLORS.length];
   }
 
@@ -437,7 +443,11 @@ export class LocalSharedSimTransport implements NetworkTransport {
     }
 
     const signature =
-      payload.mode + "|" + payload.baseMode + "|" + JSON.stringify(payload.settings);
+      payload.mode +
+      "|" +
+      payload.baseMode +
+      "|" +
+      JSON.stringify(payload.settings);
     if (this.lastAdvancedSettingsSignature !== signature) {
       this.lastAdvancedSettingsSignature = signature;
       this.callbacks?.onAdvancedSettingsReceived({
@@ -564,7 +574,8 @@ export class LocalSharedSimTransport implements NetworkTransport {
   }
 
   private readInjectedPlayerName(): string | null {
-    const name = (window as unknown as { __PLAYER_NAME__?: string }).__PLAYER_NAME__;
+    const name = (window as unknown as { __PLAYER_NAME__?: string })
+      .__PLAYER_NAME__;
     if (typeof name !== "string") return null;
     const normalized = name.trim();
     return normalized.length > 0 ? normalized : null;

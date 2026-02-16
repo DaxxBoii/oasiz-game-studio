@@ -48,7 +48,9 @@ export class GameRenderer {
     this.renderer.clear();
     this.renderer.beginFrame();
     const useSimTime =
-      ctx.phase === "PLAYING" || ctx.phase === "GAME_END" || ctx.phase === "ROUND_END";
+      ctx.phase === "PLAYING" ||
+      ctx.phase === "GAME_END" ||
+      ctx.phase === "ROUND_END";
     this.renderer.setGameTimeMs(useSimTime ? ctx.nowMs : null);
 
     this.renderer.drawStars();
@@ -57,7 +59,10 @@ export class GameRenderer {
     const mapTimeSec = ctx.nowMs / 1000;
     if (ctx.showMapElements) {
       this.renderer.drawArenaBorder(mapTheme.border);
-      for (const block of this.getYellowBlocksForRender(map.yellowBlocks, ctx.yellowBlockHp)) {
+      for (const block of this.getYellowBlocksForRender(
+        map.yellowBlocks,
+        ctx.yellowBlockHp,
+      )) {
         this.renderer.drawYellowBlock(block);
       }
       for (const hole of map.centerHoles) {
@@ -85,7 +90,10 @@ export class GameRenderer {
           const player = ctx.players.get(state.playerId);
           if (player) {
             const powerUp = ctx.playerPowerUps.get(state.playerId);
-            const renderData = this.getShipPowerUpRenderData(powerUp, ctx.nowMs);
+            const renderData = this.getShipPowerUpRenderData(
+              powerUp,
+              ctx.nowMs,
+            );
             this.renderer.drawShip(
               state,
               player.color,
@@ -232,15 +240,16 @@ export class GameRenderer {
     joustRightActive?: boolean;
     homingMissileCharges?: number;
   } {
-    const shieldHits = powerUp?.type === "SHIELD" ? powerUp.shieldHits : undefined;
-    const laserCharges = powerUp?.type === "LASER" ? powerUp.charges : undefined;
+    const shieldHits =
+      powerUp?.type === "SHIELD" ? powerUp.shieldHits : undefined;
+    const laserCharges =
+      powerUp?.type === "LASER" ? powerUp.charges : undefined;
     const laserCooldownProgress =
       powerUp?.type === "LASER" &&
       powerUp.charges < GAME_CONFIG.POWERUP_LASER_CHARGES
         ? Math.min(
             1,
-            (nowMs - powerUp.lastFireTime) /
-              GAME_CONFIG.POWERUP_LASER_COOLDOWN,
+            (nowMs - powerUp.lastFireTime) / GAME_CONFIG.POWERUP_LASER_COOLDOWN,
           )
         : undefined;
     const scatterCharges =
@@ -279,7 +288,9 @@ export class GameRenderer {
   ): YellowBlock[] {
     if (networkYellowBlockHp.length <= 0) return [];
     if (networkYellowBlockHp.length !== yellowBlocks.length) return [];
-    return yellowBlocks.filter((_, index) => (networkYellowBlockHp[index] ?? 1) > 0);
+    return yellowBlocks.filter(
+      (_, index) => (networkYellowBlockHp[index] ?? 1) > 0,
+    );
   }
 
   private getMapTheme(mapId: MapId): {
