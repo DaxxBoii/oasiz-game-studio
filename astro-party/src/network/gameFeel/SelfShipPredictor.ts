@@ -60,6 +60,7 @@ export class SelfShipPredictor {
   private lastRenderStepAtMs = 0;
   private stepAccumulatorSec = 0;
   private dashQueued = false;
+  private correctionHoldUntilRenderMs = 0;
   private renderOffsetX = 0;
   private renderOffsetY = 0;
   private predictionErrorPxLast = 0;
@@ -117,6 +118,7 @@ export class SelfShipPredictor {
   queueDash(): void {
     if (!SELF_TUNING.enabled) return;
     this.dashQueued = true;
+    this.extendDashCorrectionHoldWindow();
   }
 
   ingestAuthoritative(
@@ -133,6 +135,7 @@ export class SelfShipPredictor {
       this.predictedShip = null;
       this.predictionHistory = [];
       this.dashQueued = false;
+      this.correctionHoldUntilRenderMs = 0;
       this.renderOffsetX = 0;
       this.renderOffsetY = 0;
       this.stepAccumulatorSec = 0;
@@ -147,6 +150,7 @@ export class SelfShipPredictor {
 
     if (!SELF_TUNING.enabled) {
       this.predictedShip = { ...authoritativeShip };
+      this.correctionHoldUntilRenderMs = 0;
       this.renderOffsetX = 0;
       this.renderOffsetY = 0;
       this.stepAccumulatorSec = 0;
@@ -194,12 +198,15 @@ export class SelfShipPredictor {
       const rawCorrectionX = targetPrediction.x - previousPrediction.x;
       const rawCorrectionY = targetPrediction.y - previousPrediction.y;
       const error = Math.hypot(rawCorrectionX, rawCorrectionY);
+      const correctionHoldActive = this.isDashCorrectionHoldActive(renderNowMs);
       this.predictionErrorPxLast = error;
       this.predictionErrorPxEwma = this.predictionErrorPxEwma * 0.9 + error * 0.1;
       const lifecycleChanged = previousPrediction.alive !== targetPrediction.alive;
       if (lifecycleChanged) {
         this.renderOffsetX = 0;
         this.renderOffsetY = 0;
+      } else if (correctionHoldActive) {
+        // Keep local dash motion uninterrupted; reconcile once dash visual window ends.
       } else if (
         error >= SELF_TUNING.outlierDiscardThresholdPx &&
         this.predictionErrorPxEwma <= SELF_TUNING.unstableEwmaThresholdPx &&
@@ -386,6 +393,7 @@ export class SelfShipPredictor {
     this.predictedShip = null;
     this.predictionHistory = [];
     this.dashQueued = false;
+    this.correctionHoldUntilRenderMs = 0;
     this.renderOffsetX = 0;
     this.renderOffsetY = 0;
     this.lastRenderStepAtMs = 0;
@@ -423,6 +431,29 @@ export class SelfShipPredictor {
     if (!this.dashQueued) return false;
     this.dashQueued = false;
     return true;
+  }
+
+  private extendDashCorrectionHoldWindow(nowMs: number = this.getNowMs()): void {
+    const holdMs = Math.max(
+      0,
+      GameConfig.config.SHIP_DASH_DURATION * 1000 + SELF_TUNING.dashCorrectionHoldExtraMs,
+    );
+    if (!Number.isFinite(holdMs) || holdMs <= 0) return;
+    this.correctionHoldUntilRenderMs = Math.max(
+      this.correctionHoldUntilRenderMs,
+      nowMs + holdMs,
+    );
+  }
+
+  private isDashCorrectionHoldActive(nowMs: number): boolean {
+    return nowMs < this.correctionHoldUntilRenderMs;
+  }
+
+  private getNowMs(): number {
+    if (typeof performance !== "undefined" && typeof performance.now === "function") {
+      return performance.now();
+    }
+    return Date.now();
   }
 
   private recordPredictionStep(input: PlayerInput, dashQueued: boolean): void {

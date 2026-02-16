@@ -38,6 +38,7 @@ export const NETWORK_GAME_FEEL_TUNING = {
     outlierDiscardThresholdPx: 180,
     outlierDiscardCooldownMs: 150,
     localProjectileWarmupMs: 85,
+    dashCorrectionHoldExtraMs: 30,
     nonStandardResponseScale: 0.75,
     unstableErrorThresholdPx: 48,
     unstableEwmaThresholdPx: 24,
