@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "../node_modules/@types/three";
 import { C } from "./config";
 
 export interface JetModel {

@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "../node_modules/@types/three";
 import { C, type GameState, type HapticType, type BlockRow, type Particle } from "./config";
 import { AudioManager } from "./audio";
 import { createJet, updateJetFX, type JetModel } from "./jet";

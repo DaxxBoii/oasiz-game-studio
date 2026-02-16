@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "../node_modules/@types/three";
 import { C, type Block, type BlockRow } from "./config";
 import { seededRandom } from "./utils";
 
