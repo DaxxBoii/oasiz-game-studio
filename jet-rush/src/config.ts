@@ -106,6 +106,8 @@ declare global {
 export const C = {
   /** Fixed plane altitude. Use case: all obstacle safety and collision height logic references this baseline. */
   PLANE_Y: 10.0,
+  /** Scale multiplier for the plane model. Use case: resize ship model to fit game proportions. */
+  PLANE_SCALE: 0.005,
   /** Plane collision radius used for front/back and vertical checks. Use case: make hits more forgiving/strict. */
   PLANE_HIT_R: 0.85,
   /** Half-width of plane collision body. Use case: lateral overlap checks against block width. */
@@ -121,12 +123,12 @@ export const C = {
   /** Horizontal steering speed (units/sec). Use case: tuning responsiveness for keyboard and touch drag. */
   LATERAL_SPEED: 10,
   /** Lateral boundary clamp from center. Use case: keep player within designed obstacle field. */
-  BOUNDARY_X: 34,
+  BOUNDARY_X: 68,
 
   /** Camera follow offset behind the plane on Z axis. Use case: change how much upcoming path is visible. */
   CAM_BACK: 10,
   /** Camera height above world. Use case: control top-down vs behind-the-plane perspective feel. */
-  CAM_UP: 15,
+  CAM_UP: 12,
   /** Look-at distance in front of camera target. Use case: stabilize horizon focus ahead of motion. */
   CAM_LOOK_AHEAD: 20,
   /** Camera interpolation strength. Use case: smoother or snappier chase camera movement. */
@@ -149,7 +151,7 @@ export const C = {
   ROW_BEHIND: 40,
 
   /** Horizontal half-span for block generation from center. Use case: world width occupied by city. */
-  BLOCK_SPREAD_X: 55,
+  BLOCK_SPREAD_X: 110,
   /** Grid step between block centers on X axis. Use case: tighter = denser buildings, wider = more gaps. */
   CELL_SIZE_X: 4.5,
 
@@ -233,4 +235,13 @@ export const C = {
   TRAIL_LIFE: 0.22,
   /** Emission rate (particles/sec) of jet trail. Use case: tune visual density vs performance cost. */
   TRAIL_RATE: 55,
+
+  /* ── Bloom Post-Processing ── */
+
+  /** Bloom intensity/strength. Use case: higher values create more pronounced glow effect. */
+  BLOOM_STRENGTH: 1.0,
+  /** Bloom radius/spread. Use case: controls how far the glow extends from bright areas. */
+  BLOOM_RADIUS: 0.5,
+  /** Bloom luminance threshold. Use case: pixels brighter than this value will bloom. Lower = more bloom. */
+  BLOOM_THRESHOLD: 0.5,
 } as const;

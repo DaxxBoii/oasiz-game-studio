@@ -1,4 +1,10 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { C, type GameState, type HapticType, type BlockRow, type Particle } from "./config";
 import { AudioManager } from "./audio";
 import { createJet, updateJetFX, type JetModel } from "./jet";
@@ -12,6 +18,9 @@ class JetRush {
   private scene: THREE.Scene;
   private cam: THREE.PerspectiveCamera;
   private ren: THREE.WebGLRenderer;
+  private composer: EffectComposer;
+  private bloomPass: UnrealBloomPass;
+  private fxaaPass: ShaderPass;
 
   /* Objects */
   private jet: JetModel;
@@ -59,10 +68,31 @@ class JetRush {
     );
     this.cam.position.set(0, C.CAM_UP, C.CAM_BACK);
 
-    this.ren = new THREE.WebGLRenderer({ antialias: !this.mobile });
-    this.ren.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.ren = new THREE.WebGLRenderer({ antialias: true });
+    this.ren.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
     this.ren.setSize(window.innerWidth, window.innerHeight);
+    this.ren.toneMapping = THREE.ACESFilmicToneMapping;
+    this.ren.toneMappingExposure = 1.0;
     document.getElementById("gameContainer")!.appendChild(this.ren.domElement);
+
+    /* Post-processing: Bloom */
+    this.composer = new EffectComposer(this.ren);
+    this.composer.addPass(new RenderPass(this.scene, this.cam));
+
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      C.BLOOM_STRENGTH,
+      C.BLOOM_RADIUS,
+      C.BLOOM_THRESHOLD,
+    );
+    this.composer.addPass(this.bloomPass);
+    this.fxaaPass = new ShaderPass(FXAAShader);
+    this.fxaaPass.uniforms["resolution"].value.set(
+      1 / (window.innerWidth * this.ren.getPixelRatio()),
+      1 / (window.innerHeight * this.ren.getPixelRatio()),
+    );
+    this.composer.addPass(this.fxaaPass);
+    this.composer.addPass(new OutputPass());
 
     this.initLights();
 
@@ -113,6 +143,13 @@ class JetRush {
     this.cam.aspect = window.innerWidth / window.innerHeight;
     this.cam.updateProjectionMatrix();
     this.ren.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.bloomPass.resolution.set(window.innerWidth, window.innerHeight);
+    const pixelRatio = this.ren.getPixelRatio();
+    this.fxaaPass.uniforms["resolution"].value.set(
+      1 / (window.innerWidth * pixelRatio),
+      1 / (window.innerHeight * pixelRatio),
+    );
     this.mobile = window.matchMedia("(pointer: coarse)").matches;
   }
 
@@ -220,7 +257,7 @@ class JetRush {
     this.explParts = tickExplosion(this.scene, this.explParts, dt);
 
     this.updateCamera(dt);
-    this.ren.render(this.scene, this.cam);
+    this.composer.render();
   }
 
   /* ═══ Camera ═══ */

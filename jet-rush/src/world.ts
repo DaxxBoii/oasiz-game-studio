@@ -7,6 +7,7 @@ import { seededRandom, SimplexNoise } from "./utils";
 const blockShades = [0x0f1e30, 0x121f33, 0x0d1a2c, 0x142236, 0x101c2e];
 let blockMats: THREE.MeshStandardMaterial[] = [];
 let blockEdgeMat: THREE.MeshBasicMaterial;
+let wireframeMat: THREE.LineBasicMaterial;
 let groundMat: THREE.MeshStandardMaterial;
 let matsReady = false;
 
@@ -29,6 +30,10 @@ function ensureMats(): void {
     color: 0x0066aa,
     transparent: true,
     opacity: 0.3,
+  });
+
+  wireframeMat = new THREE.LineBasicMaterial({
+    color: 0x00aaff,
   });
 
   groundMat = new THREE.MeshStandardMaterial({
@@ -217,6 +222,11 @@ export function spawnRow(
     const mat = blockMats[Math.floor(rng2() * blockMats.length)];
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(bx, bh / 2, bz);
+
+    const edgesGeo = new THREE.EdgesGeometry(geo);
+    const wireframe = new THREE.LineSegments(edgesGeo, wireframeMat);
+    mesh.add(wireframe);
+
     scene.add(mesh);
 
     if (bh > 4.0) {
@@ -269,7 +279,14 @@ export function spawnRow(
 export function destroyRow(scene: THREE.Scene, row: BlockRow): void {
   for (const b of row.blocks) {
     scene.remove(b.mesh);
-    b.mesh.geometry.dispose();
+    b.mesh.traverse((child) => {
+      if (
+        (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) &&
+        child.geometry
+      ) {
+        child.geometry.dispose();
+      }
+    });
   }
 }
 

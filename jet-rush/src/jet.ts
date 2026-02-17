@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { C } from "./config";
 
 export interface JetModel {
@@ -11,63 +12,18 @@ export function createJet(scene: THREE.Scene): JetModel {
   const group = new THREE.Group();
   const body = new THREE.Group();
 
-  const bodyMat = new THREE.MeshStandardMaterial({
+  /* Create placeholder geometry while FBX loads */
+  const placeholderMat = new THREE.MeshStandardMaterial({
     color: 0x2288ff, roughness: 0.3, metalness: 0.7,
     emissive: 0x1155cc, emissiveIntensity: 0.25,
+    transparent: true, opacity: 0,
   });
-  const accentMat = new THREE.MeshStandardMaterial({
-    color: 0x00d4ff, roughness: 0.2, metalness: 0.9,
-    emissive: 0x00aaff, emissiveIntensity: 0.6,
-  });
-  const darkMat = new THREE.MeshStandardMaterial({
-    color: 0x0a1a3a, roughness: 0.4, metalness: 0.8,
-  });
-
-  /* Fuselage */
-  const fuseGeo = new THREE.ConeGeometry(0.35, 2.8, 8);
-  fuseGeo.rotateX(Math.PI / 2);
-  body.add(new THREE.Mesh(fuseGeo, bodyMat));
-
-  /* Cockpit */
-  const cockpitGeo = new THREE.SphereGeometry(0.28, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
-  const cockpit = new THREE.Mesh(cockpitGeo, accentMat);
-  cockpit.position.set(0, 0.2, -0.3);
-  cockpit.rotation.x = -Math.PI / 6;
-  body.add(cockpit);
-
-  /* Wings */
-  const wingShape = new THREE.Shape();
-  wingShape.moveTo(0, 0);
-  wingShape.lineTo(2.2, -0.3);
-  wingShape.lineTo(2.0, 0.1);
-  wingShape.lineTo(0.3, 0.2);
-  wingShape.lineTo(0, 0);
-  const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.06, bevelEnabled: false });
-
-  const leftWing = new THREE.Mesh(wingGeo, bodyMat);
-  leftWing.position.set(0.15, -0.05, 0.2);
-  const rightWing = new THREE.Mesh(wingGeo, bodyMat);
-  rightWing.position.set(-0.15, -0.05, 0.2);
-  rightWing.rotation.y = Math.PI;
-  body.add(leftWing, rightWing);
-
-  /* Tail fin */
-  const tailFinShape = new THREE.Shape();
-  tailFinShape.moveTo(0, 0);
-  tailFinShape.lineTo(0, 0.8);
-  tailFinShape.lineTo(-0.5, 0.1);
-  tailFinShape.lineTo(0, 0);
-  const tailFin = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(tailFinShape, { depth: 0.04, bevelEnabled: false }),
-    darkMat,
+  const placeholder = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.1, 0.1),
+    placeholderMat,
   );
-  tailFin.position.set(-0.02, 0.1, 1.2);
-  body.add(tailFin);
-
-  /* Tail horizontal wings */
-  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.04, 0.4), darkMat);
-  tailWing.position.set(0, 0, 1.2);
-  body.add(tailWing);
+  placeholder.name = "placeholder";
+  body.add(placeholder);
 
   /* Engine glow */
   const glowMesh = new THREE.Mesh(
@@ -88,6 +44,63 @@ export function createJet(scene: THREE.Scene): JetModel {
   exhaust.position.set(0, 0, 2.1);
   exhaust.name = "exh";
   body.add(exhaust);
+
+  /* Load textures */
+  const textureLoader = new THREE.TextureLoader();
+  const baseTexture = textureLoader.load("assets/textures/PolygonSciFiSpace_Texture_01_A.png");
+  const emissiveTexture = textureLoader.load("assets/textures/PolygonSciFiSpace_Emissive_01.png");
+
+  /* Configure texture settings */
+  baseTexture.colorSpace = THREE.SRGBColorSpace;
+  baseTexture.flipY = false;
+  emissiveTexture.flipY = false;
+
+  /* Load FBX model */
+  const loader = new FBXLoader();
+  loader.load(
+    "assets/models/SM_Ship_Fighter_01.fbx",
+    (fbx) => {
+      console.log("[createJet] FBX loaded");
+
+      /* Apply textured material to all meshes */
+      const shipMat = new THREE.MeshStandardMaterial({
+        map: baseTexture,
+        emissiveMap: emissiveTexture,
+        emissive: 0xffffff,
+        emissiveIntensity: 2.0,
+        roughness: 0.4,
+        metalness: 0.6,
+      });
+
+      fbx.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).material = shipMat;
+        }
+      });
+
+      /* Scale and orient the model */
+      fbx.scale.setScalar(C.PLANE_SCALE);
+      fbx.rotation.set(0, Math.PI, 0);
+      fbx.position.set(0, -0.3, 0);
+      fbx.name = "shipModel";
+
+      /* Remove placeholder and add FBX */
+      const ph = body.getObjectByName("placeholder");
+      if (ph) body.remove(ph);
+      body.add(fbx);
+
+      /* Reposition glow and exhaust for new model */
+      const glow = body.getObjectByName("glow") as THREE.Mesh;
+      if (glow) glow.position.set(0, 0, 1.8);
+
+      const exh = body.getObjectByName("exh") as THREE.Mesh;
+      if (exh) exh.position.set(0, 0, 2.3);
+    },
+    undefined,
+    (err) => {
+      console.error("[createJet] FBX load error:", err);
+    },
+  );
 
   body.scale.setScalar(0.85);
   group.add(body);
