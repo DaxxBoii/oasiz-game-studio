@@ -1,4 +1,4 @@
-import * as THREE from "../node_modules/@types/three";
+import * as THREE from "three";
 import { C, type Particle } from "./config";
 
 /** Emits a single engine trail particle behind the jet. */

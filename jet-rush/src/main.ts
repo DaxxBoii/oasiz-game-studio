@@ -1,4 +1,4 @@
-import * as THREE from "../node_modules/@types/three";
+import * as THREE from "three";
 import { C, type GameState, type HapticType, type BlockRow, type Particle } from "./config";
 import { AudioManager } from "./audio";
 import { createJet, updateJetFX, type JetModel } from "./jet";
@@ -69,6 +69,7 @@ class JetRush {
     /* Build world */
     this.jet = createJet(this.scene);
     this.groundTiles = buildGround(this.scene);
+    this.spawnIdleBlocks();
 
     /* UI & Input */
     this.ui = cacheUI();
@@ -115,6 +116,14 @@ class JetRush {
     this.mobile = window.matchMedia("(pointer: coarse)").matches;
   }
 
+  /* ═══ Idle Blocks (start screen atmosphere) ═══ */
+
+  private spawnIdleBlocks(): void {
+    for (let z = 30; z > -200; z -= C.ROW_SPACING) {
+      this.rows.push(spawnRow(this.scene, z, 42));
+    }
+  }
+
   /* ═══ Start ═══ */
 
   private startGame(): void {
@@ -140,9 +149,11 @@ class JetRush {
     this.jet.group.position.set(0, C.PLANE_Y, 0);
     this.jet.body.rotation.set(0, 0, 0);
 
-    /* Pre-spawn rows */
+    /* Pre-spawn rows: safe zone near player, normal blocks ahead */
+    this.nextRowZ = 15;
     while (this.nextRowZ > -C.ROW_AHEAD) {
-      this.rows.push(spawnRow(this.scene, this.nextRowZ, this.runSeed));
+      const safe = this.nextRowZ > -40;
+      this.rows.push(spawnRow(this.scene, this.nextRowZ, this.runSeed, safe));
       this.nextRowZ -= C.ROW_SPACING;
     }
 
@@ -200,10 +211,11 @@ class JetRush {
     this.lastT = t;
     this.elapsed += dt;
 
+    updateBlockAnimations(this.rows, this.elapsed);
+
     if (this.state === "PLAYING") this.tick(dt);
     else if (this.state === "START") this.idle(dt);
 
-    updateBlockAnimations(this.rows, this.elapsed);
     this.trail = tickTrail(this.scene, this.trail, dt);
     this.explParts = tickExplosion(this.scene, this.explParts, dt);
 
@@ -215,8 +227,11 @@ class JetRush {
 
   private updateCamera(dt: number): void {
     if (this.state === "PLAYING" || this.state === "GAME_OVER") {
-      const tx = this.jet.group.position.x * 0.4;
-      const tz = this.jet.group.position.z + C.CAM_BACK;
+      const px = this.jet.group.position.x;
+      const pz = this.jet.group.position.z;
+
+      const tx = px;
+      const tz = pz + C.CAM_BACK;
 
       this.cam.position.x += (tx - this.cam.position.x) * C.CAM_SMOOTH * dt;
       this.cam.position.y +=
@@ -231,9 +246,9 @@ class JetRush {
       }
 
       this.cam.lookAt(
-        this.jet.group.position.x * 0.2,
+        px,
         C.PLANE_Y - 0.5,
-        this.jet.group.position.z - C.CAM_LOOK_AHEAD,
+        pz - C.CAM_LOOK_AHEAD,
       );
     }
   }
