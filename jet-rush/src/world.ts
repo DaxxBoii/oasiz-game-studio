@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { C, type Block, type BlockRow } from "./config";
 import { seededRandom, SimplexNoise } from "./utils";
 
@@ -7,13 +10,26 @@ import { seededRandom, SimplexNoise } from "./utils";
 const blockShades = [0x0f1e30, 0x121f33, 0x0d1a2c, 0x142236, 0x101c2e];
 let blockMats: THREE.MeshStandardMaterial[] = [];
 let blockEdgeMat: THREE.MeshBasicMaterial;
-let wireframeMat: THREE.LineBasicMaterial;
+let wireframeMats: LineMaterial[] = [];
 let groundMat: THREE.MeshStandardMaterial;
 let matsReady = false;
+
+const OUTLINE_COLORS = [
+  0x00aaff, 0x00ff88, 0xffdd00, 0xff6600, 0xff0066, 0xaa00ff, 0x0088ff, 0x88ff00,
+];
 
 function ensureMats(): void {
   if (matsReady) return;
   matsReady = true;
+
+  wireframeMats = OUTLINE_COLORS.map(
+    (c) =>
+      new LineMaterial({
+        color: c,
+        linewidth: 2,
+        resolution: new THREE.Vector2(1, 1),
+      }),
+  );
 
   blockMats = blockShades.map(
     (c) =>
@@ -30,10 +46,6 @@ function ensureMats(): void {
     color: 0x0066aa,
     transparent: true,
     opacity: 0.3,
-  });
-
-  wireframeMat = new THREE.LineBasicMaterial({
-    color: 0x00aaff,
   });
 
   groundMat = new THREE.MeshStandardMaterial({
@@ -115,6 +127,12 @@ function corridor2CenterX(z: number): number {
   return noiseCorridor2.noise2D(5.5, z * C.CORRIDOR2_WANDER_SCALE) * C.CORRIDOR2_WANDER_AMP;
 }
 
+/** Returns the primary corridor's center X at a given Z. Requires ensureNoise() first. */
+export function getCorridorCenter(z: number, runSeed: number): number {
+  ensureNoise(runSeed);
+  return corridorCenterX(z);
+}
+
 /* ── Cell data computed before mesh creation ── */
 
 interface CellData {
@@ -132,6 +150,7 @@ export function spawnRow(
   z: number,
   runSeed: number,
   safeZone: boolean = false,
+  score: number = 0,
 ): BlockRow {
   ensureMats();
   ensureNoise(runSeed);
@@ -223,8 +242,11 @@ export function spawnRow(
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(bx, bh / 2, bz);
 
+    const outlineTier = Math.floor(score / 100) % OUTLINE_COLORS.length;
     const edgesGeo = new THREE.EdgesGeometry(geo);
-    const wireframe = new THREE.LineSegments(edgesGeo, wireframeMat);
+    const lineGeo = new LineSegmentsGeometry().fromEdgesGeometry(edgesGeo);
+    edgesGeo.dispose();
+    const wireframe = new LineSegments2(lineGeo, wireframeMats[outlineTier]);
     mesh.add(wireframe);
 
     scene.add(mesh);
@@ -280,12 +302,8 @@ export function destroyRow(scene: THREE.Scene, row: BlockRow): void {
   for (const b of row.blocks) {
     scene.remove(b.mesh);
     b.mesh.traverse((child) => {
-      if (
-        (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) &&
-        child.geometry
-      ) {
-        child.geometry.dispose();
-      }
+      const obj = child as THREE.Mesh & { geometry?: THREE.BufferGeometry };
+      if (obj.geometry) obj.geometry.dispose();
     });
   }
 }

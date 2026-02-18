@@ -30,7 +30,7 @@ export function initInput(
 
   const isUI = (e: Event) =>
     !!(e.target as HTMLElement).closest(
-      ".modal-card,.icon-btn,.setting-row,.settings-list,.ctrl-btn",
+      ".modal-card,.icon-btn,.setting-row,.settings-list,.ctrl-btn,.shop-btn,.shop-container,#shopModal",
     );
 
   const handleTap = (e: Event) => {

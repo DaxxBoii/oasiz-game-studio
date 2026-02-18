@@ -50,6 +50,11 @@ export class AudioManager {
     this.tone(600, 0.06, 0.12);
   }
 
+  collect(): void {
+    this.tone(880, 0.08, 0.15);
+    this.tone(1320, 0.1, 0.10);
+  }
+
   /* ── Background music ── */
 
   private playing = false;

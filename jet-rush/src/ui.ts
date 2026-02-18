@@ -11,6 +11,10 @@ export interface UIElements {
   scoreTxt: HTMLElement;
   finalTxt: HTMLElement;
   mobCtrl: HTMLElement;
+  hudOrbs: HTMLElement;
+  orbDisplay: HTMLElement;
+  startOrbTotal: HTMLElement;
+  finalOrbs: HTMLElement;
 }
 
 /** Caches all UI DOM elements. */
@@ -24,6 +28,10 @@ export function cacheUI(): UIElements {
     scoreTxt: $("scoreDisplay"),
     finalTxt: $("finalScore"),
     mobCtrl: $("mobileControls"),
+    hudOrbs: $("hudOrbs"),
+    orbDisplay: $("orbDisplay"),
+    startOrbTotal: $("startOrbTotal"),
+    finalOrbs: $("finalOrbs"),
   };
 }
 
@@ -140,15 +148,27 @@ export function showPlaying(ui: UIElements, mobile: boolean): void {
   ui.modal.classList.add("hidden");
   ui.setBtn.classList.remove("hidden");
   ui.hud.classList.remove("hidden");
+  ui.hudOrbs.classList.remove("hidden");
   if (mobile) ui.mobCtrl.classList.remove("hidden");
   ui.scoreTxt.textContent = "0";
+  ui.orbDisplay.textContent = "0";
 }
 
-export function showGameOver(ui: UIElements, score: number): void {
+export function showGameOver(
+  ui: UIElements,
+  score: number,
+  orbsThisRun: number,
+): void {
   ui.setBtn.classList.add("hidden");
   ui.hud.classList.add("hidden");
+  ui.hudOrbs.classList.add("hidden");
   ui.mobCtrl.classList.add("hidden");
   ui.modal.classList.add("hidden");
   ui.finalTxt.textContent = String(score);
+  ui.finalOrbs.textContent = String(orbsThisRun);
   ui.overScr.classList.remove("hidden");
+}
+
+export function updateStartOrbTotal(ui: UIElements, total: number): void {
+  ui.startOrbTotal.textContent = String(total)+" Orbs";
 }

@@ -71,6 +71,17 @@ export interface BlockRow {
   blocks: Block[];
 }
 
+/* ── Collectible Data ── */
+
+export interface Collectible {
+  mesh: THREE.Group;
+  worldX: number;
+  worldZ: number;
+  collected: boolean;
+  attracting: boolean;
+  phase: number;
+}
+
 /* ── Particle Data ── */
 
 /**
@@ -236,12 +247,24 @@ export const C = {
   /** Emission rate (particles/sec) of jet trail. Use case: tune visual density vs performance cost. */
   TRAIL_RATE: 55,
 
+  /* ── Collectibles ── */
+
+  COLLECT_ATTRACT_RANGE: 16,
+  COLLECT_PICKUP_RANGE: 2.0,
+  COLLECT_ATTRACT_SPEED: 60,
+  COLLECT_CHASE_SPEED: 90,
+  COLLECT_SPAWN_INTERVAL: 45,
+  COLLECT_SPAWN_CHANCE: 0.55,
+  COLLECT_SCORE_BONUS: 5,
+  COLLECT_OFFSET_MIN: 5,
+  COLLECT_OFFSET_MAX: 8,
+
   /* ── Bloom Post-Processing ── */
 
   /** Bloom intensity/strength. Use case: higher values create more pronounced glow effect. */
-  BLOOM_STRENGTH: 1.0,
+  BLOOM_STRENGTH: 0.5,
   /** Bloom radius/spread. Use case: controls how far the glow extends from bright areas. */
-  BLOOM_RADIUS: 0.5,
+  BLOOM_RADIUS: 0.1,
   /** Bloom luminance threshold. Use case: pixels brighter than this value will bloom. Lower = more bloom. */
-  BLOOM_THRESHOLD: 0.5,
+  BLOOM_THRESHOLD: 0.9,
 } as const;

@@ -5,13 +5,16 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { C, type GameState, type HapticType, type BlockRow, type Particle } from "./config";
+import { C, type GameState, type HapticType, type BlockRow, type Particle, type Collectible } from "./config";
 import { AudioManager } from "./audio";
-import { createJet, updateJetFX, type JetModel } from "./jet";
+import { createJet, updateJetFX, loadShipFBX, type JetModel } from "./jet";
+import { Shop } from "./shop";
 import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations } from "./world";
-import { emitTrail, tickTrail, spawnExplosion, tickExplosion } from "./particles";
+import { emitTrail, tickTrail, spawnExplosion, tickExplosion, spawnCollectBurst } from "./particles";
+import { spawnCollectible, tickCollectibles, destroyCollectible } from "./collectibles";
+import { getCorridorCenter } from "./world";
 import { initInput, resetInput, type InputState } from "./input";
-import { cacheUI, loadSettings, applySettingsUI, bindSettingsUI, showPlaying, showGameOver, type UIElements } from "./ui";
+import { cacheUI, loadSettings, applySettingsUI, bindSettingsUI, showPlaying, showGameOver, updateStartOrbTotal, type UIElements } from "./ui";
 
 class JetRush {
   /* Three.js core */
@@ -28,6 +31,8 @@ class JetRush {
   private rows: BlockRow[] = [];
   private trail: Particle[] = [];
   private explParts: Particle[] = [];
+  private collectibles: Collectible[] = [];
+  private nextCollectZ = 0;
 
   /* State */
   private state: GameState = "START";
@@ -44,12 +49,15 @@ class JetRush {
   private trailT = 0;
   private runSeed = 42;
   private mobile: boolean;
+  private orbsCollected = 0;
+  private totalOrbs = 0;
 
   /* Systems */
   private input: InputState;
   private settings = loadSettings();
   private sfx = new AudioManager();
   private ui: UIElements;
+  private shop: Shop;
 
   constructor() {
     console.log("[JetRush]", "Init");
@@ -96,13 +104,25 @@ class JetRush {
 
     this.initLights();
 
+    /* Shop (needs to init before jet so we know which model to load) */
+    this.shop = new Shop(
+      () => this.totalOrbs,
+      (n) => { this.totalOrbs = n; this.saveTotalOrbs(); updateStartOrbTotal(this.ui, this.totalOrbs); },
+      (t) => this.hap(t),
+      () => this.playFX("ui"),
+      (modelPath) => loadShipFBX(this.jet.body, modelPath),
+    );
+
     /* Build world */
-    this.jet = createJet(this.scene);
+    this.jet = createJet(this.scene, this.shop.getSelectedModelPath());
     this.groundTiles = buildGround(this.scene);
     this.spawnIdleBlocks();
 
     /* UI & Input */
     this.ui = cacheUI();
+    this.totalOrbs = this.loadTotalOrbs();
+    updateStartOrbTotal(this.ui, this.totalOrbs);
+
     this.input = initInput(
       () => this.state,
       () => this.startGame(),
@@ -164,6 +184,7 @@ class JetRush {
   /* ═══ Start ═══ */
 
   private startGame(): void {
+    if (this.shop.isOpen()) return;
     console.log("[startGame]", "New run");
     this.state = "PLAYING";
     this.score = 0;
@@ -186,11 +207,16 @@ class JetRush {
     this.jet.group.position.set(0, C.PLANE_Y, 0);
     this.jet.body.rotation.set(0, 0, 0);
 
+    this.orbsCollected = 0;
+    this.nextCollectZ = -30;
+
     /* Pre-spawn rows: safe zone near player, normal blocks ahead */
     this.nextRowZ = 15;
     while (this.nextRowZ > -C.ROW_AHEAD) {
       const safe = this.nextRowZ > -40;
-      this.rows.push(spawnRow(this.scene, this.nextRowZ, this.runSeed, safe));
+      this.rows.push(
+        spawnRow(this.scene, this.nextRowZ, this.runSeed, safe, this.score),
+      );
       this.nextRowZ -= C.ROW_SPACING;
     }
 
@@ -213,15 +239,20 @@ class JetRush {
       p.mesh.geometry.dispose();
     }
     this.explParts = [];
+    for (const c of this.collectibles) destroyCollectible(this.scene, c);
+    this.collectibles = [];
   }
 
   /* ═══ Game Over ═══ */
 
   private die(): void {
-    console.log("[die]", "Score:", this.score);
+    console.log("[die]", "Score:", this.score, "Orbs:", this.orbsCollected);
     this.state = "GAME_OVER";
 
-    showGameOver(this.ui, this.score);
+    this.totalOrbs += this.orbsCollected;
+    this.saveTotalOrbs();
+
+    showGameOver(this.ui, this.score, this.orbsCollected);
     spawnExplosion(
       this.scene,
       this.jet.group.position.x,
@@ -363,7 +394,9 @@ class JetRush {
 
     /* Spawn rows ahead */
     while (this.nextRowZ > this.planeZ - C.ROW_AHEAD) {
-      this.rows.push(spawnRow(this.scene, this.nextRowZ, this.runSeed));
+      this.rows.push(
+        spawnRow(this.scene, this.nextRowZ, this.runSeed, false, this.score),
+      );
       this.nextRowZ -= C.ROW_SPACING;
     }
 
@@ -372,6 +405,56 @@ class JetRush {
     this.rows = this.rows.filter((row) => {
       if (row.z > behind) {
         destroyRow(this.scene, row);
+        return false;
+      }
+      return true;
+    });
+
+    /* Spawn collectibles ahead */
+    while (this.nextCollectZ > this.planeZ - C.ROW_AHEAD) {
+      const rng = () => Math.random();
+      if (rng() < C.COLLECT_SPAWN_CHANCE) {
+        const cx = getCorridorCenter(this.nextCollectZ, this.runSeed);
+        this.collectibles.push(
+          spawnCollectible(this.scene, this.nextCollectZ, cx, rng),
+        );
+      }
+      this.nextCollectZ -= C.COLLECT_SPAWN_INTERVAL;
+    }
+
+    /* Tick collectibles — attract & collect */
+    const picked = tickCollectibles(
+      this.collectibles,
+      this.planeX,
+      C.PLANE_Y,
+      this.planeZ,
+      dt,
+      this.elapsed,
+    );
+    if (picked > 0) {
+      this.orbsCollected += picked;
+      this.score += picked * C.COLLECT_SCORE_BONUS;
+      this.ui.orbDisplay.textContent = String(this.orbsCollected);
+      this.hap("medium");
+      this.playFX("collect");
+    }
+
+    /* Remove collected & far-behind (only if not attracting) */
+    const collectBehind = this.planeZ + C.ROW_BEHIND;
+    this.collectibles = this.collectibles.filter((c) => {
+      if (c.collected) {
+        spawnCollectBurst(
+          this.scene,
+          c.mesh.position.x,
+          c.mesh.position.y,
+          c.mesh.position.z,
+          this.explParts,
+        );
+        destroyCollectible(this.scene, c);
+        return false;
+      }
+      if (!c.attracting && c.worldZ > collectBehind) {
+        destroyCollectible(this.scene, c);
         return false;
       }
       return true;
@@ -416,16 +499,33 @@ class JetRush {
     }
   }
 
-  private playFX(kind: "ui" | "crash"): void {
+  private playFX(kind: "ui" | "crash" | "collect"): void {
     if (!this.settings.fx) return;
     if (kind === "ui") this.sfx.ui();
-    else this.sfx.crash();
+    else if (kind === "crash") this.sfx.crash();
+    else if (kind === "collect") this.sfx.collect();
   }
 
   private submitScore(): void {
     const s = Math.max(0, this.score);
     console.log("[submitScore]", s);
     if (typeof window.submitScore === "function") window.submitScore(s);
+  }
+
+  private loadTotalOrbs(): number {
+    try {
+      return parseInt(localStorage.getItem("jetRush_orbs") || "0", 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private saveTotalOrbs(): void {
+    try {
+      localStorage.setItem("jetRush_orbs", String(this.totalOrbs));
+    } catch {
+      console.log("[saveTotalOrbs]", "localStorage unavailable");
+    }
   }
 }
 

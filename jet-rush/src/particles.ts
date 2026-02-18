@@ -56,6 +56,45 @@ export function tickTrail(
   });
 }
 
+/** Spawns a small radial burst when a collectible is picked up. */
+export function spawnCollectBurst(
+  scene: THREE.Scene,
+  x: number,
+  y: number,
+  z: number,
+  particles: Particle[],
+): void {
+  for (let i = 0; i < 10; i++) {
+    const sz = 0.06 + Math.random() * 0.08;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(sz, 4, 4),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(1.5, 4, 3),
+        toneMapped: false,
+        transparent: true,
+        opacity: 0.9,
+      }),
+    );
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+
+    const ang = Math.random() * Math.PI * 2;
+    const elev = (Math.random() - 0.5) * Math.PI;
+    const spd = 4 + Math.random() * 6;
+
+    particles.push({
+      mesh,
+      life: 0.25 + Math.random() * 0.2,
+      maxLife: 0.4,
+      vel: new THREE.Vector3(
+        Math.cos(ang) * Math.cos(elev) * spd,
+        Math.sin(elev) * spd,
+        Math.sin(ang) * Math.cos(elev) * spd,
+      ),
+    });
+  }
+}
+
 /** Spawns an explosion burst of box particles. */
 export function spawnExplosion(
   scene: THREE.Scene,
