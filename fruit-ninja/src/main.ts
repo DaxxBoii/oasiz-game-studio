@@ -29,8 +29,14 @@ import watermelonUrl from "../Assets/Targets/Fruit/Normal Fruit/watermelon.png";
 import kiwiUrl from "../Assets/Targets/Fruit/Normal Fruit/kiwi.png";
 import lemonUrl from "../Assets/Targets/Fruit/Normal Fruit/lemon.png";
 import knifeUrl from "../Assets/Weapons/Normal Knif.png";
+import kunaiUrl from "../Assets/Weapons/kunai.png";
+import penUrl from "../Assets/Weapons/pen.png";
 import brokenKnife1Url from "../Assets/Weapons/broken1.png";
 import brokenKnife2Url from "../Assets/Weapons/broken2.png";
+import brokenKunai1Url from "../Assets/Weapons/broken_kunai1.png";
+import brokenKunai2Url from "../Assets/Weapons/broken_kunai2.png";
+import brokenPen1Url from "../Assets/Weapons/broken_pen1.png";
+import brokenPen2Url from "../Assets/Weapons/broken_pen2.png";
 import knifeIconUrl from "../Assets/Weapons/icon.png";
 
 // Import sound effects
@@ -158,6 +164,8 @@ interface BrokenKnifePiece {
   maxLife: number;
   // Which broken sprite to use (1 or 2)
   spriteIndex: number;
+  // Concrete image for this piece (already picked for current weapon)
+  image: HTMLImageElement | null;
 }
 
 interface Coin {
@@ -623,7 +631,17 @@ class KnifeHitGame {
   private knifeImage: HTMLImageElement | null = null;
   private brokenKnife1Image: HTMLImageElement | null = null;
   private brokenKnife2Image: HTMLImageElement | null = null;
+  private brokenKunai1Image: HTMLImageElement | null = null;
+  private brokenKunai2Image: HTMLImageElement | null = null;
+  private brokenPen1Image: HTMLImageElement | null = null;
+  private brokenPen2Image: HTMLImageElement | null = null;
   private knifeIconImage: HTMLImageElement | null = null;
+  private currentWeapon: "knife" | "kunai" | "pen" = "knife";
+  private weaponImages: { knife: HTMLImageElement | null; kunai: HTMLImageElement | null; pen: HTMLImageElement | null } = {
+    knife: null,
+    kunai: null,
+    pen: null,
+  };
   private assetsLoaded: boolean = false;
   
   // Audio
@@ -641,8 +659,10 @@ class KnifeHitGame {
   private winScreen: HTMLElement;
   private pauseScreen: HTMLElement;
   private settingsModal: HTMLElement;
+  private weaponModal: HTMLElement;
   private levelDisplay: HTMLElement;
   private coinDisplay: HTMLElement;
+  private weaponBtn: HTMLElement;
   private bottomHud: HTMLElement;
   private knifePreviewImage: HTMLImageElement;
   private flyingKnifeSprite: HTMLImageElement;
@@ -663,8 +683,10 @@ class KnifeHitGame {
     this.winScreen = document.getElementById("winScreen")!;
     this.pauseScreen = document.getElementById("pauseScreen")!;
     this.settingsModal = document.getElementById("settingsModal")!;
+    this.weaponModal = document.getElementById("weaponModal")!;
     this.levelDisplay = document.getElementById("levelDisplay")!;
     this.coinDisplay = document.getElementById("coinDisplay")!;
+    this.weaponBtn = document.getElementById("weaponBtn")!;
     this.bottomHud = document.getElementById("bottomHud")!;
     this.knifePreviewImage = document.getElementById("knifePreviewImage") as HTMLImageElement;
     this.flyingKnifeSprite = document.getElementById("flyingKnifeSprite") as HTMLImageElement;
@@ -697,7 +719,7 @@ class KnifeHitGame {
 
   private loadAssets(): void {
     let loadedCount = 0;
-    const totalAssets = 10; // 2 backgrounds + 6 fruits + 1 knife + 1 knife icon
+    const totalAssets = 18; // 2 backgrounds + 6 fruits + 3 weapons + 6 broken variants + 1 knife icon
     
     const checkAllLoaded = () => {
       loadedCount++;
@@ -781,16 +803,35 @@ class KnifeHitGame {
       checkAllLoaded();
     };
     
-    // Load knife
-    this.knifeImage = new Image();
-    this.knifeImage.src = knifeUrl;
-    this.knifeImage.onload = checkAllLoaded;
-    this.knifeImage.onerror = () => {
+    // Load all weapons
+    this.weaponImages.knife = new Image();
+    this.weaponImages.knife.src = knifeUrl;
+    this.weaponImages.knife.onload = checkAllLoaded;
+    this.weaponImages.knife.onerror = () => {
       console.warn("[KnifeHitGame] Failed to load knife");
       checkAllLoaded();
     };
     
-    // Load broken knife sprites
+    this.weaponImages.kunai = new Image();
+    this.weaponImages.kunai.src = kunaiUrl;
+    this.weaponImages.kunai.onload = checkAllLoaded;
+    this.weaponImages.kunai.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load kunai");
+      checkAllLoaded();
+    };
+    
+    this.weaponImages.pen = new Image();
+    this.weaponImages.pen.src = penUrl;
+    this.weaponImages.pen.onload = checkAllLoaded;
+    this.weaponImages.pen.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load pen");
+      checkAllLoaded();
+    };
+    
+    // Set initial weapon image based on current selection
+    this.updateWeaponImage();
+    
+    // Load broken knife sprites (for normal knife)
     this.brokenKnife1Image = new Image();
     this.brokenKnife1Image.src = brokenKnife1Url;
     this.brokenKnife1Image.onload = checkAllLoaded;
@@ -807,6 +848,40 @@ class KnifeHitGame {
       checkAllLoaded();
     };
     
+    // Load broken kunai sprites
+    this.brokenKunai1Image = new Image();
+    this.brokenKunai1Image.src = brokenKunai1Url;
+    this.brokenKunai1Image.onload = checkAllLoaded;
+    this.brokenKunai1Image.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load broken kunai 1");
+      checkAllLoaded();
+    };
+
+    this.brokenKunai2Image = new Image();
+    this.brokenKunai2Image.src = brokenKunai2Url;
+    this.brokenKunai2Image.onload = checkAllLoaded;
+    this.brokenKunai2Image.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load broken kunai 2");
+      checkAllLoaded();
+    };
+
+    // Load broken pen sprites
+    this.brokenPen1Image = new Image();
+    this.brokenPen1Image.src = brokenPen1Url;
+    this.brokenPen1Image.onload = checkAllLoaded;
+    this.brokenPen1Image.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load broken pen 1");
+      checkAllLoaded();
+    };
+
+    this.brokenPen2Image = new Image();
+    this.brokenPen2Image.src = brokenPen2Url;
+    this.brokenPen2Image.onload = checkAllLoaded;
+    this.brokenPen2Image.onerror = () => {
+      console.warn("[KnifeHitGame] Failed to load broken pen 2");
+      checkAllLoaded();
+    };
+
     // Load knife icon
     this.knifeIconImage = new Image();
     this.knifeIconImage.src = knifeIconUrl;
@@ -996,6 +1071,33 @@ class KnifeHitGame {
       this.hideSettings();
     });
     
+    // Weapon selection button
+    this.weaponBtn.addEventListener("click", () => {
+      this.triggerHaptic("light");
+      this.showWeaponModal();
+    });
+    
+    // Weapon selection modal
+    document.getElementById("closeWeaponModal")!.addEventListener("click", () => {
+      this.triggerHaptic("light");
+      this.hideWeaponModal();
+    });
+    
+    document.getElementById("selectKnife")!.addEventListener("click", () => {
+      this.triggerHaptic("light");
+      this.selectWeapon("knife");
+    });
+    
+    document.getElementById("selectKunai")!.addEventListener("click", () => {
+      this.triggerHaptic("light");
+      this.selectWeapon("kunai");
+    });
+    
+    document.getElementById("selectPen")!.addEventListener("click", () => {
+      this.triggerHaptic("light");
+      this.selectWeapon("pen");
+    });
+    
     // Input
     this.canvas.addEventListener("click", (e) => this.handleInput(e));
     this.canvas.addEventListener("touchstart", (e) => {
@@ -1056,6 +1158,47 @@ class KnifeHitGame {
     if (saved) {
       this.settings = { ...this.settings, ...JSON.parse(saved) };
     }
+    
+    // Load weapon preference
+    const weaponSaved = localStorage.getItem("knifeHitWeapon");
+    if (weaponSaved && (weaponSaved === "knife" || weaponSaved === "kunai" || weaponSaved === "pen")) {
+      this.currentWeapon = weaponSaved as "knife" | "kunai" | "pen";
+    }
+    this.updateWeaponImage();
+  }
+  
+  private saveWeapon(): void {
+    localStorage.setItem("knifeHitWeapon", this.currentWeapon);
+  }
+  
+  private updateWeaponImage(): void {
+    // Update the active weapon image
+    this.knifeImage = this.weaponImages[this.currentWeapon];
+    
+    // Update preview image
+    if (this.knifePreviewImage && this.knifeImage) {
+      this.knifePreviewImage.src = this.knifeImage.src;
+    }
+    
+    // Update weapon modal preview images
+    const previewKnife = document.getElementById("weaponPreviewKnife") as HTMLImageElement;
+    const previewKunai = document.getElementById("weaponPreviewKunai") as HTMLImageElement;
+    const previewPen = document.getElementById("weaponPreviewPen") as HTMLImageElement;
+    
+    if (previewKnife && this.weaponImages.knife) {
+      previewKnife.src = this.weaponImages.knife.src;
+    }
+    if (previewKunai && this.weaponImages.kunai) {
+      previewKunai.src = this.weaponImages.kunai.src;
+    }
+    if (previewPen && this.weaponImages.pen) {
+      previewPen.src = this.weaponImages.pen.src;
+    }
+    
+    // Update active state in modal
+    document.getElementById("selectKnife")?.classList.toggle("active", this.currentWeapon === "knife");
+    document.getElementById("selectKunai")?.classList.toggle("active", this.currentWeapon === "kunai");
+    document.getElementById("selectPen")?.classList.toggle("active", this.currentWeapon === "pen");
   }
 
   private saveSettings(): void {
@@ -1387,8 +1530,11 @@ class KnifeHitGame {
   private pause(): void {
     if (this.state === "PLAYING") {
       this.state = "PAUSED";
-      // Only show pause screen if settings modal is not visible
-      if (!this.settingsModal.classList.contains("visible")) {
+      // Only show pause screen if settings or weapon modal are not visible
+      if (
+        !this.settingsModal.classList.contains("visible") &&
+        !this.weaponModal.classList.contains("visible")
+      ) {
         this.pauseScreen.classList.remove("hidden");
       }
     }
@@ -1432,6 +1578,33 @@ class KnifeHitGame {
         this.resume();
       }
     }, 300); // Match CSS transition duration
+  }
+  
+  private showWeaponModal(): void {
+    this.weaponModal.offsetHeight; // Force reflow
+    this.weaponModal.classList.add("visible");
+    // Hide pause screen if it's showing
+    this.pauseScreen.classList.add("hidden");
+    if (this.state === "PLAYING") {
+      this.pause();
+    }
+  }
+  
+  private hideWeaponModal(): void {
+    this.weaponModal.classList.remove("visible");
+    this.pauseScreen.classList.add("hidden");
+    setTimeout(() => {
+      if (this.state === "PAUSED") {
+        this.resume();
+      }
+    }, 300);
+  }
+  
+  private selectWeapon(weapon: "knife" | "kunai" | "pen"): void {
+    this.currentWeapon = weapon;
+    this.updateWeaponImage();
+    this.saveWeapon();
+    this.hideWeaponModal();
   }
 
   private updateLevelDisplay(): void {
@@ -2814,9 +2987,32 @@ class KnifeHitGame {
   }
   
   private createBrokenKnifePieces(x: number, y: number, rotation: number): void {
-    if (!this.brokenKnife1Image || !this.brokenKnife2Image) return;
-    
+    // Choose the correct broken sprite set based on current weapon
+    let sprite1: HTMLImageElement | null = null;
+    let sprite2: HTMLImageElement | null = null;
+
+    if (this.currentWeapon === "knife") {
+      sprite1 = this.brokenKnife1Image;
+      sprite2 = this.brokenKnife2Image;
+    } else if (this.currentWeapon === "kunai") {
+      sprite1 = this.brokenKunai1Image;
+      sprite2 = this.brokenKunai2Image;
+    } else if (this.currentWeapon === "pen") {
+      sprite1 = this.brokenPen1Image;
+      sprite2 = this.brokenPen2Image;
+    }
+
+    if (!sprite1 || !sprite2) return;
+
     // Spawn exactly 2 broken pieces at the exact same position
+    // Tune base scale per weapon to keep visual balance
+    const baseScale =
+      this.currentWeapon === "knife"
+        ? 1.0 // original knife size (baseline)
+        : this.currentWeapon === "kunai"
+        ? 0.9 // slightly smaller than knife
+        : 0.1; // pen: much smaller, so it feels light and shard-like
+
     for (let i = 0; i < 2; i++) {
       const spriteIndex = i + 1; // 1 or 2
       
@@ -2831,10 +3027,11 @@ class KnifeHitGame {
         vy: 50 + Math.random() * 50, // Downward velocity
         rotation: rotation + (Math.random() - 0.5) * 0.5, // Slight rotation variation
         rotationSpeed: (Math.random() - 0.5) * 8, // Random rotation speed
-        scale: 1.0, // No scaling - use native resolution
+        scale: baseScale, // Weapon-specific base scale
         life: 2.0, // Pieces last 2 seconds
         maxLife: 2.0,
         spriteIndex: spriteIndex, // Which broken sprite to use (1 or 2)
+        image: spriteIndex === 1 ? sprite1 : sprite2,
       };
       
       this.brokenKnifePieces.push(piece);
@@ -2962,8 +3159,8 @@ class KnifeHitGame {
   
   private drawBrokenKnifePieces(): void {
     for (const piece of this.brokenKnifePieces) {
-      // Get the appropriate broken sprite
-      const brokenSprite = piece.spriteIndex === 1 ? this.brokenKnife1Image : this.brokenKnife2Image;
+      // Each piece already knows which image to use
+      const brokenSprite = piece.image;
       if (!brokenSprite) continue;
       
       const alpha = piece.life / piece.maxLife;

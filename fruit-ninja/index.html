@@ -67,6 +67,30 @@
             gap: 8px;
         }
 
+        .weapon-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            font-size: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            transition: background 0.2s, transform 0.1s;
+        }
+        
+        .weapon-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .weapon-btn:active {
+            transform: scale(0.95);
+        }
+        
         #coinDisplay {
             color: white;
             font-size: 18px;
@@ -347,6 +371,81 @@
             transform: scale(1) translateY(0);
             opacity: 1;
         }
+
+        /* Weapon Modal (same style as settings) */
+        #weaponModal {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(8px);
+            pointer-events: auto;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease-out, visibility 0.3s ease-out;
+        }
+
+        #weaponModal.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #weaponModal .settings-content {
+            transform: scale(0.8) translateY(-20px);
+            opacity: 0;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-out;
+        }
+
+        #weaponModal.visible .settings-content {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+        }
+
+        .weapon-selection {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .weapon-option {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px;
+            background: #f5f5f5;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Fredoka One', sans-serif;
+            font-size: 18px;
+        }
+
+        .weapon-option:hover {
+            background: #e8e8e8;
+            border-color: #667eea;
+        }
+
+        .weapon-option.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .weapon-preview {
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: white;
+            border-radius: 8px;
+        }
         
         .settings-close {
             position: absolute;
@@ -452,6 +551,7 @@
         <!-- HUD -->
         <div id="hud">
             <div id="hud-left">
+                <button id="weaponBtn" class="weapon-btn">⚔️</button>
                 <span id="coinDisplay">0</span>
             </div>
             <div id="hud-center">
@@ -531,6 +631,34 @@
                 <div class="settings-row">
                     <label>Haptics</label>
                     <div class="toggle-switch" id="hapticsToggle"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weapon Selection Modal -->
+        <div id="weaponModal">
+            <div class="settings-content">
+                <button class="settings-close" id="closeWeaponModal">×</button>
+                <h2 style="margin-bottom: 24px;">Select Weapon</h2>
+                <div class="weapon-selection">
+                    <button class="weapon-option" id="selectKnife">
+                        <div class="weapon-preview">
+                            <img src="" alt="Knife" id="weaponPreviewKnife" style="width: 80px; height: 80px; object-fit: contain;">
+                        </div>
+                        <span>Knife</span>
+                    </button>
+                    <button class="weapon-option" id="selectKunai">
+                        <div class="weapon-preview">
+                            <img src="" alt="Kunai" id="weaponPreviewKunai" style="width: 80px; height: 80px; object-fit: contain;">
+                        </div>
+                        <span>Kunai</span>
+                    </button>
+                    <button class="weapon-option" id="selectPen">
+                        <div class="weapon-preview">
+                            <img src="" alt="Pen" id="weaponPreviewPen" style="width: 80px; height: 80px; object-fit: contain;">
+                        </div>
+                        <span>Pen</span>
+                    </button>
                 </div>
             </div>
         </div>
