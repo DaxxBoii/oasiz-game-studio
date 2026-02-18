@@ -59,6 +59,10 @@ export interface NetworkCallbacks {
   onPlayerListReceived: (playerOrder: string[], meta?: PlayerMetaMap) => void;
   onRoundResultReceived: (payload: RoundResultPayload) => void;
   onDevModeReceived: (enabled: boolean) => void;
+  onDebugStateReceived?: (payload: {
+    enabled: boolean;
+    tainted: boolean;
+  }) => void;
   onAdvancedSettingsReceived: (payload: AdvancedSettingsSync) => void;
   onMapIdReceived: (mapId: number) => void;
   onScreenShakeReceived: (intensity: number, duration: number) => void;

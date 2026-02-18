@@ -21,6 +21,7 @@ import type {
   PlayerMeta,
   PlayerMetaMap,
 } from "./NetworkTransport";
+import { isClientDebugToolsRequested } from "../../debug/debugTools";
 
 class LocalPlayerState implements NetworkPlayerState {
   constructor(
@@ -75,6 +76,8 @@ export class LocalSharedSimTransport implements NetworkTransport {
   private playerRefs = new Map<string, LocalPlayerState>();
   private lastAdvancedSettingsSignature: string | null = null;
   private lastDevModeEnabled: boolean | null = null;
+  private lastDebugToolsEnabled: boolean | null = null;
+  private lastDebugSessionTainted: boolean | null = null;
   private lastMapId: number | null = null;
 
   setCallbacks(callbacks: NetworkCallbacks): void {
@@ -125,12 +128,14 @@ export class LocalSharedSimTransport implements NetworkTransport {
           this.callbacks?.onTransportError?.(code, message);
         },
       },
+      { debugToolsEnabled: isClientDebugToolsRequested() },
     );
 
     this.simulation.addHuman(
       this.mySessionId,
       this.readInjectedPlayerName() ?? undefined,
     );
+    this.emitDebugStateFromSimulation();
 
     this.tickInterval = setInterval(() => {
       if (!this.simulation) return;
@@ -263,11 +268,13 @@ export class LocalSharedSimTransport implements NetworkTransport {
   broadcastDevMode(enabled: boolean): void {
     if (!this.simulation || !this.mySessionId) return;
     this.simulation.setDevMode(this.mySessionId, enabled);
+    this.emitDebugStateFromSimulation();
   }
 
   requestDevPowerUp(type: PowerUpType | "SPAWN_RANDOM"): void {
     if (!this.simulation || !this.mySessionId) return;
     this.simulation.devGrantPowerUp(this.mySessionId, type);
+    this.emitDebugStateFromSimulation();
   }
 
   broadcastAdvancedSettings(payload: AdvancedSettingsSync): void {
@@ -462,6 +469,33 @@ export class LocalSharedSimTransport implements NetworkTransport {
       this.lastMapId = payload.mapId;
       this.callbacks?.onMapIdReceived(payload.mapId);
     }
+
+    if (
+      this.lastDebugToolsEnabled !== payload.debugToolsEnabled ||
+      this.lastDebugSessionTainted !== payload.debugSessionTainted
+    ) {
+      this.lastDebugToolsEnabled = payload.debugToolsEnabled;
+      this.lastDebugSessionTainted = payload.debugSessionTainted;
+      this.callbacks?.onDebugStateReceived?.({
+        enabled: payload.debugToolsEnabled,
+        tainted: payload.debugSessionTainted,
+      });
+    }
+  }
+
+  private emitDebugStateFromSimulation(): void {
+    if (!this.simulation) return;
+    const enabled = this.simulation.getDebugToolsEnabled();
+    const tainted = this.simulation.getDebugSessionTainted();
+    if (
+      this.lastDebugToolsEnabled === enabled &&
+      this.lastDebugSessionTainted === tainted
+    ) {
+      return;
+    }
+    this.lastDebugToolsEnabled = enabled;
+    this.lastDebugSessionTainted = tainted;
+    this.callbacks?.onDebugStateReceived?.({ enabled, tainted });
   }
 
   private normalizePlayerMeta(meta: PlayerListMeta): PlayerMeta {
@@ -562,6 +596,8 @@ export class LocalSharedSimTransport implements NetworkTransport {
     this.playerRefs.clear();
     this.lastAdvancedSettingsSignature = null;
     this.lastDevModeEnabled = null;
+    this.lastDebugToolsEnabled = null;
+    this.lastDebugSessionTainted = null;
     this.lastMapId = null;
   }
 

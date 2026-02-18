@@ -394,6 +394,8 @@ export function syncRoomMeta(sim: SimState): void {
     baseMode: sim.baseMode,
     settings: { ...sim.settings },
     mapId: sim.mapId,
+    debugToolsEnabled: sim.debugToolsEnabled,
+    debugSessionTainted: sim.debugSessionTainted,
   });
 }
 

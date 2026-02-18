@@ -10,6 +10,7 @@ import { createLeaveModal } from "./ui/modals";
 import { createSettingsUI } from "./ui/settings";
 import { createAdvancedSettingsUI } from "./ui/advancedSettings";
 import { createMapPreviewUI } from "./ui/mapPreview";
+import { CLIENT_DEBUG_BUILD_ENABLED } from "./debug/debugTools";
 
 // Declare platform-injected variables
 declare global {
@@ -48,41 +49,49 @@ async function init(): Promise<void> {
   const lobbyUI = createLobbyUI(game, viewport.isMobile);
   bindEndScreenUI(game);
 
+  const syncScreenToPhase = (
+    phase: GamePhase,
+    triggerPhaseEffects: boolean,
+  ): void => {
+    switch (phase) {
+      case "START":
+        screenController.showScreen("start");
+        startUI.resetStartButtons();
+        break;
+      case "LOBBY":
+        screenController.showScreen("lobby");
+        lobbyUI.updateRoomCode(game.getRoomCode());
+        lobbyUI.updateMapSelector();
+        mapPreviewUI.updateMapPreview();
+        screenController.resetEndScreenButtons();
+        break;
+      case "COUNTDOWN":
+      case "PLAYING":
+        screenController.showScreen("game");
+        screenController.setRoundResultVisible(false);
+        screenController.updateControlHints();
+        break;
+      case "ROUND_END":
+        screenController.showScreen("game");
+        screenController.updateRoundResultOverlay();
+        screenController.setRoundResultVisible(true);
+        screenController.updateControlHints();
+        break;
+      case "GAME_END":
+        screenController.showScreen("end");
+        screenController.updateGameEnd(game.getPlayers());
+        if (triggerPhaseEffects) {
+          triggerHaptic("success");
+        }
+        screenController.updateControlHints();
+        break;
+    }
+  };
+
   game.setUICallbacks({
     onPhaseChange: (phase: GamePhase) => {
       console.log("[Main] Phase changed:", phase);
-
-      switch (phase) {
-        case "START":
-          screenController.showScreen("start");
-          startUI.resetStartButtons();
-          break;
-        case "LOBBY":
-          screenController.showScreen("lobby");
-          lobbyUI.updateRoomCode(game.getRoomCode());
-          lobbyUI.updateMapSelector();
-          mapPreviewUI.updateMapPreview();
-          screenController.resetEndScreenButtons();
-          break;
-        case "COUNTDOWN":
-        case "PLAYING":
-          screenController.showScreen("game");
-          screenController.setRoundResultVisible(false);
-          screenController.updateControlHints();
-          break;
-        case "ROUND_END":
-          screenController.showScreen("game");
-          screenController.updateRoundResultOverlay();
-          screenController.setRoundResultVisible(true);
-          screenController.updateControlHints();
-          break;
-        case "GAME_END":
-          screenController.showScreen("end");
-          screenController.updateGameEnd(game.getPlayers());
-          triggerHaptic("success");
-          screenController.updateControlHints();
-          break;
-      }
+      syncScreenToPhase(phase, true);
     },
 
     onPlayersUpdate: (players: PlayerData[]) => {
@@ -134,6 +143,17 @@ async function init(): Promise<void> {
   settingsUI.updateSettingsUI();
   advancedSettingsUI.updateAdvancedSettingsUI();
   screenController.showScreen("start");
+
+  if (CLIENT_DEBUG_BUILD_ENABLED) {
+    const { mountDebugPanel } = await import("./debug/debugPanel");
+    mountDebugPanel({
+      game,
+      screenController,
+      restoreLiveUi: () => {
+        syncScreenToPhase(game.getPhase(), false);
+      },
+    });
+  }
 
   game.start();
 

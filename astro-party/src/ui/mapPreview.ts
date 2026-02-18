@@ -273,4 +273,3 @@ export function createMapPreviewUI(game: Game): MapPreviewUI {
 
   return { updateMapPreview };
 }
-

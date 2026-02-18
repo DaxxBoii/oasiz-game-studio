@@ -31,4 +31,6 @@ export class AstroPartyRoomState extends Schema {
   @type("number") roundResultRevision = 0;
   @type("number") countdown = 0;
   @type("boolean") devModeEnabled = false;
+  @type("boolean") debugToolsEnabled = false;
+  @type("boolean") debugSessionTainted = false;
 }

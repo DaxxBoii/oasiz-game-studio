@@ -24,6 +24,7 @@ import {
   PlayerData,
   PlayerInput,
   PlayerPowerUp,
+  PowerUpType,
   RoundResultPayload,
   AdvancedSettings,
   AdvancedSettingsSync,
@@ -40,6 +41,7 @@ import {
   isScoreSubmissionEligibleBotType,
   shouldSubmitScoreToPlatform,
 } from "../shared/sim/scoring.js";
+import { isClientDebugToolsRequested } from "./debug/debugTools";
 
 export class Game {
   private renderer: Renderer;
@@ -73,6 +75,10 @@ export class Game {
   private roundResult: RoundResultPayload | null = null;
   private finalScoreSubmittedForMatch = false;
   private lobbyHasEligibleScoreBot = false;
+  private readonly debugToolsRequested = isClientDebugToolsRequested();
+  private debugToolsEnabledForRoom = false;
+  private debugSessionTainted = false;
+  private devKeyInputRequestedByUI = false;
   private advancedSettings: AdvancedSettings = {
     ...DEFAULT_ADVANCED_SETTINGS,
   };
@@ -355,6 +361,10 @@ export class Game {
         this.setDevModeFromNetwork(enabled);
       },
 
+      onDebugStateReceived: ({ enabled, tainted }) => {
+        this.applyDebugStateFromNetwork(enabled, tainted);
+      },
+
       onAdvancedSettingsReceived: (payload) => {
         this.applyModeStateFromNetwork(payload);
       },
@@ -411,6 +421,13 @@ export class Game {
           );
           return;
         }
+        if (code === "DEBUG_TOOLS_DISABLED") {
+          this._onSystemMessage?.(
+            "Debug tools are disabled for this room",
+            3500,
+          );
+          return;
+        }
         if (code === "INVALID_CODE") {
           this._onSystemMessage?.("Enter a valid room code", 3000);
           return;
@@ -450,6 +467,9 @@ export class Game {
     this.network.startSync();
     this.finalScoreSubmittedForMatch = false;
     this.lobbyHasEligibleScoreBot = false;
+    this.debugToolsEnabledForRoom = false;
+    this.debugSessionTainted = false;
+    this.applyDevKeyInputGate();
     if (!this.network.isSimulationAuthority()) {
       this.network.resyncPlayerListFromState("session-init", true);
     }
@@ -505,6 +525,9 @@ export class Game {
     this._originalHostLeft = false;
     this.finalScoreSubmittedForMatch = false;
     this.lobbyHasEligibleScoreBot = false;
+    this.debugToolsEnabledForRoom = false;
+    this.debugSessionTainted = false;
+    this.applyDevKeyInputGate();
     this.resetAdvancedSettings();
     this.selectedMapId = 0;
     this.flowMgr.setPhase("START");
@@ -647,6 +670,7 @@ export class Game {
   }
 
   private processDevPowerUpRequests(): void {
+    if (!this.canUseDebugToolsInCurrentSession()) return;
     const devKeys = this.input.consumeDevKeys();
     const myPlayerId = this.network.getMyPlayerId();
     if (!myPlayerId) return;
@@ -665,7 +689,10 @@ export class Game {
     if (!this.botMgr.useTouchForHost) return;
     if (!this.multiInput?.consumeDash(0)) return;
 
-    if (this.flowMgr.phase !== "COUNTDOWN" && this.flowMgr.phase !== "PLAYING") {
+    if (
+      this.flowMgr.phase !== "COUNTDOWN" &&
+      this.flowMgr.phase !== "PLAYING"
+    ) {
       return;
     }
 
@@ -845,7 +872,10 @@ export class Game {
       const networkMeta = meta.get(playerId);
       if (!networkMeta) continue;
 
-      if (Number.isFinite(networkMeta.kills) && networkMeta.kills !== player.kills) {
+      if (
+        Number.isFinite(networkMeta.kills) &&
+        networkMeta.kills !== player.kills
+      ) {
         player.kills = networkMeta.kills as number;
         changed = true;
       }
@@ -856,7 +886,10 @@ export class Game {
         player.roundWins = networkMeta.roundWins as number;
         changed = true;
       }
-      if (Number.isFinite(networkMeta.score) && networkMeta.score !== player.score) {
+      if (
+        Number.isFinite(networkMeta.score) &&
+        networkMeta.score !== player.score
+      ) {
         player.score = networkMeta.score as number;
         changed = true;
       }
@@ -884,7 +917,9 @@ export class Game {
     const playerIds = this.network.getPlayerIds();
     return playerIds.some((playerId) => {
       if (!this.network.isPlayerBot(playerId)) return false;
-      return isScoreSubmissionEligibleBotType(this.network.getPlayerBotType(playerId));
+      return isScoreSubmissionEligibleBotType(
+        this.network.getPlayerBotType(playerId),
+      );
     });
   }
 
@@ -1201,6 +1236,9 @@ export class Game {
 
   setSessionMode(mode: "online" | "local"): void {
     this.network.setTransportMode(mode);
+    this.debugToolsEnabledForRoom = false;
+    this.debugSessionTainted = false;
+    this.applyDevKeyInputGate();
   }
 
   getSessionMode(): "online" | "local" {
@@ -1304,10 +1342,15 @@ export class Game {
   }
 
   setDevKeysEnabled(enabled: boolean): void {
-    this.input.setDevKeysEnabled(enabled);
+    this.devKeyInputRequestedByUI = enabled;
+    this.applyDevKeyInputGate();
   }
 
   toggleDevMode(): boolean {
+    if (!this.canUseDebugToolsInCurrentSession()) {
+      this._onSystemMessage?.("Debug tools are disabled", 2500);
+      return this.input.isDevModeEnabled();
+    }
     const newState = this.input.toggleDevMode();
     this.renderer.setDevMode(newState);
 
@@ -1327,6 +1370,27 @@ export class Game {
     console.log("[Game] Dev mode synced from network:", enabled ? "ON" : "OFF");
   }
 
+  requestDebugPowerUp(type: PowerUpType | "SPAWN_RANDOM"): boolean {
+    if (!this.canUseDebugToolsInCurrentSession()) {
+      this._onSystemMessage?.("Debug tools are disabled", 2500);
+      return false;
+    }
+    this.network.requestDevPowerUp(type);
+    return true;
+  }
+
+  getDebugStatus(): {
+    buildEnabled: boolean;
+    roomEnabled: boolean;
+    sessionTainted: boolean;
+  } {
+    return {
+      buildEnabled: this.debugToolsRequested,
+      roomEnabled: this.debugToolsEnabledForRoom,
+      sessionTainted: this.debugSessionTainted,
+    };
+  }
+
   private submitFinalScoreFromAuthoritativeState(): void {
     if (this.network.isSimulationAuthority()) return;
     if (this.finalScoreSubmittedForMatch) return;
@@ -1335,12 +1399,25 @@ export class Game {
     if (!myId) return;
 
     const hasEligibleLobbyBot =
-      this.lobbyHasEligibleScoreBot || this.hasEligibleScoreBotInCurrentRoster();
-    if (!shouldSubmitScoreToPlatform(hasEligibleLobbyBot)) {
-      if (!this.lobbyHasEligibleScoreBot && this.network.getPlayerCount() <= 0) {
+      this.lobbyHasEligibleScoreBot ||
+      this.hasEligibleScoreBotInCurrentRoster();
+    if (
+      !shouldSubmitScoreToPlatform(
+        hasEligibleLobbyBot,
+        this.debugSessionTainted,
+      )
+    ) {
+      if (
+        !this.lobbyHasEligibleScoreBot &&
+        this.network.getPlayerCount() <= 0
+      ) {
         return;
       }
-      console.log("[Game] Score submission skipped by policy");
+      if (this.debugSessionTainted) {
+        console.log("[Game] Score submission skipped: debug-tainted session");
+      } else {
+        console.log("[Game] Score submission skipped by policy");
+      }
       this.finalScoreSubmittedForMatch = true;
       return;
     }
@@ -1380,5 +1457,25 @@ export class Game {
     this.lastTransportErrorCode = null;
     this.lastTransportErrorMessage = null;
     return message;
+  }
+
+  private canUseDebugToolsInCurrentSession(): boolean {
+    return this.debugToolsRequested && this.debugToolsEnabledForRoom;
+  }
+
+  private applyDevKeyInputGate(): void {
+    this.input.setDevKeysEnabled(
+      this.devKeyInputRequestedByUI && this.canUseDebugToolsInCurrentSession(),
+    );
+  }
+
+  private applyDebugStateFromNetwork(enabled: boolean, tainted: boolean): void {
+    this.debugToolsEnabledForRoom = enabled;
+    const wasTainted = this.debugSessionTainted;
+    this.debugSessionTainted = tainted;
+    this.applyDevKeyInputGate();
+    if (this.debugSessionTainted && !wasTainted) {
+      console.log("[Game] Score submission disabled for debug-tainted session");
+    }
   }
 }

@@ -257,6 +257,10 @@ interface RuntimeYellowBlock {
   maxHp: number;
 }
 
+interface SimulationOptions {
+  debugToolsEnabled?: boolean;
+}
+
 export class AstroPartySimulation implements SimState {
   // ---- Entity collections ----
   players = new Map<string, RuntimePlayer>();
@@ -283,6 +287,8 @@ export class AstroPartySimulation implements SimState {
   mapId: MapId = 0;
   rotationDirection = 1;
   devModeEnabled = false;
+  debugToolsEnabled = false;
+  debugSessionTainted = false;
   currentRound = 1;
   screenShakeIntensity = 0;
   screenShakeDuration = 0;
@@ -327,7 +333,9 @@ export class AstroPartySimulation implements SimState {
     private maxPlayers: number,
     public readonly tickDurationMs: number,
     public readonly hooks: Hooks,
+    options: SimulationOptions = {},
   ) {
+    this.debugToolsEnabled = Boolean(options.debugToolsEnabled);
     this.physics = new Physics();
     this.reseed(Math.floor(Date.now()) >>> 0);
     this.physics.createWalls(
@@ -639,14 +647,32 @@ export class AstroPartySimulation implements SimState {
   }
 
   setDevMode(sessionId: string, enabled: boolean): void {
+    if (!this.debugToolsEnabled) {
+      this.hooks.onError(
+        sessionId,
+        "DEBUG_TOOLS_DISABLED",
+        "Debug tools are disabled for this room",
+      );
+      return;
+    }
     if (!this.ensureLeader(sessionId)) return;
+    this.markDebugSessionTainted();
     this.devModeEnabled = Boolean(enabled);
     this.hooks.onDevMode(this.devModeEnabled);
   }
 
   devGrantPowerUp(sessionId: string, type: PowerUpType | "SPAWN_RANDOM"): void {
+    if (!this.debugToolsEnabled) {
+      this.hooks.onError(
+        sessionId,
+        "DEBUG_TOOLS_DISABLED",
+        "Debug tools are disabled for this room",
+      );
+      return;
+    }
     const player = this.getHuman(sessionId);
     if (!player) return;
+    this.markDebugSessionTainted();
     if (!this.devModeEnabled) {
       this.hooks.onError(sessionId, "DEV_MODE_REQUIRED", "Enable dev mode first");
       return;
@@ -668,6 +694,12 @@ export class AstroPartySimulation implements SimState {
     }
 
     this.grantPowerUp(player.id, type);
+  }
+
+  private markDebugSessionTainted(): void {
+    if (this.debugSessionTainted) return;
+    this.debugSessionTainted = true;
+    syncRoomMeta(this);
   }
 
   removeBot(sessionId: string, playerId: string): void {
@@ -793,6 +825,14 @@ export class AstroPartySimulation implements SimState {
 
   getDevModeEnabled(): boolean {
     return this.devModeEnabled;
+  }
+
+  getDebugToolsEnabled(): boolean {
+    return this.debugToolsEnabled;
+  }
+
+  getDebugSessionTainted(): boolean {
+    return this.debugSessionTainted;
   }
 
   // ============= SimState interface methods =============

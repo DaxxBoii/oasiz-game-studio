@@ -267,7 +267,7 @@ export function createScreenController(
       elements.playAgainBtn.disabled = false;
     } else {
       elements.playAgainBtn.style.display = "block";
-      elements.playAgainBtn.textContent = "Waiting for leader...";
+      elements.playAgainBtn.textContent = "Waiting for leader";
       elements.playAgainBtn.disabled = true;
     }
 
@@ -308,7 +308,7 @@ export function bindEndScreenUI(game: Game): void {
       elements.playAgainBtn.textContent = "Restarting...";
       await game.restartGame();
     } else {
-      elements.playAgainBtn.textContent = "Waiting for leader...";
+      elements.playAgainBtn.textContent = "Waiting for leader";
       elements.playAgainBtn.disabled = true;
     }
   });

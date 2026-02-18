@@ -79,6 +79,7 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
     const maxPlayers = options.maxPlayers ?? 4;
     const simTickHz = options.simTickHz ?? 60;
     const tickDurationMs = 1000 / simTickHz;
+    const debugToolsEnabled = true;
     this.snapshotHzLobby = this.parseSnapshotHz(
       process.env.SNAPSHOT_HZ_LOBBY,
       12,
@@ -88,6 +89,7 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
     this.maxClients = maxPlayers;
     this.setState(new AstroPartyRoomState());
     this.state.roomCode = roomCode;
+    this.state.debugToolsEnabled = debugToolsEnabled;
 
     this.simulation = new AstroPartySimulation(
       roomCode,
@@ -163,6 +165,7 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
           }
         },
       },
+      { debugToolsEnabled },
     );
 
     this.setSimulationInterval((deltaMs) => {
@@ -345,6 +348,8 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
     this.state.mode = payload.mode;
     this.state.baseMode = payload.baseMode;
     this.state.mapId = payload.mapId;
+    this.state.debugToolsEnabled = payload.debugToolsEnabled;
+    this.state.debugSessionTainted = payload.debugSessionTainted;
     this.state.settingsJson = JSON.stringify(payload.settings);
   }
 

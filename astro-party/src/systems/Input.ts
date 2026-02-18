@@ -265,13 +265,14 @@ export class InputManager {
   }
 
   private handleDevKeyDown(code: string): boolean {
-    // Dev mode toggle works regardless of devKeysEnabled
+    if (!this.devKeysEnabled) return false;
+
+    // Dev mode toggle shares same gate as other debug controls
     if (code === "Digit0") {
       this.toggleDevMode();
       return true;
     }
 
-    if (!this.devKeysEnabled) return false;
     switch (code) {
       case "Digit1":
         this.devPowerUpKeys.laser = true;

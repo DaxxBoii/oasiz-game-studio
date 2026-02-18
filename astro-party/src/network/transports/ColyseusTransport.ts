@@ -72,6 +72,8 @@ interface RoomStateView {
   roundResultRevision?: number;
   countdown?: number;
   devModeEnabled?: boolean;
+  debugToolsEnabled?: boolean;
+  debugSessionTainted?: boolean;
 }
 
 interface PlayerListPayload {
@@ -130,6 +132,8 @@ export class ColyseusTransport implements NetworkTransport {
   private lastPlayerListSignature: string | null = null;
   private lastAdvancedSettingsSignature: string | null = null;
   private lastDevModeEnabled: boolean | null = null;
+  private lastDebugToolsEnabled: boolean | null = null;
+  private lastDebugSessionTainted: boolean | null = null;
   private lastMapId: number | null = null;
   private lastPhase: GamePhase | null = null;
   private lastCountdown: number | null = null;
@@ -679,6 +683,12 @@ export class ColyseusTransport implements NetworkTransport {
       trackUnsubscriber(
         root.listen("devModeEnabled", () => triggerStateRefresh()),
       );
+      trackUnsubscriber(
+        root.listen("debugToolsEnabled", () => triggerStateRefresh()),
+      );
+      trackUnsubscriber(
+        root.listen("debugSessionTainted", () => triggerStateRefresh()),
+      );
     }
 
     if (root.playerOrder) {
@@ -777,6 +787,7 @@ export class ColyseusTransport implements NetworkTransport {
     this.applyAdvancedSettingsFromState(state);
     this.applyMapFromState(state);
     this.applyDevModeFromState(state);
+    this.applyDebugStateFromState(state);
 
     const order = this.toStringArray(state.playerOrder);
     const meta = this.extractPlayerMetaList(state.players);
@@ -823,6 +834,26 @@ export class ColyseusTransport implements NetworkTransport {
     if (this.lastDevModeEnabled === state.devModeEnabled) return;
     this.lastDevModeEnabled = state.devModeEnabled;
     this.callbacks?.onDevModeReceived(state.devModeEnabled);
+  }
+
+  private applyDebugStateFromState(state: RoomStateView): void {
+    const enabled =
+      typeof state.debugToolsEnabled === "boolean"
+        ? state.debugToolsEnabled
+        : false;
+    const tainted =
+      typeof state.debugSessionTainted === "boolean"
+        ? state.debugSessionTainted
+        : false;
+    if (
+      this.lastDebugToolsEnabled === enabled &&
+      this.lastDebugSessionTainted === tainted
+    ) {
+      return;
+    }
+    this.lastDebugToolsEnabled = enabled;
+    this.lastDebugSessionTainted = tainted;
+    this.callbacks?.onDebugStateReceived?.({ enabled, tainted });
   }
 
   private applyMapFromState(state: RoomStateView): void {
@@ -1073,6 +1104,8 @@ export class ColyseusTransport implements NetworkTransport {
     this.lastPlayerListSignature = null;
     this.lastAdvancedSettingsSignature = null;
     this.lastDevModeEnabled = null;
+    this.lastDebugToolsEnabled = null;
+    this.lastDebugSessionTainted = null;
     this.lastMapId = null;
     this.lastPhase = null;
     this.lastCountdown = null;

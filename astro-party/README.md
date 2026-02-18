@@ -53,8 +53,21 @@ Start from `.env.example`.
 
 - `VITE_MATCH_HTTP_URL`: matchmaking HTTP base URL
 - `VITE_COLYSEUS_WS_URL`: Colyseus websocket base URL
+- `VITE_QA_DEBUG_TOOLS`: set to `true` to compile QA debug panel/tools into non-dev builds
 
 If unset, the client falls back to `window.location` with port `2567`.
+
+## QA/Debug panel (mobile + desktop)
+
+- The in-game QA debug sheet is compiled only when:
+  - `import.meta.env.DEV` is true, or
+  - `VITE_QA_DEBUG_TOOLS=true`
+- It provides quick preview actions for UI validation without full match flow:
+  - `Start`, `Lobby`, `Game HUD`, `Round End Mock`, `Match End Mock`, `Live`
+  - Dev helpers: `Toggle Dev Viz` and power-up grant shortcuts
+- In production builds without `VITE_QA_DEBUG_TOOLS=true`, this panel is not compiled.
+- Server does not require env toggles for debug command acceptance.
+- Any server-accepted debug action taints the session and blocks score submission to platform APIs.
 
 ## Runtime/platform integration
 

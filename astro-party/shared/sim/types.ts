@@ -245,6 +245,8 @@ export interface RoomMetaPayload {
   baseMode: BaseGameMode;
   settings: AdvancedSettings;
   mapId: MapId;
+  debugToolsEnabled: boolean;
+  debugSessionTainted: boolean;
 }
 
 export interface AsteroidColliderSync {
@@ -431,6 +433,8 @@ export interface SimState {
   mapId: MapId;
   rotationDirection: number;
   devModeEnabled: boolean;
+  debugToolsEnabled: boolean;
+  debugSessionTainted: boolean;
   currentRound: number;
   screenShakeIntensity: number;
   screenShakeDuration: number;

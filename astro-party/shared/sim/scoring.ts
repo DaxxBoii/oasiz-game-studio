@@ -11,6 +11,7 @@ interface ScoreRulesConfig {
   submission: {
     requireEligibleBotInLobby: boolean;
     eligibleBotTypes: ScoreEligibleBotType[];
+    blockWhenDebugSessionTainted: boolean;
   };
 }
 
@@ -25,6 +26,7 @@ export const SCORE_RULES: ScoreRulesConfig = {
   submission: {
     requireEligibleBotInLobby: true,
     eligibleBotTypes: ["ai"],
+    blockWhenDebugSessionTainted: true,
   },
 };
 
@@ -43,7 +45,14 @@ export function isScoreSubmissionEligibleBotType(
 
 export function shouldSubmitScoreToPlatform(
   hasEligibleBotInLobby: boolean,
+  debugSessionTainted: boolean = false,
 ): boolean {
+  if (
+    SCORE_RULES.submission.blockWhenDebugSessionTainted &&
+    debugSessionTainted
+  ) {
+    return false;
+  }
   if (!SCORE_RULES.submission.requireEligibleBotInLobby) return true;
   return hasEligibleBotInLobby;
 }

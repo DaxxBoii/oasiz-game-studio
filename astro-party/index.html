@@ -183,6 +183,21 @@
       margin: 0;
     }
 
+    /* Shared sizing contract for grouped action buttons */
+    .start-actions .btn,
+    .join-section .btn-group .btn,
+    .lobby-bottombar .btn,
+    .end-actions .btn,
+    .settings-actions .btn,
+    #leaveModal .leave-actions .btn {
+      min-height: clamp(50px, 7vh, 62px);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 1.05;
+    }
+
     .start-helper {
       font-size: 0.85rem;
       color: rgba(255, 255, 255, 0.5);
@@ -910,6 +925,10 @@
       margin: 0;
     }
 
+    .settings-actions .settings-close {
+      margin-top: 0 !important;
+    }
+
     #settingsLeaveBtn {
       margin: 0;
       padding: 0.75rem 1rem;
@@ -1038,7 +1057,8 @@
     }
 
     #leaveModal .leave-actions {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1rem;
     }
 
@@ -1814,16 +1834,25 @@
 
     .end-actions {
       width: 100%;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      align-items: stretch;
     }
 
     .end-actions .btn {
       flex: 1;
       margin: 0;
+      font-size: clamp(0.86rem, 2vw, 1.03rem);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     html[data-layout="narrow"] .end-actions {
-      flex-direction: column;
-      align-items: stretch;
+      grid-template-columns: 1fr;
+      gap: 10px;
     }
 
     @media (pointer: coarse) {
@@ -2113,6 +2142,15 @@
         font-size: 0.72rem;
       }
 
+      .start-actions .btn,
+      .join-section .btn-group .btn,
+      .lobby-bottombar .btn,
+      .end-actions .btn,
+      .settings-actions .btn,
+      #leaveModal .leave-actions .btn {
+        min-height: 46px;
+      }
+
       .settings-modal {
         width: min(360px, calc(min(var(--box-width), var(--box-height)) - 24px));
         min-width: min(280px, calc(min(var(--box-width), var(--box-height)) - 24px));
@@ -2135,7 +2173,7 @@
         font-size: 0.9rem;
       }
 
-      .settings-close {
+      .advanced-settings-modal .settings-close {
         margin-top: 0.6rem;
       }
 
