@@ -150,7 +150,7 @@ const MAP_4_BUNKERS: MapDefinition = {
   yellowBlocks: [],
   centerHoles: [],
   repulsionZones: [],
-  overlayBoxes: generateBunkerBoxes(),
+  overlayBoxes: [],
   asteroidConfig: { enabled: true, minCount: 5, maxCount: 5, greyRatio: 0.4 },
   hasTurret: false,
 };
@@ -222,68 +222,6 @@ function generateCacheBlocks(): YellowBlock[] {
   }
 
   return blocks;
-}
-
-function generateBunkerBoxes(): OverlayBox[] {
-  const boxW = 260;
-  const boxH = 200;
-  const marginX = 150;
-  const marginY = 145;
-
-  const topLeft: OverlayBox = {
-    x: marginX,
-    y: marginY,
-    width: boxW,
-    height: boxH,
-    holes: [
-      { x: boxW * 0.3, y: boxH * 0.5, radius: 20 },
-      { x: boxW * 0.7, y: boxH * 0.7, radius: 15 },
-    ],
-  };
-  const topRight: OverlayBox = {
-    x: W - marginX - boxW,
-    y: marginY,
-    width: boxW,
-    height: boxH,
-    holes: [
-      { x: boxW * 0.5, y: boxH * 0.4, radius: 18 },
-      { x: boxW * 0.2, y: boxH * 0.8, radius: 16 },
-    ],
-  };
-  const bottomLeft: OverlayBox = {
-    x: marginX,
-    y: H - marginY - boxH,
-    width: boxW,
-    height: boxH,
-    holes: [
-      { x: boxW * 0.6, y: boxH * 0.3, radius: 17 },
-      { x: boxW * 0.3, y: boxH * 0.6, radius: 20 },
-    ],
-  };
-  const bottomRight: OverlayBox = {
-    x: W - marginX - boxW,
-    y: H - marginY - boxH,
-    width: boxW,
-    height: boxH,
-    holes: [
-      { x: boxW * 0.4, y: boxH * 0.5, radius: 19 },
-      { x: boxW * 0.8, y: boxH * 0.3, radius: 14 },
-    ],
-  };
-
-  const pipeWidth = Math.max(50, Math.round(boxW * 0.22));
-  const pipeX = topLeft.x + boxW * 0.5 - pipeWidth / 2;
-  const pipeY = topLeft.y + boxH;
-  const pipeHeight = bottomLeft.y - pipeY;
-  const leftPipe: OverlayBox = {
-    x: pipeX,
-    y: pipeY,
-    width: pipeWidth,
-    height: pipeHeight,
-    holes: [],
-  };
-
-  return [topLeft, topRight, bottomLeft, bottomRight, leftPipe];
 }
 
 export const MAP_DEFINITIONS: Record<MapId, MapDefinition> = {

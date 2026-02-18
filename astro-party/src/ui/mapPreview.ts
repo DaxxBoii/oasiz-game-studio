@@ -1,5 +1,6 @@
 import { Game } from "../Game";
 import { MapId } from "../types";
+import { getMapOverlayUrl } from "../assets/mapOverlayAssets";
 import { elements } from "./elements";
 import { getMapDefinition, type MapDefinition } from "../../shared/sim/maps.js";
 import {
@@ -10,6 +11,7 @@ import {
 
 const MIN_PREVIEW_WIDTH = 73;
 const MIN_PREVIEW_HEIGHT = 55;
+const mapOverlayPreviewCache = new Map<MapId, HTMLImageElement>();
 
 const colors = {
   yellowBlock: "#fbbf24",
@@ -17,8 +19,6 @@ const colors = {
   centerHoleBorder: "#374151",
   repulsionZone: "rgba(59, 130, 246, 0.3)",
   repulsionZoneBorder: "rgba(59, 130, 246, 0.6)",
-  overlayBox: "rgba(75, 85, 99, 0.5)",
-  overlayBoxBorder: "rgba(107, 114, 128, 0.8)",
   turret: "#ef4444",
   grid: "rgba(255, 255, 255, 0.05)",
 };
@@ -157,30 +157,29 @@ export function renderMapPreviewOnCanvas(
     }
   }
 
-  function drawOverlayBoxes(boxes: MapDefinition["overlayBoxes"]): void {
-    context.fillStyle = colors.overlayBox;
-    context.strokeStyle = colors.overlayBoxBorder;
-    context.lineWidth = 1;
-
-    for (const box of boxes) {
-      const x = scaleX(box.x);
-      const y = scaleY(box.y);
-      const w = scaleX(box.x + box.width) - x;
-      const h = scaleY(box.y + box.height) - y;
-      context.fillRect(x, y, w, h);
-      context.strokeRect(x, y, w, h);
-
-      context.fillStyle = "rgba(0, 0, 0, 0.5)";
-      for (const hole of box.holes) {
-        const hx = x + (hole.x / box.width) * w;
-        const hy = y + (hole.y / box.height) * h;
-        const hr = scaleSize(hole.radius);
-        context.beginPath();
-        context.arc(hx, hy, hr, 0, Math.PI * 2);
-        context.fill();
-      }
-      context.fillStyle = colors.overlayBox;
+  function drawOverlayAsset(): boolean {
+    const overlayUrl = getMapOverlayUrl(mapId);
+    if (!overlayUrl) {
+      return false;
     }
+
+    let image = mapOverlayPreviewCache.get(mapId);
+    if (!image) {
+      image = new Image();
+      image.decoding = "async";
+      image.onload = () => {
+        renderMapPreviewOnCanvas(canvas, mapId);
+      };
+      image.src = overlayUrl;
+      mapOverlayPreviewCache.set(mapId, image);
+    }
+
+    if (!image.complete || image.naturalWidth <= 0) {
+      return false;
+    }
+
+    context.drawImage(image, 0, 0, getCanvasWidth(), getCanvasHeight());
+    return true;
   }
 
   function drawAsteroidConfig(config: MapDefinition["asteroidConfig"]): void {
@@ -295,7 +294,7 @@ export function renderMapPreviewOnCanvas(
     drawGrid();
     drawRepulsionZones(map.repulsionZones);
     drawCenterHoles(map.centerHoles);
-    drawOverlayBoxes(map.overlayBoxes);
+    drawOverlayAsset();
     drawYellowBlocks(map.yellowBlocks);
     drawAsteroidConfig(map.asteroidConfig);
     drawTurret(map.hasTurret);

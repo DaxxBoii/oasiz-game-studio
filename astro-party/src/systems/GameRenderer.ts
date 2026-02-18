@@ -211,8 +211,8 @@ export class GameRenderer {
         });
       }
 
-      for (const box of map.overlayBoxes) {
-        this.renderer.drawOverlayBox(box, mapTheme.overlay);
+      if (this.renderer.hasMapOverlay(ctx.mapId)) {
+        this.renderer.drawMapOverlay(ctx.mapId);
       }
 
       this.renderer.drawParticles();
@@ -313,7 +313,6 @@ export class GameRenderer {
       arrow: string;
       glow: string;
     };
-    overlay?: { fill: string; stroke: string; hole: string };
   } {
     switch (mapId) {
       case 1:
@@ -347,11 +346,6 @@ export class GameRenderer {
       case 4:
         return {
           border: "#00ff88",
-          overlay: {
-            fill: "#0bb866",
-            stroke: "#7cffb8",
-            hole: "transparent",
-          },
         };
       case 0:
       default:

@@ -11,14 +11,15 @@ import {
   PlayerColor,
   PLAYER_COLORS,
   GAME_CONFIG,
+  MapId,
 } from "../types";
 import { SeededRNG } from "./SeededRNG";
 import { EntitySpriteStore } from "./EntitySpriteStore";
+import { MapOverlayStore } from "./MapOverlayStore";
 import type {
   YellowBlock,
   CenterHole,
   RepulsionZone,
-  OverlayBox,
 } from "../../shared/sim/maps";
 
 export class Renderer {
@@ -37,6 +38,7 @@ export class Renderer {
   private offsetX: number = 0;
   private offsetY: number = 0;
   private entitySprites = new EntitySpriteStore();
+  private mapOverlays = new MapOverlayStore();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -1822,41 +1824,12 @@ export class Renderer {
     ctx.restore();
   }
 
-  drawOverlayBox(
-    box: OverlayBox,
-    theme?: { fill: string; stroke: string; hole: string },
-  ): void {
-    const { ctx } = this;
-    ctx.save();
+  hasMapOverlay(mapId: MapId): boolean {
+    return this.mapOverlays.hasOverlay(mapId);
+  }
 
-    const fillColor = theme?.fill ?? "rgba(20, 25, 40, 0.85)";
-    const strokeColor = theme?.stroke ?? "rgba(100, 120, 160, 0.6)";
-    const holeStrokeColor = theme?.hole ?? "rgba(100, 120, 160, 0.4)";
-
-    ctx.beginPath();
-    ctx.rect(box.x, box.y, box.width, box.height);
-    for (const hole of box.holes) {
-      ctx.moveTo(box.x + hole.x + hole.radius, box.y + hole.y);
-      ctx.arc(box.x + hole.x, box.y + hole.y, hole.radius, 0, Math.PI * 2);
-    }
-    ctx.fillStyle = fillColor;
-    ctx.fill("evenodd");
-
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(box.x, box.y, box.width, box.height);
-
-    if (holeStrokeColor !== "transparent") {
-      ctx.strokeStyle = holeStrokeColor;
-      ctx.lineWidth = 1;
-      for (const hole of box.holes) {
-        ctx.beginPath();
-        ctx.arc(box.x + hole.x, box.y + hole.y, hole.radius, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
+  drawMapOverlay(mapId: MapId): void {
+    this.mapOverlays.drawMapOverlay(this.ctx, mapId);
   }
 
   // ============= UI ELEMENTS =============
