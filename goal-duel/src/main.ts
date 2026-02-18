@@ -1040,6 +1040,13 @@ class GoalDuelGame {
   private elImgMenuBtn = document.getElementById("imgMenuBtn") as HTMLImageElement;
   private elImgSettingsBtn = document.getElementById("imgSettingsBtn") as HTMLImageElement;
 
+  // Debug panel
+  private elDebugPanel = document.getElementById("debugPanel") as HTMLDivElement;
+  private elDebugContent = document.getElementById("debugContent") as HTMLDivElement;
+  private elDebugClearBtn = document.getElementById("debugClearBtn") as HTMLButtonElement;
+  private debugLogs: Array<{ time: number; level: string; message: string }> = [];
+  private maxDebugLogs = 100;
+
   private carNames = ["blue", "brown", "cyan", "dark blue", "green", "purple", "red", "yellow"];
   private selectedCarIndex = 0;
   private playerCarName = "blue";
@@ -1098,9 +1105,28 @@ class GoalDuelGame {
 
   constructor() {
     this.canvas = document.getElementById("game") as HTMLCanvasElement;
+    if (!this.canvas) {
+      this.debugLog("error", "Canvas element not found!");
+      throw new Error("Canvas element not found");
+    }
+    
     const c = this.canvas.getContext("2d");
-    if (!c) throw new Error("2D context not available");
+    if (!c) {
+      this.debugLog("error", "2D context not available");
+      throw new Error("2D context not available");
+    }
     this.ctx = c;
+    
+    // Initialize debug panel
+    if (this.elDebugContent) {
+      this.debugLog("info", "Debug panel initialized");
+    } else {
+      console.warn("[GoalDuelGame] Debug panel elements not found");
+    }
+    
+    // Log canvas context info
+    const dpr = window.devicePixelRatio || 1;
+    this.debugLog("info", `Canvas initialized: ${this.canvas.width}x${this.canvas.height}, DPR=${dpr}, context=${this.ctx ? "OK" : "FAIL"}`);
 
     this.settings = this.loadSettings();
     this.audio = new AudioManager(this.settings);
@@ -1261,17 +1287,21 @@ class GoalDuelGame {
     if (this.elImgSettingsBtn) this.elImgSettingsBtn.src = urlSettings;
     // Panel backgrounds removed - using fog overlay instead
     this.stadiumBg.onerror = () => {
+      this.debugLog("error", `Failed to load stadium background image: ${urlGameBg}`);
       console.error("[Game] Failed to load stadium background");
     };
     this.stadiumBg.onload = () => {
+      this.debugLog("info", `Stadium BG loaded: ${this.stadiumBg.naturalWidth}x${this.stadiumBg.naturalHeight}`);
       console.log("[Game] Loaded stadium background");
     };
     this.stadiumBg.src = urlGameBg;
     
     this.goalImage.onerror = () => {
+      this.debugLog("error", `Failed to load goal image: ${urlGoal}`);
       console.error("[Game] Failed to load goal image");
     };
     this.goalImage.onload = () => {
+      this.debugLog("info", `Goal image loaded: ${this.goalImage.naturalWidth}x${this.goalImage.naturalHeight}`);
       console.log("[Game] Loaded goal image");
     };
     this.goalImage.src = urlGoal;
@@ -1644,6 +1674,11 @@ class GoalDuelGame {
         tap();
         this.showSettings(false);
       }
+    });
+
+    this.elDebugClearBtn?.addEventListener("click", () => {
+      this.clearDebugLogs();
+      this.debugLog("info", "Debug logs cleared");
     });
 
     this.elBtnCloseInfo.addEventListener("click", () => {
@@ -2439,6 +2474,7 @@ class GoalDuelGame {
   }
 
   private buildWorld(): void {
+    this.debugLog("info", "Building world...");
     Composite.clear(this.world, false);
 
     // Field bounds in world units
@@ -3262,9 +3298,13 @@ class GoalDuelGame {
     const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const oldW = this.canvas.width;
+    const oldH = this.canvas.height;
     this.canvas.width = Math.floor(w * dpr);
     this.canvas.height = Math.floor(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    
+    this.debugLog("info", `Resize: ${w}x${h}, DPR=${dpr.toFixed(2)}, canvas=${this.canvas.width}x${this.canvas.height} (was ${oldW}x${oldH})`);
     
     // Update mobile controls visibility on resize
     this.updateMobileControlsVisibility();
@@ -3848,6 +3888,11 @@ class GoalDuelGame {
 
   private update(dt: number): void {
     if (this.state === "MENU") return;
+    
+    // Debug: log update cycle occasionally
+    if (Math.random() < 0.01) { // ~1% of frames
+      this.debugLog("info", `Update: state=${this.state}, dt=${dt.toFixed(4)}, zoom=${this.currentZoom.toFixed(2)}`);
+    }
     
     // During countdown: allow car controls (revving) but prevent movement and ball physics
     if (this.countdownActive) {
@@ -4482,6 +4527,22 @@ class GoalDuelGame {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
+    // Debug: check for canvas context issues (iOS can lose context)
+    if (!ctx) {
+      this.debugLog("error", "Canvas context is null!");
+      return;
+    }
+    
+    // Debug: check canvas size issues
+    if (this.canvas.width === 0 || this.canvas.height === 0) {
+      this.debugLog("error", `Canvas has zero size: ${this.canvas.width}x${this.canvas.height}`);
+    }
+
+    // Debug: log render info occasionally
+    if (Math.random() < 0.01) { // ~1% of frames
+      this.debugLog("render", `Render: ${w}x${h}, canvas=${this.canvas.width}x${this.canvas.height}, state=${this.state}, DPR=${window.devicePixelRatio || 1}`);
+    }
+
     ctx.clearRect(0, 0, w, h);
 
     // Gameplay camera (dynamic zoom view)
@@ -4535,6 +4596,10 @@ class GoalDuelGame {
       ctx.shadowBlur = 30;
       ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
       
+      // Debug: log goal image drawing
+      if (Math.random() < 0.1) {
+        this.debugLog("render", `drawGoalImage: ${imgW}x${imgH}, display=${displayW}x${displayH}, scale=${scale}`);
+      }
       ctx.drawImage(
         this.goalImage,
         -displayW * 0.5,
@@ -4573,6 +4638,9 @@ class GoalDuelGame {
   private drawStadiumBG(ctx: CanvasRenderingContext2D): void {
     // Fallback if image hasn't loaded yet
     if (!this.stadiumBg || this.stadiumBg.naturalWidth === 0 || this.stadiumBg.naturalHeight === 0) {
+      if (Math.random() < 0.05) { // Log occasionally
+        this.debugLog("warn", `StadiumBG: image not loaded (w=${this.stadiumBg?.naturalWidth || 0}, h=${this.stadiumBg?.naturalHeight || 0})`);
+      }
       // Use fixed size for fallback, not the adjustable bounds
       const w = 720;
       const h = 1200;
@@ -4869,6 +4937,12 @@ class GoalDuelGame {
   }
 
   private drawBodies(ctx: CanvasRenderingContext2D): void {
+    // Debug: check if bodies exist
+    if (!this.ball || !this.playerCar || !this.botCar) {
+      this.debugLog("error", `drawBodies: Missing bodies (ball=${!!this.ball}, playerCar=${!!this.playerCar}, botCar=${!!this.botCar})`);
+      return;
+    }
+    
     // Ball
     const b = this.ball;
     const spriteSize = this.settings.ballSpriteSize;
@@ -4970,6 +5044,10 @@ class GoalDuelGame {
       ctx.fill();
       ctx.globalAlpha = 1;
 
+      // Debug: log drawImage calls occasionally
+      if (Math.random() < 0.01) {
+        this.debugLog("render", `drawCarSprite: ${carName}, img=${img.naturalWidth}x${img.naturalHeight}, draw=${desiredW}x${desiredH}`);
+      }
       ctx.drawImage(img, -desiredW * 0.5, -desiredH * 0.5, desiredW, desiredH);
       
       // Draw collision bounds visualization (if enabled)
@@ -5107,7 +5185,10 @@ class GoalDuelGame {
   // Removed: sparks + screen FX (background art already includes the vibe)
 
   private loop(ts: number): void {
-    if (!this.lastTs) this.lastTs = ts;
+    if (!this.lastTs) {
+      this.lastTs = ts;
+      this.debugLog("info", "Game loop started");
+    }
     const dt = clamp((ts - this.lastTs) / 1000, 0, 1 / 30);
     this.lastTs = ts;
 
@@ -5115,10 +5196,66 @@ class GoalDuelGame {
       this.update(dt);
       this.render();
     } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      this.debugLog("error", `Loop error: ${errorMsg}`);
       console.warn("[GoalDuelGame.loop] error", e);
     }
 
     requestAnimationFrame((t) => this.loop(t));
+  }
+
+  // Debug logging methods
+  private debugLog(level: string, message: string): void {
+    const time = performance.now();
+    this.debugLogs.push({ time, level, message });
+    
+    // Keep only last N logs
+    if (this.debugLogs.length > this.maxDebugLogs) {
+      this.debugLogs.shift();
+    }
+    
+    // Also log to console
+    const consoleMethod = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+    consoleMethod(`[GoalDuelGame.${level.toUpperCase()}]`, message);
+    
+    // Update UI
+    this.updateDebugPanel();
+  }
+
+  private updateDebugPanel(): void {
+    if (!this.elDebugContent) return;
+    
+    // Clear and rebuild
+    this.elDebugContent.innerHTML = "";
+    
+    // Show last 50 logs (most recent at bottom)
+    const logsToShow = this.debugLogs.slice(-50);
+    
+    for (const log of logsToShow) {
+      const div = document.createElement("div");
+      div.className = `debugLog ${log.level}`;
+      
+      const timestamp = new Date(log.time).toLocaleTimeString("en-US", { 
+        hour12: false, 
+        hour: "2-digit", 
+        minute: "2-digit", 
+        second: "2-digit",
+        fractionalSecondDigits: 3
+      });
+      
+      div.innerHTML = `<span class="debugLogTimestamp">${timestamp}</span>${log.message}`;
+      this.elDebugContent.appendChild(div);
+    }
+    
+    // Auto-scroll to bottom
+    this.elDebugContent.scrollTop = this.elDebugContent.scrollHeight;
+  }
+
+  private clearDebugLogs(): void {
+    this.debugLogs = [];
+    if (this.elDebugContent) {
+      this.elDebugContent.innerHTML = "";
+    }
   }
 }
 

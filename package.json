@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "upload": "bun scripts/upload.ts"
+    "upload": "bun upload.ts"
   }
 }
 
