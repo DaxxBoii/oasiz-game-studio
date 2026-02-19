@@ -331,12 +331,16 @@ bun run upload your-game-name
 bun run upload your-game-name horizontal   # Landscape-friendly (verticalOnly=false)
 bun run upload your-game-name vertical     # Portrait-locked (verticalOnly=true, default)
 
+# Upload as a new game (ignores existing gameId in publish.json):
+bun run upload your-game-name new
+
 # Other options:
 bun run upload your-game-name --skip-build  # Use existing dist/
 bun run upload your-game-name --dry-run     # Test without uploading
 
 # Combine options:
 bun run upload your-game-name horizontal --skip-build
+bun run upload your-game-name new --skip-build
 
 # List all available games
 bun run upload --list
