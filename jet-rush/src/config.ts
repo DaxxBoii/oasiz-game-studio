@@ -118,9 +118,9 @@ export const C = {
   /** Fixed plane altitude. Use case: all obstacle safety and collision height logic references this baseline. */
   PLANE_Y: 10.0,
   /** Scale multiplier for the plane model. Use case: resize ship model to fit game proportions. */
-  PLANE_SCALE: 0.005,
+  PLANE_SCALE: 0.003,
   /** Plane collision radius used for front/back and vertical checks. Use case: make hits more forgiving/strict. */
-  PLANE_HIT_R: 0.85,
+  PLANE_HIT_R: 0.60,
   /** Half-width of plane collision body. Use case: lateral overlap checks against block width. */
   PLANE_HIT_HALF_W: 1.0,
 
@@ -139,7 +139,7 @@ export const C = {
   /** Camera follow offset behind the plane on Z axis. Use case: change how much upcoming path is visible. */
   CAM_BACK: 10,
   /** Camera height above world. Use case: control top-down vs behind-the-plane perspective feel. */
-  CAM_UP: 12,
+  CAM_UP: 15,
   /** Look-at distance in front of camera target. Use case: stabilize horizon focus ahead of motion. */
   CAM_LOOK_AHEAD: 20,
   /** Camera interpolation strength. Use case: smoother or snappier chase camera movement. */
@@ -258,6 +258,11 @@ export const C = {
   COLLECT_SCORE_BONUS: 5,
   COLLECT_OFFSET_MIN: 5,
   COLLECT_OFFSET_MAX: 8,
+
+  /* ── Shield ── */
+
+  /** Radius of the invincibility shield sphere. Use case: tune visual size of the hex force field around the jet. */
+  SHIELD_RADIUS: 2,
 
   /* ── Bloom Post-Processing ── */
 

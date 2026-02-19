@@ -40,24 +40,6 @@ export function createJet(scene: THREE.Scene, modelPath?: string): JetModel {
   placeholder.name = "placeholder";
   body.add(placeholder);
 
-  const glowMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.85 }),
-  );
-  glowMesh.position.set(0, 0, 1.5);
-  glowMesh.name = "glow";
-  body.add(glowMesh);
-
-  const exhaustGeo = new THREE.ConeGeometry(0.16, 1.0, 8);
-  exhaustGeo.rotateX(-Math.PI / 2);
-  const exhaust = new THREE.Mesh(
-    exhaustGeo,
-    new THREE.MeshBasicMaterial({ color: 0x0066ff, transparent: true, opacity: 0.35 }),
-  );
-  exhaust.position.set(0, 0, 2.1);
-  exhaust.name = "exh";
-  body.add(exhaust);
-
   loadShipFBX(body, modelPath || "assets/models/SM_Ship_Fighter_01.fbx");
 
   body.scale.setScalar(0.85);
@@ -109,12 +91,6 @@ export function loadShipFBX(body: THREE.Group, modelPath: string): void {
       const ph = body.getObjectByName("placeholder");
       if (ph) body.remove(ph);
       body.add(fbx);
-
-      const glow = body.getObjectByName("glow") as THREE.Mesh;
-      if (glow) glow.position.set(0, 0, 1.8);
-
-      const exh = body.getObjectByName("exh") as THREE.Mesh;
-      if (exh) exh.position.set(0, 0, 2.3);
     },
     undefined,
     (err) => console.error("[loadShipFBX] Error:", err),

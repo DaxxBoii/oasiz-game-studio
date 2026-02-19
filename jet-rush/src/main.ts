@@ -9,8 +9,8 @@ import { C, type GameState, type HapticType, type BlockRow, type Particle, type 
 import { AudioManager } from "./audio";
 import { createJet, updateJetFX, loadShipFBX, type JetModel } from "./jet";
 import { Shop } from "./shop";
-import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations, updateWireframeColors } from "./world";
-import { emitTrail, tickTrail, spawnExplosion, tickExplosion, spawnCollectBurst } from "./particles";
+import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations } from "./world";
+import { spawnExplosion, tickExplosion, spawnCollectBurst } from "./particles";
 import { spawnCollectible, tickCollectibles, destroyCollectible } from "./collectibles";
 import { getCorridorCenter } from "./world";
 import { initInput, resetInput, type InputState } from "./input";
@@ -29,8 +29,10 @@ class JetRush {
   private jet: JetModel;
   private groundTiles: THREE.Group[];
   private rows: BlockRow[] = [];
-  private trail: Particle[] = [];
   private explParts: Particle[] = [];
+  private trailPositions: THREE.Vector3[] = [];
+  private trailMesh: THREE.Mesh | null = null;
+  private readonly PLAY_TRAIL_MAX = 30;
   private collectibles: Collectible[] = [];
   private nextCollectZ = 0;
 
@@ -46,11 +48,16 @@ class JetRush {
   private lastT = 0;
   private nextRowZ = 0;
   private shake = 0;
-  private trailT = 0;
+  private trailTimer = 0;
   private runSeed = 42;
   private mobile: boolean;
   private orbsCollected = 0;
   private totalOrbs = 0;
+
+  /* Invincibility */
+  private invincible = false;
+  private invincibleTimer = 0;
+  private shieldMesh: THREE.Mesh | null = null;
 
   /* Systems */
   private input: InputState;
@@ -198,7 +205,7 @@ class JetRush {
     this.elapsed = 0;
     this.lastT = 0;
     this.shake = 0;
-    this.trailT = 0;
+    this.trailTimer = 0;
     this.runSeed = Math.floor(Math.random() * 100000);
     this.nextRowZ = -40;
     this.idleZ = 0;
@@ -224,7 +231,9 @@ class JetRush {
       this.nextRowZ -= C.ROW_SPACING;
     }
 
-    showPlaying(this.ui, this.mobile);
+    this.activateShield();
+
+    showPlaying(this.ui);
     if (this.settings.music) this.sfx.musicOn();
     this.hap("light");
     this.playFX("ui");
@@ -233,11 +242,8 @@ class JetRush {
   private clearAll(): void {
     for (const row of this.rows) destroyRow(this.scene, row);
     this.rows = [];
-    for (const p of this.trail) {
-      this.scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-    }
-    this.trail = [];
+    this.cleanupPlayTrail();
+    this.deactivateShield();
     for (const p of this.explParts) {
       this.scene.remove(p.mesh);
       p.mesh.geometry.dispose();
@@ -284,12 +290,10 @@ class JetRush {
     this.elapsed += dt;
 
     updateBlockAnimations(this.rows, this.elapsed);
-    updateWireframeColors(this.rows, this.elapsed);
 
     if (this.state === "PLAYING") this.tick(dt);
     else if (this.state === "START") this.idle(dt);
 
-    this.trail = tickTrail(this.scene, this.trail, dt);
     this.explParts = tickExplosion(this.scene, this.explParts, dt);
 
     this.updateCamera(dt);
@@ -359,9 +363,6 @@ class JetRush {
     const idleBank = THREE.MathUtils.clamp((this.idleXTarget - this.idleX) * -0.09, -0.35, 0.35);
     this.jet.body.rotation.z += (idleBank - this.jet.body.rotation.z) * Math.min(1, dt * 5);
     this.jet.body.rotation.x = 0;
-
-    const glow = this.jet.body.getObjectByName("glow") as THREE.Mesh;
-    if (glow) glow.scale.setScalar(1 + Math.sin(this.elapsed * 4) * 0.2);
 
     updateJetFX(this.jet.body, this.elapsed);
 
@@ -460,6 +461,72 @@ class JetRush {
     this.idleTrailPositions = [];
   }
 
+  /* ═══ Gameplay Ribbon Trail ═══ */
+
+  private updatePlayTrail(): void {
+    if (this.trailPositions.length < 2) return;
+
+    if (this.trailMesh) {
+      this.scene.remove(this.trailMesh);
+      this.trailMesh.geometry.dispose();
+    }
+
+    const pts = this.trailPositions;
+    const count = pts.length;
+    const verts: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+
+    const trailYOffset = -0.5;
+    for (let i = 0; i < count; i++) {
+      const t = i / (count - 1);
+      const width = t * 0.2;
+      const p = pts[i];
+      const y = p.y + trailYOffset;
+
+      verts.push(p.x - width, y, p.z);
+      verts.push(p.x + width, y, p.z);
+
+      const alpha = t * t;
+      const r = 0.0;
+      const g = 0.55 + t * 0.25;
+      const b = 1.0;
+      colors.push(r, g, b, alpha * 0.55);
+      colors.push(r, g, b, alpha * 0.55);
+
+      if (i < count - 1) {
+        const bi = i * 2;
+        indices.push(bi, bi + 1, bi + 2);
+        indices.push(bi + 1, bi + 3, bi + 2);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+    geo.setIndex(indices);
+
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    this.trailMesh = new THREE.Mesh(geo, mat);
+    this.scene.add(this.trailMesh);
+  }
+
+  private cleanupPlayTrail(): void {
+    if (this.trailMesh) {
+      this.scene.remove(this.trailMesh);
+      this.trailMesh.geometry.dispose();
+      this.trailMesh = null;
+    }
+    this.trailPositions = [];
+  }
+
   /* ═══ Game Tick ═══ */
 
   private tick(dt: number): void {
@@ -499,11 +566,15 @@ class JetRush {
     updateJetFX(this.jet.body, this.elapsed);
 
     /* Trail */
-    this.trailT += dt;
-    if (this.trailT > 1 / C.TRAIL_RATE) {
-      this.trailT = 0;
-      emitTrail(this.scene, this.jet.group.position, this.trail);
+    this.trailTimer += dt;
+    if (this.trailTimer > 0.016) {
+      this.trailTimer = 0;
+      this.trailPositions.push(this.jet.group.position.clone());
+      if (this.trailPositions.length > this.PLAY_TRAIL_MAX) {
+        this.trailPositions.shift();
+      }
     }
+    this.updatePlayTrail();
 
     /* Recycle ground */
     recycleGround(this.groundTiles, this.planeZ);
@@ -576,6 +647,25 @@ class JetRush {
       return true;
     });
 
+    /* Invincibility countdown & shield animation */
+    if (this.invincible) {
+      this.invincibleTimer -= dt;
+      if (this.invincibleTimer <= 0) {
+        this.deactivateShield();
+      } else if (this.shieldMesh) {
+        this.shieldMesh.rotation.y += dt * 0.5;
+        this.shieldMesh.rotation.x += dt * 0.3;
+        const mat = this.shieldMesh.material as THREE.MeshBasicMaterial;
+        const pulse = 0.45 + Math.sin(this.elapsed * 4) * 0.15;
+        if (this.invincibleTimer < 2) {
+          const blink = Math.sin(this.elapsed * 14) > 0 ? 1.0 : 0.15;
+          mat.opacity = pulse * blink;
+        } else {
+          mat.opacity = pulse;
+        }
+      }
+    }
+
     /* Collision detection */
     if (this.checkCollisions()) return;
 
@@ -585,6 +675,8 @@ class JetRush {
   /* ═══ Collision ═══ */
 
   private checkCollisions(): boolean {
+    if (this.invincible) return false;
+
     for (const row of this.rows) {
       if (Math.abs(row.z - this.planeZ) > 5) continue;
 
@@ -605,6 +697,48 @@ class JetRush {
       }
     }
     return false;
+  }
+
+  /* ═══ Invincibility Shield ═══ */
+
+  private createShieldMesh(): THREE.Mesh {
+    const geo = new THREE.IcosahedronGeometry(C.SHIELD_RADIUS, 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0, 1.8, 3.0),
+      wireframe: true,
+      transparent: true,
+      opacity: 0.5,
+      toneMapped: false,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = "shield";
+    return mesh;
+  }
+
+  private activateShield(): void {
+    this.invincible = true;
+    this.invincibleTimer = 5;
+
+    if (!this.shieldMesh) {
+      this.shieldMesh = this.createShieldMesh();
+    }
+    this.shieldMesh.visible = true;
+    this.shieldMesh.rotation.set(0, 0, 0);
+    (this.shieldMesh.material as THREE.MeshBasicMaterial).opacity = 0.5;
+
+    if (!this.jet.group.children.includes(this.shieldMesh)) {
+      this.jet.group.add(this.shieldMesh);
+    }
+  }
+
+  private deactivateShield(): void {
+    this.invincible = false;
+    this.invincibleTimer = 0;
+    if (this.shieldMesh) {
+      this.shieldMesh.visible = false;
+    }
   }
 
   /* ═══ Helpers ═══ */

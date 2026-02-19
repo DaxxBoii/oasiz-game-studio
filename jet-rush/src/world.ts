@@ -344,18 +344,3 @@ export function updateBlockAnimations(rows: BlockRow[], elapsed: number): void {
   }
 }
 
-/** Cycles world wireframe outline colors at fixed time intervals. */
-export function updateWireframeColors(rows: BlockRow[], elapsed: number): void {
-  const outlineTier = Math.floor(elapsed / 5) % OUTLINE_COLORS.length;
-  const targetMaterial = wireframeMats[outlineTier];
-
-  for (const row of rows) {
-    for (const b of row.blocks) {
-      const wireframe = b.mesh.getObjectByName("wireframeOutline") as LineSegments2 | null;
-      if (!wireframe) continue;
-      if (wireframe.material !== targetMaterial) {
-        wireframe.material = targetMaterial;
-      }
-    }
-  }
-}

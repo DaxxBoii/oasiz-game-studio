@@ -142,14 +142,13 @@ export function bindSettingsUI(
 
 /* ── Screen transitions ── */
 
-export function showPlaying(ui: UIElements, mobile: boolean): void {
+export function showPlaying(ui: UIElements): void {
   ui.startScr.classList.add("hidden");
   ui.overScr.classList.add("hidden");
   ui.modal.classList.add("hidden");
   ui.setBtn.classList.remove("hidden");
   ui.hud.classList.remove("hidden");
   ui.hudOrbs.classList.remove("hidden");
-  if (mobile) ui.mobCtrl.classList.remove("hidden");
   ui.scoreTxt.textContent = "0";
   ui.orbDisplay.textContent = "0";
 }
