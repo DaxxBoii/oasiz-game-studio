@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,container-queries"></script>
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;display=swap" rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <style type="text/tailwindcss">
+        :root {
+            --neon-green: #39ff14;
+            --neon-purple: #bc13fe;
+            --neon-red: #ff3939;
+            --terminal-bg: #0a0a0f;
+            --panel-border: #2d2d3a;
+            --scanline-color: rgba(18, 16, 16, 0.1);
+        }
+        body {
+            background-color: var(--terminal-bg);
+            background-image: linear-gradient(var(--scanline-color) 50%, transparent 50%);
+            background-size: 100% 4px;
+            color: var(--neon-green);
+            font-family: 'Press Start 2P', cursive;
+            image-rendering: pixels;
+        }
+        .crt-frame {
+            border: 20px solid #1a1a1a;
+            border-style: outset;
+            box-shadow: 
+                0 0 0 4px #333,
+                inset 0 0 100px rgba(0,0,0,0.8);
+            background: #0d0d12;
+        }
+        .terminal-header {
+            border-bottom: 4px double var(--neon-green);
+            text-shadow: 0 0 8px var(--neon-green);
+        }
+        .module-card {
+            border: 2px solid var(--neon-purple);
+            background: rgba(188, 19, 254, 0.05);
+            box-shadow: inset 0 0 15px rgba(188, 19, 254, 0.1);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .module-card:hover {
+            background: rgba(188, 19, 254, 0.1);
+            border-color: var(--neon-green);
+            box-shadow: 0 0 10px rgba(57, 255, 20, 0.2);
+            transform: scale(1.02);
+        }
+        .action-button {
+            border: 2px solid var(--neon-green);
+            background: transparent;
+            color: var(--neon-green);
+            box-shadow: 0 0 5px var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+            transition: all 0.2s;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        .action-button:hover {
+            background: var(--neon-green);
+            color: black;
+            box-shadow: 0 0 15px var(--neon-green);
+        }
+        .status-panel {
+            border: 2px solid var(--panel-border);
+            background: #050505;
+        }
+        .material-symbols-outlined {
+            font-size: 24px;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app" class="relative w-full h-full">
+        <div id="game-container" class="absolute inset-0"></div>
+
+        <!-- UI Layer -->
+        <div id="ui-layer">
+
+            <!-- Main Menu -->
+            <div id="main-menu"
+                class="pointer-events-auto w-full h-full flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-[150]">
+                <div
+                    class="crt-frame p-12 max-w-3xl w-full text-center relative overflow-hidden border-[var(--neon-green)] shadow-[0_0_50px_rgba(57,255,20,0.1)]">
+                    <div
+                        class="absolute top-0 left-0 w-full h-2 bg-[var(--neon-green)] shadow-[0_0_20px_var(--neon-green)]">
+                    </div>
+
+                    <h1 class="text-5xl md:text-6xl mb-4 terminal-header text-[var(--neon-green)] animate-pulse tracking-tighter"
+                        style="text-shadow: 4px 4px 0px #bc13fe;">
+                        NEON PUSH
+                    </h1>
+
+                    <div class="flex justify-center items-center gap-4 mb-12 text-[10px] tracking-widest opacity-70">
+                        <span class="text-[var(--neon-purple)]">SYS_VER 3.0.1</span>
+                        <span class="w-1 h-1 bg-white rounded-full"></span>
+                        <span class="text-[var(--neon-green)]">ONLINE</span>
+                    </div>
+
+                    <div class="flex flex-col items-center gap-6">
+                        <button id="btn-start-game"
+                            class="action-button py-6 px-12 text-xl flex items-center justify-center gap-3 group relative overflow-hidden bg-black hover:bg-[var(--neon-green)] hover:text-black transition-all duration-300">
+                            <span
+                                class="absolute inset-0 bg-[var(--neon-green)] opacity-0 group-hover:opacity-20 transition-opacity"></span>
+                            <span
+                                class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">rocket_launch</span>
+                            INITIATE // START
+                        </button>
+                    </div>
+
+                    <div class="mt-16 grid grid-cols-3 gap-8 max-w-md mx-auto">
+                        <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting group"
+                            data-setting="music">
+                            <div
+                                class="w-12 h-12 border border-[var(--panel-border)] group-hover:border-[var(--neon-green)] flex items-center justify-center rounded transition-colors bg-black">
+                                <span class="material-symbols-outlined text-[var(--neon-green)]"
+                                    id="icon-music-main">music_note</span>
+                            </div>
+                            <span class="text-[8px] opacity-60 group-hover:opacity-100">AUDIO_1</span>
+                        </div>
+                        <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting group"
+                            data-setting="sfx">
+                            <div
+                                class="w-12 h-12 border border-[var(--panel-border)] group-hover:border-[var(--neon-green)] flex items-center justify-center rounded transition-colors bg-black">
+                                <span class="material-symbols-outlined text-[var(--neon-green)]"
+                                    id="icon-sfx-main">volume_up</span>
+                            </div>
+                            <span class="text-[8px] opacity-60 group-hover:opacity-100">AUDIO_2</span>
+                        </div>
+                        <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting group"
+                            data-setting="haptic">
+                            <div
+                                class="w-12 h-12 border border-[var(--panel-border)] group-hover:border-[var(--neon-green)] flex items-center justify-center rounded transition-colors bg-black">
+                                <span class="material-symbols-outlined text-[var(--neon-green)]"
+                                    id="icon-haptic-main">vibration</span>
+                            </div>
+                            <span class="text-[8px] opacity-60 group-hover:opacity-100">HAPTICS</span>
+                        </div>
+                    </div>
+
+
+                </div>
+            </div>
+
+            <!-- HUD Layer -->
+            <div id="hud" class="absolute top-[50px] right-0 p-6 pointer-events-auto z-50">
+                <button id="btn-pause"
+                    class="w-12 h-12 flex items-center justify-center border-2 border-[var(--neon-green)] bg-black/50 text-[var(--neon-green)] hover:bg-[var(--neon-green)] hover:text-black transition-all shadow-[0_0_10px_rgba(57,255,20,0.3)] pointer-events-auto">
+                    <span class="material-symbols-outlined">pause</span>
+                </button>
+            </div>
+
+            <!-- Pause Menu -->
+            <div id="pause-menu"
+                class="hidden pointer-events-auto max-w-2xl w-full crt-frame p-8 relative overflow-hidden mx-4">
+                <div class="status-panel mb-8 p-4 flex justify-between items-center bg-black/50 backdrop-blur-sm">
+                    <div class="flex items-center space-x-4">
+                        <span
+                            class="material-symbols-outlined text-[var(--neon-green)] animate-pulse">pause_circle</span>
+                        <div class="space-y-1">
+                            <div class="text-[10px] opacity-70">SYSTEM_STATUS:</div>
+                            <div class="text-xs uppercase tracking-widest text-[var(--neon-purple)]">PAUSED //
+                                WAITING...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-6 text-center">
+                    <h1 class="text-2xl mb-8 terminal-header">SYSTEM HALTED</h1>
+
+                    <div class="grid gap-4 max-w-xs mx-auto">
+                        <button id="btn-resume"
+                            class="action-button py-4 px-8 text-sm flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-sm">play_arrow</span> RESUME
+                        </button>
+                        <button id="btn-restart-pause"
+                            class="action-button py-4 px-8 text-sm flex items-center justify-center gap-2 border-[var(--neon-purple)] text-[var(--neon-purple)] hover:bg-[var(--neon-purple)] hover:text-black hover:shadow-[0_0_15px_var(--neon-purple)]">
+                            <span class="material-symbols-outlined text-sm">restart_alt</span> RESTART
+                        </button>
+                        <button id="btn-quit"
+                            class="action-button py-4 px-8 text-sm flex items-center justify-center gap-2 border-red-500 text-red-500 hover:bg-red-500 hover:text-black hover:shadow-[0_0_15px_red]">
+                            <span class="material-symbols-outlined text-sm">power_settings_new</span> QUIT
+                        </button>
+                    </div>
+
+                    <!-- Settings Toggles (simplified for Pause) -->
+                    <div class="mt-8 pt-6 border-t border-[var(--panel-border)]">
+                        <div class="flex justify-center gap-6 text-[10px]">
+                            <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting"
+                                data-setting="music">
+                                <span class="material-symbols-outlined" id="icon-music">music_note</span>
+                                <span>MUSIC</span>
+                            </div>
+                            <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting"
+                                data-setting="sfx">
+                                <span class="material-symbols-outlined" id="icon-sfx">volume_up</span>
+                                <span>SFX</span>
+                            </div>
+                            <div class="flex flex-col items-center gap-2 cursor-pointer toggle-setting"
+                                data-setting="haptic">
+                                <span class="material-symbols-outlined" id="icon-haptic">vibration</span>
+                                <span>HAPTIC</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Game Over Menu -->
+            <div id="game-over-menu"
+                class="hidden pointer-events-auto max-w-2xl w-full crt-frame p-8 relative overflow-hidden mx-4 border-red-900/50">
+                <style>
+                    #game-over-menu .crt-frame {
+                        border-color: #3f0000;
+                        box-shadow: 0 0 0 4px #1a0000, inset 0 0 100px rgba(50, 0, 0, 0.8);
+                    }
+
+                    #game-over-menu .terminal-header {
+                        border-color: var(--neon-red);
+                        text-shadow: 0 0 8px var(--neon-red);
+                        color: var(--neon-red);
+                    }
+                </style>
+                <div class="status-panel mb-8 p-4 flex justify-between items-center bg-black/50">
+                    <div class="flex items-center space-x-4">
+                        <span class="material-symbols-outlined text-[var(--neon-red)] animate-pulse">warning</span>
+                        <div class="space-y-1">
+                            <div class="text-[10px] opacity-70 text-[var(--neon-red)]">SYSTEM_STATUS:</div>
+                            <div class="text-xs uppercase tracking-widest text-[var(--neon-red)]">CRITICAL FAILURE //
+                                TERMINATED</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-6 text-center">
+                    <h1 class="text-3xl mb-2 terminal-header text-[var(--neon-red)]">GAME OVER</h1>
+
+                    <div class="py-6 space-y-2">
+                        <div class="text-xs opacity-70">FINAL SCORE</div>
+                        <div id="final-score"
+                            class="text-4xl text-[var(--neon-green)] drop-shadow-[0_0_10px_rgba(57,255,20,0.5)]">0</div>
+                    </div>
+
+                    <div class="grid gap-4 max-w-xs mx-auto">
+                        <button id="btn-restart-gameover"
+                            class="action-button py-4 px-8 text-sm flex items-center justify-center gap-2 border-[var(--neon-green)] text-[var(--neon-green)] hover:bg-[var(--neon-green)] hover:text-black">
+                            <span class="material-symbols-outlined text-sm">refresh</span> REBOOT SYSTEM
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
