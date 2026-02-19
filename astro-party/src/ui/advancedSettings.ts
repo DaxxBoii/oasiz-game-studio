@@ -45,7 +45,6 @@ function labelDash(value: DashPreset): string {
 
 type PresetLabelKey =
   | "rotation"
-  | "rotationBoost"
   | "recoil"
   | "shipRestitution"
   | "shipAir"
@@ -56,7 +55,6 @@ type PresetLabelKey =
 
 const PRESET_LABELS: Record<PresetLabelKey, Record<ModePreset, string>> = {
   rotation: { STANDARD: "Standard", SANE: "Sane", CHAOTIC: "Chaotic" },
-  rotationBoost: { STANDARD: "Off", SANE: "Sane", CHAOTIC: "Chaotic" },
   recoil: { STANDARD: "Off", SANE: "Sane", CHAOTIC: "Chaotic" },
   shipRestitution: { STANDARD: "None", SANE: "Sane", CHAOTIC: "Chaotic" },
   shipAir: { STANDARD: "None", SANE: "Sane", CHAOTIC: "Chaotic" },
@@ -124,10 +122,6 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
       "rotation",
       current.rotationPreset,
     );
-    elements.rotationBoostCycle.textContent = labelPreset(
-      "rotationBoost",
-      current.rotationBoostPreset,
-    );
     elements.recoilPresetCycle.textContent = labelPreset(
       "recoil",
       current.recoilPreset,
@@ -161,6 +155,8 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   function applySettings(update: Partial<AdvancedSettings>): void {
     const current = game.getAdvancedSettings();
     const next = { ...current, ...update };
+    // Rotation is a single combined preset. Keep boost in sync.
+    next.rotationBoostPreset = next.rotationPreset;
     game.setAdvancedSettings(next, "local");
     updateAdvancedSettingsUI(next);
   }
@@ -240,15 +236,6 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
     AudioManager.playUIClick();
     const current = game.getAdvancedSettings().rotationPreset;
     applySettings({ rotationPreset: nextInCycle(MODE_PRESET_ORDER, current) });
-  });
-
-  elements.rotationBoostCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
-    const current = game.getAdvancedSettings().rotationBoostPreset;
-    applySettings({
-      rotationBoostPreset: nextInCycle(MODE_PRESET_ORDER, current),
-    });
   });
 
   elements.recoilPresetCycle.addEventListener("click", () => {

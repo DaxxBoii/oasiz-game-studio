@@ -390,6 +390,9 @@ export interface RuntimeTurretBullet extends TurretBulletState {
 export interface ActiveConfig {
   BASE_THRUST: number;
   ROTATION_SPEED: number;
+  SHIP_ROTATION_RESPONSE: number;
+  SHIP_ROTATION_RELEASE_RESPONSE: number;
+  SHIP_ROTATION_DRIFT_RESPONSE_FACTOR: number;
   ROTATION_THRUST_BONUS: number;
   RECOIL_FORCE: number;
   DASH_FORCE: number;

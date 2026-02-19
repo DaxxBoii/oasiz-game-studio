@@ -107,7 +107,6 @@ export const elements = {
   shipSpeedCycle: getElement<HTMLButtonElement>("shipSpeedCycle"),
   dashPowerCycle: getElement<HTMLButtonElement>("dashPowerCycle"),
   rotationPresetCycle: getElement<HTMLButtonElement>("rotationPresetCycle"),
-  rotationBoostCycle: getElement<HTMLButtonElement>("rotationBoostCycle"),
   recoilPresetCycle: getElement<HTMLButtonElement>("recoilPresetCycle"),
   shipRestitutionCycle: getElement<HTMLButtonElement>("shipRestitutionCycle"),
   shipFrictionAirCycle: getElement<HTMLButtonElement>("shipFrictionAirCycle"),

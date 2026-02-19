@@ -27,6 +27,7 @@ import {
 
 const STANDARD_DODGE_FORWARD_FACTOR = 0.35;
 const STANDARD_DODGE_SPEED_FACTOR = 1.65;
+const MATTER_BASE_STEPS_PER_SECOND = 60;
 
 export function updateShips(sim: SimState, dtSec: number): void {
   const cfg = sim.getActiveConfig();
@@ -38,18 +39,24 @@ export function updateShips(sim: SimState, dtSec: number): void {
     const ship = player.ship;
     if (!ship.alive) continue;
 
-    if (isStandard) {
+    const rotating = player.input.buttonA;
+    // ROTATION_SPEED is tuned as radians/second.
+    // Matter angular velocity is radians per base-step (~1/60s),
+    // so convert to avoid exaggerated "beyblade" spin.
+    const targetAngularVelocity = rotating
+      ? (cfg.ROTATION_SPEED * sim.rotationDirection) /
+        MATTER_BASE_STEPS_PER_SECOND
+      : 0;
+    const angularResponse = rotating
+      ? cfg.SHIP_ROTATION_RESPONSE
+      : cfg.SHIP_ROTATION_RELEASE_RESPONSE;
+    const angularT = 1 - Math.exp(-angularResponse * dtSec);
+    player.angularVelocity +=
+      (targetAngularVelocity - player.angularVelocity) * angularT;
+    if (!rotating && Math.abs(player.angularVelocity) < 0.0001) {
       player.angularVelocity = 0;
-      sim.setShipAngularVelocity(player.id, 0);
     }
-
-    if (player.input.buttonA) {
-      player.angularVelocity = 0;
-      sim.setShipAngularVelocity(player.id, 0);
-      ship.angle += cfg.ROTATION_SPEED * dtSec * sim.rotationDirection;
-      ship.angle = normalizeAngle(ship.angle);
-      sim.setShipAngle(player.id, ship.angle);
-    }
+    sim.setShipAngularVelocity(player.id, player.angularVelocity);
 
     if (player.dashQueued) {
       player.dashQueued = false;
@@ -101,10 +108,6 @@ export function updateShips(sim: SimState, dtSec: number): void {
         player.recoilTimerSec > 0 ? cfg.SHIP_RECOIL_SLOWDOWN : 0;
       const joustPowerUp = sim.playerPowerUps.get(playerId);
       const speedMultiplier = joustPowerUp?.type === "JOUST" ? JOUST_SPEED_MULTIPLIER : 1;
-      const forwardSpeed = Math.max(
-        0,
-        (cfg.SHIP_TARGET_SPEED - recoilSlowdown) * speedMultiplier,
-      );
       const dodgeForwardFactor = dodgeActive
         ? STANDARD_DODGE_FORWARD_FACTOR
         : 1;
@@ -114,13 +117,21 @@ export function updateShips(sim: SimState, dtSec: number): void {
           STANDARD_DODGE_SPEED_FACTOR *
           speedMultiplier
         : 0;
+      const baseForwardSpeed = Math.max(
+        0,
+        (cfg.SHIP_TARGET_SPEED - recoilSlowdown) * speedMultiplier,
+      );
+      const forwardSpeed = rotating ? 0 : baseForwardSpeed;
       const desiredVx =
         Math.cos(ship.angle) * forwardSpeed * dodgeForwardFactor +
         player.dashVectorX * dodgeSpeed;
       const desiredVy =
         Math.sin(ship.angle) * forwardSpeed * dodgeForwardFactor +
         player.dashVectorY * dodgeSpeed;
-      const t = 1 - Math.exp(-cfg.SHIP_SPEED_RESPONSE * dtSec);
+      const speedResponse = rotating
+        ? cfg.SHIP_SPEED_RESPONSE * cfg.SHIP_ROTATION_DRIFT_RESPONSE_FACTOR
+        : cfg.SHIP_SPEED_RESPONSE;
+      const t = 1 - Math.exp(-speedResponse * dtSec);
       ship.vx += (desiredVx - ship.vx) * t;
       ship.vy += (desiredVy - ship.vy) * t;
       sim.setShipVelocity(player.id, ship.vx, ship.vy);
@@ -130,6 +141,13 @@ export function updateShips(sim: SimState, dtSec: number): void {
         Math.cos(ship.angle) * cfg.BASE_THRUST,
         Math.sin(ship.angle) * cfg.BASE_THRUST,
       );
+      if (rotating && cfg.ROTATION_THRUST_BONUS !== 0) {
+        sim.applyShipForce(
+          player.id,
+          Math.cos(ship.angle) * cfg.ROTATION_THRUST_BONUS,
+          Math.sin(ship.angle) * cfg.ROTATION_THRUST_BONUS,
+        );
+      }
     }
 
     if (player.fireRequested) {

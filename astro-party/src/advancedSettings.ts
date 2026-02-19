@@ -42,9 +42,8 @@ export function sanitizeAdvancedSettings(
   if (!MODE_PRESETS.includes(merged.rotationPreset)) {
     merged.rotationPreset = DEFAULT_ADVANCED_SETTINGS.rotationPreset;
   }
-  if (!MODE_PRESETS.includes(merged.rotationBoostPreset)) {
-    merged.rotationBoostPreset = DEFAULT_ADVANCED_SETTINGS.rotationBoostPreset;
-  }
+  // Rotation is treated as one combined preset; keep boost in lockstep.
+  merged.rotationBoostPreset = merged.rotationPreset;
   if (!MODE_PRESETS.includes(merged.recoilPreset)) {
     merged.recoilPreset = DEFAULT_ADVANCED_SETTINGS.recoilPreset;
   }
@@ -141,7 +140,6 @@ export function isCustomComparedToTemplate(
     settings.shipSpeed !== template.shipSpeed ||
     settings.dashPower !== template.dashPower ||
     settings.rotationPreset !== template.rotationPreset ||
-    settings.rotationBoostPreset !== template.rotationBoostPreset ||
     settings.recoilPreset !== template.recoilPreset ||
     settings.shipRestitutionPreset !== template.shipRestitutionPreset ||
     settings.shipFrictionAirPreset !== template.shipFrictionAirPreset ||

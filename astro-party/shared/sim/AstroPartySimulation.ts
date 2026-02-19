@@ -130,6 +130,9 @@ const LAG_COMP_MAX_REWIND_MS = 200;
 const DEBUG_CONFIG_KEYS: ReadonlyArray<keyof ActiveConfig> = [
   "BASE_THRUST",
   "ROTATION_SPEED",
+  "SHIP_ROTATION_RESPONSE",
+  "SHIP_ROTATION_RELEASE_RESPONSE",
+  "SHIP_ROTATION_DRIFT_RESPONSE_FACTOR",
   "ROTATION_THRUST_BONUS",
   "RECOIL_FORCE",
   "DASH_FORCE",
@@ -196,9 +199,8 @@ function sanitizeAdvancedSettings(input: AdvancedSettings): AdvancedSettings {
   if (!isInList(settings.rotationPreset, MODE_PRESETS)) {
     settings.rotationPreset = DEFAULT_ADVANCED_SETTINGS.rotationPreset;
   }
-  if (!isInList(settings.rotationBoostPreset, MODE_PRESETS)) {
-    settings.rotationBoostPreset = DEFAULT_ADVANCED_SETTINGS.rotationBoostPreset;
-  }
+  // Rotation is treated as one combined preset; keep boost in lockstep.
+  settings.rotationBoostPreset = settings.rotationPreset;
   if (!isInList(settings.recoilPreset, MODE_PRESETS)) {
     settings.recoilPreset = DEFAULT_ADVANCED_SETTINGS.recoilPreset;
   }
@@ -275,7 +277,6 @@ function isCustomComparedToTemplate(
     settings.shipSpeed !== template.shipSpeed ||
     settings.dashPower !== template.dashPower ||
     settings.rotationPreset !== template.rotationPreset ||
-    settings.rotationBoostPreset !== template.rotationBoostPreset ||
     settings.recoilPreset !== template.recoilPreset ||
     settings.shipRestitutionPreset !== template.shipRestitutionPreset ||
     settings.shipFrictionAirPreset !== template.shipFrictionAirPreset ||
@@ -965,8 +966,26 @@ export class AstroPartySimulation implements SimState {
       SANE_CONFIG.ROTATION_SPEED,
       CHAOTIC_CONFIG.ROTATION_SPEED,
     );
+    cfg.SHIP_ROTATION_RESPONSE = resolveConfigValue(
+      this.settings.rotationPreset,
+      STANDARD_CONFIG.SHIP_ROTATION_RESPONSE,
+      SANE_CONFIG.SHIP_ROTATION_RESPONSE,
+      CHAOTIC_CONFIG.SHIP_ROTATION_RESPONSE,
+    );
+    cfg.SHIP_ROTATION_RELEASE_RESPONSE = resolveConfigValue(
+      this.settings.rotationPreset,
+      STANDARD_CONFIG.SHIP_ROTATION_RELEASE_RESPONSE,
+      SANE_CONFIG.SHIP_ROTATION_RELEASE_RESPONSE,
+      CHAOTIC_CONFIG.SHIP_ROTATION_RELEASE_RESPONSE,
+    );
+    cfg.SHIP_ROTATION_DRIFT_RESPONSE_FACTOR = resolveConfigValue(
+      this.settings.rotationPreset,
+      STANDARD_CONFIG.SHIP_ROTATION_DRIFT_RESPONSE_FACTOR,
+      SANE_CONFIG.SHIP_ROTATION_DRIFT_RESPONSE_FACTOR,
+      CHAOTIC_CONFIG.SHIP_ROTATION_DRIFT_RESPONSE_FACTOR,
+    );
     cfg.ROTATION_THRUST_BONUS = resolveConfigValue(
-      this.settings.rotationBoostPreset,
+      this.settings.rotationPreset,
       STANDARD_CONFIG.ROTATION_THRUST_BONUS,
       SANE_CONFIG.ROTATION_THRUST_BONUS,
       CHAOTIC_CONFIG.ROTATION_THRUST_BONUS,
