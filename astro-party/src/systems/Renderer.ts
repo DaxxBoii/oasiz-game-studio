@@ -13,7 +13,7 @@ import {
   GAME_CONFIG,
   MapId,
 } from "../types";
-import { SeededRNG } from "./SeededRNG";
+import { SeededRNG } from "../../shared/sim/SeededRNG";
 import { EntitySpriteStore } from "./EntitySpriteStore";
 import { MapOverlayStore } from "./MapOverlayStore";
 import type {
@@ -40,6 +40,8 @@ export class Renderer {
   private cameraZoom: number = 1;
   private cameraFocusX: number = GAME_CONFIG.ARENA_WIDTH / 2;
   private cameraFocusY: number = GAME_CONFIG.ARENA_HEIGHT / 2;
+  private viewportWidth: number = 1;
+  private viewportHeight: number = 1;
   private entitySprites = new EntitySpriteStore();
   private mapOverlays = new MapOverlayStore();
 
@@ -87,21 +89,26 @@ export class Renderer {
         ? layoutHeight
         : rect.height;
 
-    this.canvas.width = Math.max(1, Math.round(targetWidth));
-    this.canvas.height = Math.max(1, Math.round(targetHeight));
+    const cssWidth = Math.max(1, Math.round(targetWidth));
+    const cssHeight = Math.max(1, Math.round(targetHeight));
+    this.viewportWidth = cssWidth;
+    this.viewportHeight = cssHeight;
+
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    this.canvas.width = Math.max(1, Math.round(cssWidth * dpr));
+    this.canvas.height = Math.max(1, Math.round(cssHeight * dpr));
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "high";
 
     // Calculate scale to fit fixed arena in window while maintaining aspect ratio
-    const scaleX = this.canvas.width / GAME_CONFIG.ARENA_WIDTH;
-    const scaleY = this.canvas.height / GAME_CONFIG.ARENA_HEIGHT;
+    const scaleX = cssWidth / GAME_CONFIG.ARENA_WIDTH;
+    const scaleY = cssHeight / GAME_CONFIG.ARENA_HEIGHT;
     this.scale = Math.min(scaleX, scaleY);
 
     // Center the arena
-    this.offsetX =
-      (this.canvas.width - GAME_CONFIG.ARENA_WIDTH * this.scale) / 2;
-    this.offsetY =
-      (this.canvas.height - GAME_CONFIG.ARENA_HEIGHT * this.scale) / 2;
+    this.offsetX = (cssWidth - GAME_CONFIG.ARENA_WIDTH * this.scale) / 2;
+    this.offsetY = (cssHeight - GAME_CONFIG.ARENA_HEIGHT * this.scale) / 2;
   }
 
   getSize(): { width: number; height: number } {
@@ -447,7 +454,7 @@ export class Renderer {
 
   clear(): void {
     this.ctx.fillStyle = "#0a0a12";
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.ctx.fillRect(0, 0, this.viewportWidth, this.viewportHeight);
   }
 
   beginFrame(): void {
@@ -462,7 +469,7 @@ export class Renderer {
     const zoom = this.clampCameraZoom(this.cameraZoom);
     const focus = this.getClampedCameraFocus(zoom);
     const scaled = this.scale * zoom;
-    this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+    this.ctx.translate(this.viewportWidth / 2, this.viewportHeight / 2);
     this.ctx.scale(scaled, scaled);
     this.ctx.translate(-focus.x, -focus.y);
   }
@@ -532,8 +539,8 @@ export class Renderer {
   }
 
   private getClampedCameraFocus(zoom: number): { x: number; y: number } {
-    const viewHalfWidth = this.canvas.width / (2 * this.scale * zoom);
-    const viewHalfHeight = this.canvas.height / (2 * this.scale * zoom);
+    const viewHalfWidth = this.viewportWidth / (2 * this.scale * zoom);
+    const viewHalfHeight = this.viewportHeight / (2 * this.scale * zoom);
 
     const minFocusX = viewHalfWidth;
     const maxFocusX = GAME_CONFIG.ARENA_WIDTH - viewHalfWidth;
