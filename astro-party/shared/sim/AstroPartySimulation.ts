@@ -78,6 +78,7 @@ import {
   type MapDefinition,
   type YellowBlock,
 } from "./maps.js";
+import { SHIP_CENTER_OF_GRAVITY_LOCAL } from "../geometry/EntityShapes.js";
 
 // System imports
 import { updateBots } from "./AISystem.js";
@@ -127,6 +128,67 @@ const DASH_PRESETS = ["LOW", "NORMAL", "HIGH"] as const;
 const ASTEROID_DENSITIES = ["NONE", "SOME", "MANY", "SPAWN"] as const;
 const LAG_COMP_HISTORY_MS = 500;
 const LAG_COMP_MAX_REWIND_MS = 200;
+const SHIP_COG_LOCAL_X = SHIP_CENTER_OF_GRAVITY_LOCAL.x;
+const SHIP_COG_LOCAL_Y = SHIP_CENTER_OF_GRAVITY_LOCAL.y;
+
+function rotateShipCogOffset(angle: number): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: SHIP_COG_LOCAL_X * cos - SHIP_COG_LOCAL_Y * sin,
+    y: SHIP_COG_LOCAL_X * sin + SHIP_COG_LOCAL_Y * cos,
+  };
+}
+
+function shipBodyPositionFromCenter(
+  centerX: number,
+  centerY: number,
+  angle: number,
+): { x: number; y: number } {
+  const offset = rotateShipCogOffset(angle);
+  return {
+    x: centerX + offset.x,
+    y: centerY + offset.y,
+  };
+}
+
+function shipCenterFromBodyPosition(
+  bodyX: number,
+  bodyY: number,
+  angle: number,
+): { x: number; y: number } {
+  const offset = rotateShipCogOffset(angle);
+  return {
+    x: bodyX - offset.x,
+    y: bodyY - offset.y,
+  };
+}
+
+function shipBodyVelocityFromCenterVelocity(
+  centerVx: number,
+  centerVy: number,
+  angle: number,
+  angularVelocity: number,
+): { x: number; y: number } {
+  const offset = rotateShipCogOffset(angle);
+  return {
+    x: centerVx - angularVelocity * offset.y,
+    y: centerVy + angularVelocity * offset.x,
+  };
+}
+
+function shipCenterVelocityFromBodyVelocity(
+  bodyVx: number,
+  bodyVy: number,
+  angle: number,
+  angularVelocity: number,
+): { x: number; y: number } {
+  const offset = rotateShipCogOffset(angle);
+  return {
+    x: bodyVx + angularVelocity * offset.y,
+    y: bodyVy - angularVelocity * offset.x,
+  };
+}
 const DEBUG_CONFIG_KEYS: ReadonlyArray<keyof ActiveConfig> = [
   "BASE_THRUST",
   "ROTATION_SPEED",
@@ -1099,13 +1161,21 @@ export class AstroPartySimulation implements SimState {
   setShipAngle(playerId: string, angle: number): void {
     const body = this.shipBodies.get(playerId);
     if (!body) return;
+    const center = shipCenterFromBodyPosition(body.position.x, body.position.y, body.angle);
     Body.setAngle(body, angle);
+    Body.setPosition(body, shipBodyPositionFromCenter(center.x, center.y, angle));
   }
 
   setShipVelocity(playerId: string, vx: number, vy: number): void {
     const body = this.shipBodies.get(playerId);
     if (!body) return;
-    Body.setVelocity(body, { x: vx, y: vy });
+    const bodyVelocity = shipBodyVelocityFromCenterVelocity(
+      vx,
+      vy,
+      body.angle,
+      body.angularVelocity,
+    );
+    Body.setVelocity(body, bodyVelocity);
   }
 
   setShipAngularVelocity(playerId: string, angularVelocity: number): void {
@@ -1608,8 +1678,20 @@ export class AstroPartySimulation implements SimState {
           angularDamping: shipAngularDamping,
         });
         Body.setAngle(body, player.ship.angle);
+        Body.setPosition(
+          body,
+          shipBodyPositionFromCenter(player.ship.x, player.ship.y, player.ship.angle),
+        );
         Body.setAngularVelocity(body, player.angularVelocity);
-        Body.setVelocity(body, { x: player.ship.vx, y: player.ship.vy });
+        Body.setVelocity(
+          body,
+          shipBodyVelocityFromCenterVelocity(
+            player.ship.vx,
+            player.ship.vy,
+            player.ship.angle,
+            player.angularVelocity,
+          ),
+        );
         this.shipBodies.set(playerId, body);
       } else {
         existing.restitution = shipRestitution;
@@ -1749,10 +1831,21 @@ export class AstroPartySimulation implements SimState {
     for (const [playerId, body] of this.shipBodies) {
       const player = this.players.get(playerId);
       if (!player || !player.ship.alive) continue;
-      let x = body.position.x;
-      let y = body.position.y;
-      let vx = body.velocity.x;
-      let vy = body.velocity.y;
+      const centerPosition = shipCenterFromBodyPosition(
+        body.position.x,
+        body.position.y,
+        body.angle,
+      );
+      const centerVelocity = shipCenterVelocityFromBodyVelocity(
+        body.velocity.x,
+        body.velocity.y,
+        body.angle,
+        body.angularVelocity,
+      );
+      let x = centerPosition.x;
+      let y = centerPosition.y;
+      let vx = centerVelocity.x;
+      let vy = centerVelocity.y;
 
       // Safety guard: keep ships recoverable if an extreme impulse tunnels past boundaries.
       const minX = -ARENA_PADDING;
@@ -1766,8 +1859,11 @@ export class AstroPartySimulation implements SimState {
         if ((x <= 0 && vx < 0) || (x >= ARENA_WIDTH && vx > 0)) vx = 0;
         if ((y <= 0 && vy < 0) || (y >= ARENA_HEIGHT && vy > 0)) vy = 0;
 
-        Body.setPosition(body, { x, y });
-        Body.setVelocity(body, { x: vx, y: vy });
+        Body.setPosition(body, shipBodyPositionFromCenter(x, y, body.angle));
+        Body.setVelocity(
+          body,
+          shipBodyVelocityFromCenterVelocity(vx, vy, body.angle, body.angularVelocity),
+        );
       }
 
       player.ship.x = x;

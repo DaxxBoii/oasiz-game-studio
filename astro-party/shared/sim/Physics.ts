@@ -1,6 +1,7 @@
 import Matter from "matter-js";
 import {
   PILOT_COLLIDER_VERTICES,
+  SHIP_CENTER_OF_GRAVITY_LOCAL,
   SHIP_COLLIDER_VERTICES,
   cloneShapeVertices,
   type ShapePoint,
@@ -145,6 +146,15 @@ export class Physics {
     if (options.angularDamping > 0) {
       (body as unknown as Record<string, number>).angularDamping = options.angularDamping;
     }
+
+    Body.setCentre(
+      body,
+      {
+        x: SHIP_CENTER_OF_GRAVITY_LOCAL.x,
+        y: SHIP_CENTER_OF_GRAVITY_LOCAL.y,
+      },
+      true,
+    );
 
     body.plugin = body.plugin || {};
     body.plugin.playerId = playerId;

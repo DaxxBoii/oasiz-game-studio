@@ -14,6 +14,7 @@ export interface GeneratedEntitySvgData {
   colliderPathId: string;
   colliderPath: string;
   colliderVertices: ReadonlyArray<ShapePoint>;
+  centerOfGravityLocal: ShapePoint;
   renderScale: number;
   physicsScale: number;
   slotDefaults: Readonly<Record<string, string>>;
@@ -45,6 +46,10 @@ export const GENERATED_ENTITY_SVG_DATA = [
         "y": -9
       }
     ],
+    "centerOfGravityLocal": {
+      "x": 17,
+      "y": 0
+    },
     "renderScale": 1,
     "physicsScale": 1,
     "slotDefaults": {
@@ -127,6 +132,10 @@ export const GENERATED_ENTITY_SVG_DATA = [
         "y": 3.8
       }
     ],
+    "centerOfGravityLocal": {
+      "x": -12.4,
+      "y": -3.8
+    },
     "renderScale": 1,
     "physicsScale": 1,
     "slotDefaults": {

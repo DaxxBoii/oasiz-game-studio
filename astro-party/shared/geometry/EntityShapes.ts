@@ -21,6 +21,9 @@ export type ShapePoint = GeneratedShapePoint;
 export const SHIP_COLLIDER_VERTICES: ReadonlyArray<ShapePoint> =
   getEntityAsset("ship").colliderVertices;
 
+export const SHIP_CENTER_OF_GRAVITY_LOCAL: Readonly<ShapePoint> =
+  getEntityAsset("ship").centerOfGravityLocal;
+
 export const PILOT_COLLIDER_VERTICES: ReadonlyArray<ShapePoint> =
   getEntityAsset("pilot").colliderVertices;
 

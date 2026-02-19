@@ -23,6 +23,19 @@ interface ShapePoint {
   y: number;
 }
 
+function deriveCenterOfGravity(vertices: ReadonlyArray<ShapePoint>): ShapePoint {
+  // Use the collider path's first vertex as the nose reference. This lets SVG edits
+  // move the pivot without touching simulation code.
+  const noseVertex = vertices[0];
+  if (!noseVertex) {
+    throw new Error("[generate-entity-assets] Could not derive center of gravity");
+  }
+  return {
+    x: noseVertex.x,
+    y: noseVertex.y,
+  };
+}
+
 function parseAttributes(tag: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   const regex = /([a-zA-Z_:][\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)')/g;
@@ -158,10 +171,11 @@ function main(): void {
   for (const entityId of entityIds) {
     const entry = manifest[entityId];
     const filePath = join(entitiesDir, entry.file);
-    const svg = readFileSync(filePath, "utf8").trim();
+    const svg = readFileSync(filePath, "utf8").replace(/\r\n/g, "\n").trim();
     const viewBox = parseViewBox(svg, entry.file);
     const colliderPath = extractPathById(svg, entry.colliderPathId, entry.file);
     const colliderVertices = parseSimplePathVertices(colliderPath, entityId);
+    const centerOfGravityLocal = deriveCenterOfGravity(colliderVertices);
 
     outEntries.push({
       id: entityId,
@@ -170,6 +184,7 @@ function main(): void {
       colliderPathId: entry.colliderPathId,
       colliderPath,
       colliderVertices,
+      centerOfGravityLocal,
       renderScale: entry.renderScale ?? 1,
       physicsScale: entry.physicsScale ?? 1,
       slotDefaults: entry.slotDefaults ?? {},
@@ -193,6 +208,7 @@ function main(): void {
     "  colliderPathId: string;\n" +
     "  colliderPath: string;\n" +
     "  colliderVertices: ReadonlyArray<ShapePoint>;\n" +
+    "  centerOfGravityLocal: ShapePoint;\n" +
     "  renderScale: number;\n" +
     "  physicsScale: number;\n" +
     "  slotDefaults: Readonly<Record<string, string>>;\n" +

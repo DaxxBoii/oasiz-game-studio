@@ -11,6 +11,7 @@ export interface EntityAssetDefinition {
   svgTemplate: string;
   colliderPath: string;
   colliderVertices: ReadonlyArray<ShapePoint>;
+  centerOfGravityLocal: Readonly<ShapePoint>;
   viewBox: Readonly<{
     minX: number;
     minY: number;
@@ -39,6 +40,16 @@ function scaleVertices(
   );
 }
 
+function scalePoint(point: ShapePoint, scale: number): Readonly<ShapePoint> {
+  if (scale === 1) {
+    return Object.freeze({ x: point.x, y: point.y });
+  }
+  return Object.freeze({
+    x: point.x * scale,
+    y: point.y * scale,
+  });
+}
+
 function buildDefinition(raw: GeneratedEntitySvgData): EntityAssetDefinition {
   const renderWidth = raw.viewBox.width * raw.renderScale;
   const renderHeight = raw.viewBox.height * raw.renderScale;
@@ -48,6 +59,7 @@ function buildDefinition(raw: GeneratedEntitySvgData): EntityAssetDefinition {
     svgTemplate: raw.svgTemplate,
     colliderPath: raw.colliderPath,
     colliderVertices: scaleVertices(raw.colliderVertices, raw.physicsScale),
+    centerOfGravityLocal: scalePoint(raw.centerOfGravityLocal, raw.physicsScale),
     viewBox: Object.freeze({
       minX: raw.viewBox.minX,
       minY: raw.viewBox.minY,
@@ -102,4 +114,3 @@ export function applySvgColorSlots(
     },
   );
 }
-
