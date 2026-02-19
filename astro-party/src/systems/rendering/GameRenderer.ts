@@ -15,8 +15,8 @@ import {
   HomingMissileState,
   TurretState,
   TurretBulletState,
-} from "../types";
-import { getMapDefinition, type YellowBlock } from "../../shared/sim/maps";
+} from "../../types";
+import { getMapDefinition, type YellowBlock } from "../../../shared/sim/maps";
 
 export interface RenderContext {
   dt: number;

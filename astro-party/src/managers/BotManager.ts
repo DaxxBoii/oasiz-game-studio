@@ -1,4 +1,4 @@
-import { MultiInputManager } from "../systems/MultiInputManager";
+import { MultiInputManager } from "../systems/input/MultiInputManager";
 import { NetworkManager } from "../network/NetworkManager";
 import { GamePhase, PlayerData } from "../types";
 

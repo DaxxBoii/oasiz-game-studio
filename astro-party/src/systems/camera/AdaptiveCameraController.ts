@@ -1,4 +1,4 @@
-import { GAME_CONFIG, GamePhase } from "../types";
+import { GAME_CONFIG, GamePhase } from "../../types";
 import {
   CAMERA_DEFAULT_ZOOM,
   CAMERA_FOCUS_SMOOTH_TIME,

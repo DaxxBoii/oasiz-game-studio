@@ -1,19 +1,19 @@
-import { Renderer } from "./systems/Renderer";
-import { InputManager } from "./systems/Input";
-import { MultiInputManager } from "./systems/MultiInputManager";
+import { Renderer } from "./systems/rendering/Renderer";
+import { InputManager } from "./systems/input/Input";
+import { MultiInputManager } from "./systems/input/MultiInputManager";
 import { NetworkManager, type PlayerMetaMap } from "./network/NetworkManager";
 import { PlayerManager } from "./managers/PlayerManager";
 import { GameFlowManager } from "./managers/GameFlowManager";
 import { BotManager } from "./managers/BotManager";
-import { GameRenderer } from "./systems/GameRenderer";
+import { GameRenderer } from "./systems/rendering/GameRenderer";
 import { NetworkSyncSystem } from "./network/NetworkSyncSystem";
 import type {
   RenderNetworkState,
   NetworkPredictionDebugTelemetry,
 } from "./network/NetworkSyncSystem";
-import { PlayerInputResolver } from "./systems/PlayerInputResolver";
+import { PlayerInputResolver } from "./systems/input/PlayerInputResolver";
 import { DeterministicRNGManager } from "./systems/DeterministicRNGManager";
-import { AdaptiveCameraController } from "./systems/AdaptiveCameraController";
+import { AdaptiveCameraController } from "./systems/camera/AdaptiveCameraController";
 import { AudioManager } from "./AudioManager";
 import { SettingsManager } from "./SettingsManager";
 import { NETWORK_GAME_FEEL_TUNING } from "./network/gameFeel/NetworkGameFeelTuning";

@@ -1,8 +1,8 @@
 import { InputManager } from "./Input";
 import { MultiInputManager } from "./MultiInputManager";
-import { NetworkManager } from "../network/NetworkManager";
-import { PlayerInput, GamePhase, GAME_CONFIG } from "../types";
-import { NETWORK_GAME_FEEL_TUNING } from "../network/gameFeel/NetworkGameFeelTuning";
+import { NetworkManager } from "../../network/NetworkManager";
+import { PlayerInput, GamePhase, GAME_CONFIG } from "../../types";
+import { NETWORK_GAME_FEEL_TUNING } from "../../network/gameFeel/NetworkGameFeelTuning";
 
 export class PlayerInputResolver {
   private localInputState: PlayerInput = {

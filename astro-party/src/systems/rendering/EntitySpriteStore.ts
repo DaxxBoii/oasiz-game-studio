@@ -1,8 +1,8 @@
 import {
-  applySvgColorSlots,
   getEntityAsset,
   type EntityAssetId,
-} from "../../shared/geometry/EntityAssets";
+} from "../../../shared/geometry/EntityAssets";
+import { renderAssetStore } from "./RenderAssetStore";
 
 /**
  * Client-only sprite cache for SVG-backed entities.
@@ -17,8 +17,6 @@ import {
  * collider vertices are derived from SVG collider path + physicsScale.
  */
 export class EntitySpriteStore {
-  private cache = new Map<string, HTMLImageElement>();
-
   drawEntity(
     ctx: CanvasRenderingContext2D,
     entityId: EntityAssetId,
@@ -59,16 +57,6 @@ export class EntitySpriteStore {
     svgTemplate: string,
     slots: Readonly<Record<string, string>>,
   ): HTMLImageElement {
-    const existing = this.cache.get(key);
-    if (existing) {
-      return existing;
-    }
-
-    const image = new Image();
-    image.decoding = "async";
-    const coloredSvg = applySvgColorSlots(svgTemplate, slots);
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(coloredSvg)}`;
-    this.cache.set(key, image);
-    return image;
+    return renderAssetStore.getSvgImage(key, svgTemplate, slots);
   }
 }

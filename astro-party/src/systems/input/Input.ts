@@ -1,5 +1,5 @@
-import { PlayerInput } from "../types";
-import { SettingsManager } from "../SettingsManager";
+import { PlayerInput } from "../../types";
+import { SettingsManager } from "../../SettingsManager";
 
 const DOUBLE_TAP_WINDOW = 300; // ms
 

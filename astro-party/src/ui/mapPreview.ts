@@ -1,6 +1,7 @@
 import { Game } from "../Game";
 import { MapId } from "../types";
-import { getMapOverlayUrl } from "../systems/MapOverlayRegistry";
+import { getMapOverlayUrl } from "../systems/rendering/MapOverlayRegistry";
+import { renderAssetStore } from "../systems/rendering/RenderAssetStore";
 import { elements } from "./elements";
 import { getMapDefinition, type MapDefinition } from "../../shared/sim/maps.js";
 import {
@@ -11,7 +12,7 @@ import {
 
 const MIN_PREVIEW_WIDTH = 73;
 const MIN_PREVIEW_HEIGHT = 55;
-const mapOverlayPreviewCache = new Map<MapId, HTMLImageElement>();
+const mapOverlayPreviewListenerAttached = new WeakSet<HTMLImageElement>();
 
 const colors = {
   yellowBlock: "#fbbf24",
@@ -163,18 +164,20 @@ export function renderMapPreviewOnCanvas(
       return false;
     }
 
-    let image = mapOverlayPreviewCache.get(mapId);
-    if (!image) {
-      image = new Image();
-      image.decoding = "async";
-      image.onload = () => {
-        renderMapPreviewOnCanvas(canvas, mapId);
-      };
-      image.src = overlayUrl;
-      mapOverlayPreviewCache.set(mapId, image);
-    }
+    const image = renderAssetStore.getUrlImage(overlayUrl);
 
     if (!image.complete || image.naturalWidth <= 0) {
+      if (!mapOverlayPreviewListenerAttached.has(image)) {
+        mapOverlayPreviewListenerAttached.add(image);
+        image.addEventListener(
+          "load",
+          () => {
+            mapOverlayPreviewListenerAttached.delete(image);
+            renderMapPreviewOnCanvas(canvas, mapId);
+          },
+          { once: true },
+        );
+      }
       return false;
     }
 

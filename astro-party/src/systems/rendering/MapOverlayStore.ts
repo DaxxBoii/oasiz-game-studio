@@ -1,9 +1,8 @@
-import { GAME_CONFIG, MapId } from "../types";
+import { GAME_CONFIG, MapId } from "../../types";
 import { getMapOverlayUrl } from "./MapOverlayRegistry";
+import { renderAssetStore } from "./RenderAssetStore";
 
 export class MapOverlayStore {
-  private cache = new Map<MapId, HTMLImageElement>();
-
   hasOverlay(mapId: MapId): boolean {
     return getMapOverlayUrl(mapId) !== null;
   }
@@ -23,15 +22,6 @@ export class MapOverlayStore {
       return null;
     }
 
-    const cached = this.cache.get(mapId);
-    if (cached) {
-      return cached;
-    }
-
-    const image = new Image();
-    image.decoding = "async";
-    image.src = url;
-    this.cache.set(mapId, image);
-    return image;
+    return renderAssetStore.getUrlImage(url);
   }
 }

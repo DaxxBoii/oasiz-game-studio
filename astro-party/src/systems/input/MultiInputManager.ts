@@ -2,16 +2,16 @@
 // Handles multiple keyboard input sets for local multiplayer
 // Also manages mobile touch zones for local multiplayer on a single device
 
-import { PlayerInput } from "../types";
+import { PlayerInput } from "../../types";
 import {
   getAllPresets,
   getPresetName,
   KeyBindingsManager,
-} from "./input/keyBindings";
-import { TouchZoneManager } from "./input/touchZones";
-import { SlotState, TouchLayout } from "./input/types";
+} from "./keyBindings";
+import { TouchZoneManager } from "./touchZones";
+import { SlotState, TouchLayout } from "./types";
 
-export type { TouchLayout } from "./input/types";
+export type { TouchLayout } from "./types";
 
 export class MultiInputManager {
   private slots: Map<number, SlotState> = new Map();

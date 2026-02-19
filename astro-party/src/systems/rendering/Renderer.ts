@@ -12,21 +12,22 @@ import {
   PLAYER_COLORS,
   GAME_CONFIG,
   MapId,
-} from "../types";
-import { SeededRNG } from "../../shared/sim/SeededRNG";
+} from "../../types";
+import { SeededRNG } from "../../../shared/sim/SeededRNG";
 import { EntitySpriteStore } from "./EntitySpriteStore";
 import { MapOverlayStore } from "./MapOverlayStore";
+import { PowerUpSpriteStore } from "./PowerUpSpriteStore";
 import {
   CAMERA_DEFAULT_ZOOM,
   CAMERA_EDGE_SLACK_RATIO,
   CAMERA_MAX_ZOOM,
   CAMERA_MIN_ZOOM,
-} from "./cameraConstants";
+} from "../camera/cameraConstants";
 import type {
   YellowBlock,
   CenterHole,
   RepulsionZone,
-} from "../../shared/sim/maps";
+} from "../../../shared/sim/maps";
 
 export class Renderer {
   private canvas: HTMLCanvasElement;
@@ -50,6 +51,7 @@ export class Renderer {
   private viewportHeight: number = 1;
   private entitySprites = new EntitySpriteStore();
   private mapOverlays = new MapOverlayStore();
+  private powerUpSprites = new PowerUpSpriteStore();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -313,7 +315,7 @@ export class Renderer {
 
   // ============= TURRET RENDERING =============
 
-  drawTurret(state: import("../types").TurretState): void {
+  drawTurret(state: import("../../types").TurretState): void {
     const { ctx } = this;
     const { x, y, angle, isTracking, orbitRadius } = state;
 
@@ -385,7 +387,7 @@ export class Renderer {
 
   // ============= TURRET BULLET RENDERING =============
 
-  drawTurretBullet(state: import("../types").TurretBulletState): void {
+  drawTurretBullet(state: import("../../types").TurretBulletState): void {
     const { ctx } = this;
     const { x, y, vx, vy, exploded, explosionTime } = state;
     const nowMs = this.getNowMs();
@@ -1250,151 +1252,19 @@ export class Renderer {
     );
     ctx.stroke();
 
-    // Draw power-up box - color based on type
-    let boxColor: string;
-    if (type === "LASER") {
-      boxColor = "#ff0066"; // Pink
-    } else if (type === "SHIELD") {
-      boxColor = "#00ccff"; // Cyan
-    } else if (type === "SCATTER") {
-      boxColor = "#00cc44"; // Green
-    } else if (type === "MINE") {
-      boxColor = "#ff8800"; // Orange
-    } else if (type === "JOUST") {
-      boxColor = "#00aa22"; // Dark green
-    } else if (type === "HOMING_MISSILE") {
-      boxColor = "#888888"; // Metallic gray
-    } else {
-      boxColor = "#666666"; // Gray for REVERSE
-    }
-    ctx.fillStyle = boxColor;
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
-
-    // Glow effect
-    ctx.shadowColor = ctx.fillStyle;
+    const glowColor = this.powerUpSprites.getGlowColor(type);
+    ctx.shadowColor = glowColor;
     ctx.shadowBlur = 15;
 
-    // Draw square box
-    ctx.fillRect(-size / 2, -size / 2, size, size);
-    ctx.strokeRect(-size / 2, -size / 2, size, size);
-
+    const drewSprite = this.powerUpSprites.drawPowerUp(ctx, type, size);
     ctx.shadowBlur = 0;
 
-    // Draw symbol
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "bold 14px Arial";
-
-    if (type === "LASER") {
-      // Draw laser symbol (lightning bolt)
-      ctx.beginPath();
-      ctx.moveTo(2, -8);
-      ctx.lineTo(-4, 0);
-      ctx.lineTo(0, 0);
-      ctx.lineTo(-2, 8);
-      ctx.lineTo(4, 0);
-      ctx.lineTo(0, 0);
-      ctx.closePath();
-      ctx.fill();
-    } else if (type === "SHIELD") {
-      // Draw shield symbol (circle)
-      ctx.beginPath();
-      ctx.arc(0, 0, 6, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (type === "SCATTER") {
-      // Draw shotgun shell symbol - green cylinder with red primer
-      // Shell body (green rectangle)
-      ctx.fillStyle = "#00ff44";
-      ctx.fillRect(-4, -7, 8, 14);
-      // Shell rim
-      ctx.fillStyle = "#00aa33";
-      ctx.fillRect(-5, 5, 10, 3);
-      // Red primer in center
-      ctx.fillStyle = "#ff0044";
-      ctx.beginPath();
-      ctx.arc(0, 6, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (type === "MINE") {
-      // Draw mine symbol - orange ball with grey spikes
-      // Center orange ball
-      ctx.fillStyle = "#ff8800";
-      ctx.beginPath();
-      ctx.arc(0, 0, 5, 0, Math.PI * 2);
-      ctx.fill();
-      // Grey spikes
-      ctx.strokeStyle = "#888888";
+    if (!drewSprite) {
+      ctx.fillStyle = glowColor;
+      ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 2;
-      for (let i = 0; i < 4; i++) {
-        const angle = (i / 4) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(angle) * 4, Math.sin(angle) * 4);
-        ctx.lineTo(Math.cos(angle) * 8, Math.sin(angle) * 8);
-        ctx.stroke();
-      }
-    } else if (type === "REVERSE") {
-      // Draw reverse symbol - blue glowing "R"
-      // Blue glow effect
-      ctx.shadowColor = "#0088ff";
-      ctx.shadowBlur = 20;
-      ctx.fillStyle = "#0088ff";
-      ctx.font = "bold 16px Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("R", 0, 0);
-      ctx.shadowBlur = 0;
-    } else if (type === "JOUST") {
-      // Draw Joust symbol - green box with red cross (X)
-      // Green box background
-      ctx.fillStyle = "#00ff44";
-      ctx.fillRect(-8, -8, 16, 16);
-      // Red X in center
-      ctx.strokeStyle = "#ff0044";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(-4, -4);
-      ctx.lineTo(4, 4);
-      ctx.moveTo(4, -4);
-      ctx.lineTo(-4, 4);
-      ctx.stroke();
-    } else if (type === "HOMING_MISSILE") {
-      // Draw Homing Missile symbol - rocket icon
-      // Rocket body
-      ctx.fillStyle = "#aaaaaa";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 4, 8, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // Rocket nose
-      ctx.fillStyle = "#cccccc";
-      ctx.beginPath();
-      ctx.moveTo(0, -8);
-      ctx.lineTo(-3, -3);
-      ctx.lineTo(3, -3);
-      ctx.closePath();
-      ctx.fill();
-      // Fins
-      ctx.fillStyle = "#666666";
-      ctx.beginPath();
-      ctx.moveTo(-3, 4);
-      ctx.lineTo(-6, 8);
-      ctx.lineTo(-2, 6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(3, 4);
-      ctx.lineTo(6, 8);
-      ctx.lineTo(2, 6);
-      ctx.closePath();
-      ctx.fill();
-      // Flame
-      ctx.fillStyle = "#ff8800";
-      ctx.beginPath();
-      ctx.moveTo(-2, 6);
-      ctx.lineTo(0, 10);
-      ctx.lineTo(2, 6);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(-size / 2, -size / 2, size, size);
+      ctx.strokeRect(-size / 2, -size / 2, size, size);
     }
 
     ctx.restore();
@@ -2029,7 +1899,7 @@ export class Renderer {
     }
   }
 
-  drawMineState(state: import("../types").MineState): void {
+  drawMineState(state: import("../../types").MineState): void {
     const { ctx } = this;
     const { x, y, exploded, explosionTime } = state;
     const nowMs = this.getNowMs();

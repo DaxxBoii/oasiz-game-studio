@@ -1,4 +1,4 @@
-import { Renderer } from "../systems/Renderer";
+import { Renderer } from "../systems/rendering/Renderer";
 import { NetworkManager } from "./NetworkManager";
 import { PlayerManager } from "../managers/PlayerManager";
 import { SettingsManager } from "../SettingsManager";
