@@ -8,10 +8,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap"
       rel="stylesheet"
     />
     <style>
+      @font-face {
+        font-family: "Ethnocentric";
+        src: url("/assets/fonts/Ethnocentric-Regular.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+
       :root {
         --text-main: rgba(255, 255, 255, 0.95);
         --text-soft: rgba(255, 255, 255, 0.55);
@@ -24,6 +32,7 @@
         box-sizing: border-box;
         margin: 0;
         padding: 0;
+        font-family: "Ethnocentric", "Orbitron", sans-serif;
       }
 
       html,
@@ -33,9 +42,13 @@
         overflow: hidden;
         touch-action: none;
         background: #000;
-        font-family: "Space Grotesk", sans-serif;
+        font-family: "Ethnocentric", "Orbitron", sans-serif;
         user-select: none;
         -webkit-user-select: none;
+      }
+
+      body * {
+        font-family: "Ethnocentric", "Orbitron", sans-serif !important;
       }
 
       #gameContainer {
@@ -61,6 +74,7 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
+        text-align: center;
         z-index: 20;
         cursor: pointer;
         background: radial-gradient(ellipse at 50% 40%, rgba(0, 20, 40, 0.6) 0%, rgba(0, 0, 0, 0.85) 100%);
@@ -74,6 +88,7 @@
         text-transform: uppercase;
         color: var(--text-main);
         line-height: 1;
+        text-align: center;
         text-shadow: 0 0 40px var(--accent-glow), 0 0 80px rgba(0, 212, 255, 0.2);
       }
 
@@ -313,7 +328,7 @@
         text-align: left;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         cursor: pointer;
-        font-family: "Space Grotesk", sans-serif;
+        font-family: "Orbitron", sans-serif;
       }
 
       .setting-row:last-child {

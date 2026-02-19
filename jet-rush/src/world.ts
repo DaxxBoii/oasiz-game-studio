@@ -151,6 +151,7 @@ export function spawnRow(
   runSeed: number,
   safeZone: boolean = false,
   score: number = 0,
+  edgeTallOnly: boolean = false,
 ): BlockRow {
   ensureMats();
   ensureNoise(runSeed);
@@ -158,6 +159,8 @@ export function spawnRow(
   const rng = seededRandom(Math.floor(z * 7.37 + runSeed));
   const cx1 = corridorCenterX(z);
   const cx2 = corridor2CenterX(z);
+
+  const edgeThreshold = C.BLOCK_SPREAD_X * 0.55;
 
   /* ── Pass 1: compute cell positions and heights ── */
   const cells: CellData[] = [];
@@ -177,10 +180,22 @@ export function spawnRow(
       bh = Math.min(bh, C.CORRIDOR_SAFE_H);
     }
 
+    if (edgeTallOnly) {
+      const absBx = Math.abs(bx);
+      if (absBx < edgeThreshold) {
+        bh = Math.min(bh, C.SHORT_H_MAX * 0.6);
+      } else {
+        const edgeFactor = (absBx - edgeThreshold) / (C.BLOCK_SPREAD_X - edgeThreshold);
+        const minTall = C.TALL_H_MIN * 0.6;
+        const maxTall = C.TALL_H_MAX;
+        bh = minTall + edgeFactor * edgeFactor * (maxTall - minTall);
+      }
+    }
+
     const dist1 = Math.abs(bx - cx1);
     const dist2 = Math.abs(bx - cx2);
 
-    if (!safeZone) {
+    if (!safeZone && !edgeTallOnly) {
       if (dist1 < C.CORRIDOR_HALF_W) {
         const t = dist1 / C.CORRIDOR_HALF_W;
         const maxH = C.CORRIDOR_SAFE_H + t * t * (bh - C.CORRIDOR_SAFE_H);
@@ -247,6 +262,7 @@ export function spawnRow(
     const lineGeo = new LineSegmentsGeometry().fromEdgesGeometry(edgesGeo);
     edgesGeo.dispose();
     const wireframe = new LineSegments2(lineGeo, wireframeMats[outlineTier]);
+    wireframe.name = "wireframeOutline";
     mesh.add(wireframe);
 
     scene.add(mesh);
@@ -324,6 +340,22 @@ export function updateBlockAnimations(rows: BlockRow[], elapsed: number): void {
       const scale = newH / b.baseHeight;
       b.mesh.scale.y = scale;
       b.mesh.position.y = newH / 2;
+    }
+  }
+}
+
+/** Cycles world wireframe outline colors at fixed time intervals. */
+export function updateWireframeColors(rows: BlockRow[], elapsed: number): void {
+  const outlineTier = Math.floor(elapsed / 5) % OUTLINE_COLORS.length;
+  const targetMaterial = wireframeMats[outlineTier];
+
+  for (const row of rows) {
+    for (const b of row.blocks) {
+      const wireframe = b.mesh.getObjectByName("wireframeOutline") as LineSegments2 | null;
+      if (!wireframe) continue;
+      if (wireframe.material !== targetMaterial) {
+        wireframe.material = targetMaterial;
+      }
     }
   }
 }

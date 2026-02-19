@@ -4,9 +4,8 @@ import { $ } from "./utils";
 export interface InputState {
   left: boolean;
   right: boolean;
-  touchId: number | null;
-  touchX0: number;
-  touchXNow: number;
+  touchLeftId: number | null;
+  touchRightId: number | null;
 }
 
 type TapCallback = () => void;
@@ -23,9 +22,8 @@ export function initInput(
   const input: InputState = {
     left: false,
     right: false,
-    touchId: null,
-    touchX0: 0,
-    touchXNow: 0,
+    touchLeftId: null,
+    touchRightId: null,
   };
 
   const isUI = (e: Event) =>
@@ -44,7 +42,59 @@ export function initInput(
   /* Mouse */
   window.addEventListener("mousedown", handleTap);
 
-  /* Touch - taps for start/restart, drag for steering */
+  const clearTouchSteering = (touchId: number): void => {
+    if (input.touchLeftId === touchId) {
+      input.touchLeftId = null;
+      input.left = false;
+    }
+    if (input.touchRightId === touchId) {
+      input.touchRightId = null;
+      input.right = false;
+    }
+  };
+
+  const assignTouchSteering = (touch: Touch): void => {
+    const touchOnLeft = touch.clientX < window.innerWidth * 0.5;
+    if (touchOnLeft) {
+      if (input.touchLeftId === null) {
+        input.touchLeftId = touch.identifier;
+        input.left = true;
+        haptic("light");
+      }
+      return;
+    }
+
+    if (input.touchRightId === null) {
+      input.touchRightId = touch.identifier;
+      input.right = true;
+      haptic("light");
+    }
+  };
+
+  const updateTouchSteeringSide = (touch: Touch): void => {
+    const touchOnLeft = touch.clientX < window.innerWidth * 0.5;
+
+    if (touchOnLeft && input.touchRightId === touch.identifier) {
+      input.touchRightId = null;
+      input.right = false;
+      if (input.touchLeftId === null) {
+        input.touchLeftId = touch.identifier;
+        input.left = true;
+      }
+      return;
+    }
+
+    if (!touchOnLeft && input.touchLeftId === touch.identifier) {
+      input.touchLeftId = null;
+      input.left = false;
+      if (input.touchRightId === null) {
+        input.touchRightId = touch.identifier;
+        input.right = true;
+      }
+    }
+  };
+
+  /* Touch - taps for start/restart, screen halves for steering */
   window.addEventListener(
     "touchstart",
     (e: TouchEvent) => {
@@ -54,11 +104,9 @@ export function initInput(
         handleTap(e);
         return;
       }
-      if (input.touchId !== null) return;
-      const t = e.changedTouches[0];
-      input.touchId = t.identifier;
-      input.touchX0 = t.clientX;
-      input.touchXNow = t.clientX;
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        assignTouchSteering(e.changedTouches[i]);
+      }
     },
     { passive: true },
   );
@@ -66,11 +114,11 @@ export function initInput(
   window.addEventListener(
     "touchmove",
     (e: TouchEvent) => {
-      if (getState() !== "PLAYING" || input.touchId === null) return;
+      if (getState() !== "PLAYING") return;
       for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === input.touchId) {
-          input.touchXNow = e.changedTouches[i].clientX;
-          break;
+        const t = e.changedTouches[i];
+        if (t.identifier === input.touchLeftId || t.identifier === input.touchRightId) {
+          updateTouchSteeringSide(t);
         }
       }
     },
@@ -79,10 +127,7 @@ export function initInput(
 
   const touchEnd = (e: TouchEvent) => {
     for (let i = 0; i < e.changedTouches.length; i++) {
-      if (e.changedTouches[i].identifier === input.touchId) {
-        input.touchId = null;
-        break;
-      }
+      clearTouchSteering(e.changedTouches[i].identifier);
     }
   };
   window.addEventListener("touchend", touchEnd);
@@ -137,7 +182,6 @@ export function initInput(
 export function resetInput(input: InputState): void {
   input.left = false;
   input.right = false;
-  input.touchId = null;
-  input.touchX0 = 0;
-  input.touchXNow = 0;
+  input.touchLeftId = null;
+  input.touchRightId = null;
 }

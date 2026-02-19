@@ -9,7 +9,7 @@ import { C, type GameState, type HapticType, type BlockRow, type Particle, type 
 import { AudioManager } from "./audio";
 import { createJet, updateJetFX, loadShipFBX, type JetModel } from "./jet";
 import { Shop } from "./shop";
-import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations } from "./world";
+import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations, updateWireframeColors } from "./world";
 import { emitTrail, tickTrail, spawnExplosion, tickExplosion, spawnCollectBurst } from "./particles";
 import { spawnCollectible, tickCollectibles, destroyCollectible } from "./collectibles";
 import { getCorridorCenter } from "./world";
@@ -176,9 +176,11 @@ class JetRush {
   /* ═══ Idle Blocks (start screen atmosphere) ═══ */
 
   private spawnIdleBlocks(): void {
+    this.idleNextRowZ = 30;
     for (let z = 30; z > -200; z -= C.ROW_SPACING) {
-      this.rows.push(spawnRow(this.scene, z, 42));
+      this.rows.push(spawnRow(this.scene, z, 42, false, 0, true));
     }
+    this.idleNextRowZ = -200;
   }
 
   /* ═══ Start ═══ */
@@ -199,8 +201,10 @@ class JetRush {
     this.trailT = 0;
     this.runSeed = Math.floor(Math.random() * 100000);
     this.nextRowZ = -40;
+    this.idleZ = 0;
 
     resetInput(this.input);
+    this.cleanupIdleTrail();
     this.clearAll();
 
     this.jet.group.visible = true;
@@ -280,6 +284,7 @@ class JetRush {
     this.elapsed += dt;
 
     updateBlockAnimations(this.rows, this.elapsed);
+    updateWireframeColors(this.rows, this.elapsed);
 
     if (this.state === "PLAYING") this.tick(dt);
     else if (this.state === "START") this.idle(dt);
@@ -294,6 +299,8 @@ class JetRush {
   /* ═══ Camera ═══ */
 
   private updateCamera(dt: number): void {
+    if (this.state === "START") return;
+
     if (this.state === "PLAYING" || this.state === "GAME_OVER") {
       const px = this.jet.group.position.x;
       const pz = this.jet.group.position.z;
@@ -323,18 +330,134 @@ class JetRush {
 
   /* ═══ Idle (Start Screen) ═══ */
 
-  private idle(_dt: number): void {
+  private idleZ = 0;
+  private idleNextRowZ = 0;
+  private idleX = 0;
+  private idleXTarget = 0;
+  private idleWanderTimer = 0;
+  private idleTrailTimer = 0;
+  private idleTrailStrip: THREE.Mesh | null = null;
+  private idleTrailPositions: THREE.Vector3[] = [];
+  private readonly IDLE_TRAIL_MAX_POINTS = 120;
+
+  private idle(dt: number): void {
     this.jet.group.visible = true;
-    this.jet.group.position.x = Math.sin(this.elapsed * 0.6) * 3;
+
+    const idleSpeed = 28;
+    this.idleZ -= idleSpeed * dt;
+    this.idleWanderTimer -= dt;
+    if (this.idleWanderTimer <= 0) {
+      this.idleWanderTimer = 1.2 + Math.random() * 1.6;
+      this.idleXTarget = (Math.random() * 2 - 1) * 8.5;
+    }
+    const blend = 1 - Math.pow(0.001, dt);
+    this.idleX += (this.idleXTarget - this.idleX) * blend;
+
+    this.jet.group.position.x = this.idleX;
     this.jet.group.position.y = C.PLANE_Y;
-    this.jet.group.position.z = 0;
-    this.jet.body.rotation.z = -Math.sin(this.elapsed * 0.6) * 0.2;
+    this.jet.group.position.z = this.idleZ;
+    const idleBank = THREE.MathUtils.clamp((this.idleXTarget - this.idleX) * -0.09, -0.35, 0.35);
+    this.jet.body.rotation.z += (idleBank - this.jet.body.rotation.z) * Math.min(1, dt * 5);
+    this.jet.body.rotation.x = 0;
 
     const glow = this.jet.body.getObjectByName("glow") as THREE.Mesh;
     if (glow) glow.scale.setScalar(1 + Math.sin(this.elapsed * 4) * 0.2);
 
-    this.cam.position.set(0, C.CAM_UP, C.CAM_BACK);
-    this.cam.lookAt(0, C.PLANE_Y - 0.5, -C.CAM_LOOK_AHEAD);
+    updateJetFX(this.jet.body, this.elapsed);
+
+    this.updateIdleTrail(dt);
+
+    recycleGround(this.groundTiles, this.idleZ);
+
+    while (this.idleNextRowZ > this.idleZ - C.ROW_AHEAD) {
+      this.rows.push(spawnRow(this.scene, this.idleNextRowZ, 42, false, 0, true));
+      this.idleNextRowZ -= C.ROW_SPACING;
+    }
+
+    const behind = this.idleZ + C.ROW_BEHIND;
+    this.rows = this.rows.filter((row) => {
+      if (row.z > behind) {
+        destroyRow(this.scene, row);
+        return false;
+      }
+      return true;
+    });
+
+    const camHeight = 55;
+    const camLookAhead = 25;
+    this.cam.position.set(0, camHeight, this.idleZ + 12);
+    this.cam.lookAt(0, C.PLANE_Y, this.idleZ - camLookAhead);
+  }
+
+  private updateIdleTrail(dt: number): void {
+    this.idleTrailTimer += dt;
+    if (this.idleTrailTimer > 0.016) {
+      this.idleTrailTimer = 0;
+      this.idleTrailPositions.push(this.jet.group.position.clone());
+      if (this.idleTrailPositions.length > this.IDLE_TRAIL_MAX_POINTS) {
+        this.idleTrailPositions.shift();
+      }
+    }
+
+    if (this.idleTrailPositions.length < 2) return;
+
+    if (this.idleTrailStrip) {
+      this.scene.remove(this.idleTrailStrip);
+      this.idleTrailStrip.geometry.dispose();
+    }
+
+    const pts = this.idleTrailPositions;
+    const count = pts.length;
+    const verts: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const t = i / (count - 1);
+      const width = (0.3 + t * 1.8) * 0.3;
+      const p = pts[i];
+
+      verts.push(p.x - width, p.y, p.z);
+      verts.push(p.x + width, p.y, p.z);
+
+      const alpha = t * t;
+      const r = 0.0 + t * 0.0;
+      const g = 0.6 + t * 0.2;
+      const b = 1.0;
+      colors.push(r, g, b, alpha * 0.6);
+      colors.push(r, g, b, alpha * 0.6);
+
+      if (i < count - 1) {
+        const bi = i * 2;
+        indices.push(bi, bi + 1, bi + 2);
+        indices.push(bi + 1, bi + 3, bi + 2);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+    geo.setIndex(indices);
+
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    this.idleTrailStrip = new THREE.Mesh(geo, mat);
+    this.scene.add(this.idleTrailStrip);
+  }
+
+  private cleanupIdleTrail(): void {
+    if (this.idleTrailStrip) {
+      this.scene.remove(this.idleTrailStrip);
+      this.idleTrailStrip.geometry.dispose();
+      this.idleTrailStrip = null;
+    }
+    this.idleTrailPositions = [];
   }
 
   /* ═══ Game Tick ═══ */
@@ -354,13 +477,6 @@ class JetRush {
     let mx = 0;
     if (this.input.left) mx -= 1;
     if (this.input.right) mx += 1;
-
-    if (this.input.touchId !== null && this.mobile) {
-      const drag =
-        (this.input.touchXNow - this.input.touchX0) /
-        (window.innerWidth * 0.1);
-      mx += THREE.MathUtils.clamp(drag, -1.5, 1.5);
-    }
 
     this.targetX += mx * C.LATERAL_SPEED * dt;
     this.targetX = THREE.MathUtils.clamp(
