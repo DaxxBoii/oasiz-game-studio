@@ -339,32 +339,28 @@ export default class Level extends Phaser.Scene {
 		this.tailCore = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD).setDepth(25);
 
 		this.titleText = this.add.text(this.worldWidth / 2, 80, "NEON PUSH", {
-			fontFamily: '"Press Start 2P", cursive',
-			fontSize: "42px",
-			color: "#ccffff",
-			stroke: "#00e5ff",
-			strokeThickness: 4,
-			shadow: { blur: 10, color: "#bc13fe", fill: true, offsetX: 0, offsetY: 0 }
+			fontFamily: "'Outfit', sans-serif",
+			fontSize: "64px",
+			color: "#ffffff",
+			fontStyle: "900",
+			shadow: { blur: 0, color: "#2a2a30", fill: true, offsetX: 4, offsetY: 4 }
 		}).setOrigin(0.5).setScrollFactor(0);
 
-		this.scoreText = this.add.text(24, 74, "SCORE 0", {
-			fontFamily: '"Press Start 2P", cursive',
-			fontSize: "16px",
+		this.scoreText = this.add.text(24, 24, "0", {
+			fontFamily: "'Outfit', sans-serif",
+			fontSize: "48px",
 			color: "#ffffff",
-			stroke: "#ff2ea6",
-			strokeThickness: 3,
-			shadow: { blur: 6, color: "#ff2ea6", fill: true, offsetX: 0, offsetY: 0 }
+			fontStyle: "900",
+			shadow: { blur: 0, color: "#000000", fill: true, offsetX: 3, offsetY: 3 }
 		}).setScrollFactor(0);
 
-		this.hintText = this.add.text(this.worldWidth / 2, 140, "TAP TO SHOOT", {
-			fontFamily: '"Press Start 2P", cursive',
-			fontSize: "14px",
-			color: "#ff8ce1",
-			stroke: "#7b2cff",
-			strokeThickness: 2,
-			shadow: { blur: 4, color: "#7b2cff", fill: true, offsetX: 0, offsetY: 0 }
+		this.hintText = this.add.text(this.worldWidth / 2, 160, "TAP TO SHOOT", {
+			fontFamily: "'Outfit', sans-serif",
+			fontSize: "20px",
+			color: "#00f0ff", // Accent Primary
+			fontStyle: "700"
 		}).setOrigin(0.5).setScrollFactor(0);
-		this.hintText.setVisible(false); // Hidden until game starts
+		this.hintText.setVisible(false);
 
 		this.ensureParticleTexture();
 		this.launchFx = this.add.particles(0, 0, "neon-dot", {
@@ -2716,10 +2712,10 @@ export default class Level extends Phaser.Scene {
 						return;
 					}
 				}
-				} else if (barrier.type === 'MAGNET_CORE') {
-					if (
-						barrier.magnetCenterX === undefined ||
-						barrier.magnetCoreRadius === undefined
+			} else if (barrier.type === 'MAGNET_CORE') {
+				if (
+					barrier.magnetCenterX === undefined ||
+					barrier.magnetCoreRadius === undefined
 				) {
 					continue;
 				}
@@ -2729,57 +2725,57 @@ export default class Level extends Phaser.Scene {
 					barrier.magnetCenterX,
 					barrier.y
 				) <= (trapHitRadius + barrier.magnetCoreRadius);
-					if (coreHit) {
-						this.endGame();
-						return;
-					}
-				} else if (barrier.type === 'LASER_GRID') {
-					if (!barrier.laserBeamUnits || barrier.laserThickness === undefined) {
-						continue;
-					}
-					for (const beam of barrier.laserBeamUnits) {
-						if (!beam.active) continue;
-						const y = barrier.y + beam.yOffset;
-						const leftWall = this.getSideWallX(y, true) + 6;
-						const rightWall = this.getSideWallX(y, false) - 6;
-						const width = Math.max(30, rightWall - leftWall);
-						const hit = this.circleIntersectsRect(
-							this.ball.x,
-							this.ball.y,
-							trapHitRadius,
-							leftWall,
-							y - barrier.laserThickness * 0.5,
-							width,
-							barrier.laserThickness
-						);
-						if (hit) {
-							this.endGame();
-							return;
-						}
-					}
-				} else if (barrier.type === 'PULSE_RING') {
-					if (
-						barrier.pulseCenterX === undefined ||
-						barrier.pulseCurrentRadius === undefined ||
-						barrier.pulseBandWidth === undefined
-					) {
-						continue;
-					}
-					const dist = Phaser.Math.Distance.Between(
+				if (coreHit) {
+					this.endGame();
+					return;
+				}
+			} else if (barrier.type === 'LASER_GRID') {
+				if (!barrier.laserBeamUnits || barrier.laserThickness === undefined) {
+					continue;
+				}
+				for (const beam of barrier.laserBeamUnits) {
+					if (!beam.active) continue;
+					const y = barrier.y + beam.yOffset;
+					const leftWall = this.getSideWallX(y, true) + 6;
+					const rightWall = this.getSideWallX(y, false) - 6;
+					const width = Math.max(30, rightWall - leftWall);
+					const hit = this.circleIntersectsRect(
 						this.ball.x,
 						this.ball.y,
-						barrier.pulseCenterX,
-						barrier.y
+						trapHitRadius,
+						leftWall,
+						y - barrier.laserThickness * 0.5,
+						width,
+						barrier.laserThickness
 					);
-					const ringBand = barrier.pulseBandWidth * 0.5 + trapHitRadius;
-					const ringHit = Math.abs(dist - barrier.pulseCurrentRadius) <= ringBand;
-					if (ringHit) {
+					if (hit) {
 						this.endGame();
 						return;
 					}
 				}
+			} else if (barrier.type === 'PULSE_RING') {
+				if (
+					barrier.pulseCenterX === undefined ||
+					barrier.pulseCurrentRadius === undefined ||
+					barrier.pulseBandWidth === undefined
+				) {
+					continue;
+				}
+				const dist = Phaser.Math.Distance.Between(
+					this.ball.x,
+					this.ball.y,
+					barrier.pulseCenterX,
+					barrier.y
+				);
+				const ringBand = barrier.pulseBandWidth * 0.5 + trapHitRadius;
+				const ringHit = Math.abs(dist - barrier.pulseCurrentRadius) <= ringBand;
+				if (ringHit) {
+					this.endGame();
+					return;
+				}
 			}
 		}
+	}
 
 	private circleIntersectsRect(
 		cx: number, cy: number, r: number,
@@ -2982,11 +2978,11 @@ export default class Level extends Phaser.Scene {
 						projectile.size
 					);
 				}
-				} else if (barrier.type === 'MAGNET_CORE') {
-					if (
-						barrier.magnetCenterX === undefined ||
-						barrier.magnetCoreRadius === undefined ||
-						barrier.magnetInfluenceRadius === undefined
+			} else if (barrier.type === 'MAGNET_CORE') {
+				if (
+					barrier.magnetCenterX === undefined ||
+					barrier.magnetCoreRadius === undefined ||
+					barrier.magnetInfluenceRadius === undefined
 				) {
 					continue;
 				}
@@ -2998,75 +2994,75 @@ export default class Level extends Phaser.Scene {
 					barrier.magnetInfluenceRadius
 				);
 				g.lineStyle(2, 0xff2ea6, 0.95);
-					g.strokeCircle(
-						barrier.magnetCenterX,
-						barrier.y,
-						barrier.magnetCoreRadius
-					);
-				} else if (barrier.type === 'LASER_GRID') {
-					if (!barrier.laserBeamUnits || barrier.laserThickness === undefined) {
-						continue;
-					}
-					for (const beam of barrier.laserBeamUnits) {
-						if (!beam.active) continue;
-						const y = barrier.y + beam.yOffset;
-						const leftWall = this.getSideWallX(y, true) + 6;
-						const rightWall = this.getSideWallX(y, false) - 6;
-						g.lineStyle(2, 0xff3366, 0.95);
-						g.strokeRect(
-							leftWall,
-							y - barrier.laserThickness * 0.5,
-							Math.max(30, rightWall - leftWall),
-							barrier.laserThickness
-						);
-					}
-				} else if (barrier.type === 'PULSE_RING') {
-					if (
-						barrier.pulseCenterX === undefined ||
-						barrier.pulseCurrentRadius === undefined ||
-						barrier.pulseBandWidth === undefined
-					) {
-						continue;
-					}
-					g.lineStyle(2, 0x7af5ff, 0.9);
-					g.strokeCircle(
-						barrier.pulseCenterX,
-						barrier.y,
-						barrier.pulseCurrentRadius
-					);
-					g.lineStyle(2, 0xff2ea6, 0.72);
-					g.strokeCircle(
-						barrier.pulseCenterX,
-						barrier.y,
-						Math.max(0, barrier.pulseCurrentRadius - barrier.pulseBandWidth * 0.5)
-					);
-					g.strokeCircle(
-						barrier.pulseCenterX,
-						barrier.y,
-						barrier.pulseCurrentRadius + barrier.pulseBandWidth * 0.5
-					);
-				} else if (barrier.type === 'TELEPORT_GATE') {
-					if (
-						barrier.teleportAX === undefined ||
-						barrier.teleportBX === undefined ||
-						barrier.teleportRadius === undefined
-					) {
-						continue;
-					}
-					g.lineStyle(2, 0x7b9dff, 0.9);
-					g.strokeCircle(barrier.teleportAX, barrier.y, barrier.teleportRadius);
-					g.lineStyle(2, 0xff6bc6, 0.9);
-					g.strokeCircle(barrier.teleportBX, barrier.y, barrier.teleportRadius);
-				} else if (barrier.type === 'GRAVITY_FLIP_ZONE') {
-					if (barrier.gravityZoneHeight === undefined) {
-						continue;
-					}
-					const top = barrier.y - barrier.gravityZoneHeight * 0.5;
-					g.lineStyle(2, 0x7de5ff, 0.62);
-					g.strokeRect(0, top, this.worldWidth, barrier.gravityZoneHeight);
+				g.strokeCircle(
+					barrier.magnetCenterX,
+					barrier.y,
+					barrier.magnetCoreRadius
+				);
+			} else if (barrier.type === 'LASER_GRID') {
+				if (!barrier.laserBeamUnits || barrier.laserThickness === undefined) {
+					continue;
 				}
+				for (const beam of barrier.laserBeamUnits) {
+					if (!beam.active) continue;
+					const y = barrier.y + beam.yOffset;
+					const leftWall = this.getSideWallX(y, true) + 6;
+					const rightWall = this.getSideWallX(y, false) - 6;
+					g.lineStyle(2, 0xff3366, 0.95);
+					g.strokeRect(
+						leftWall,
+						y - barrier.laserThickness * 0.5,
+						Math.max(30, rightWall - leftWall),
+						barrier.laserThickness
+					);
+				}
+			} else if (barrier.type === 'PULSE_RING') {
+				if (
+					barrier.pulseCenterX === undefined ||
+					barrier.pulseCurrentRadius === undefined ||
+					barrier.pulseBandWidth === undefined
+				) {
+					continue;
+				}
+				g.lineStyle(2, 0x7af5ff, 0.9);
+				g.strokeCircle(
+					barrier.pulseCenterX,
+					barrier.y,
+					barrier.pulseCurrentRadius
+				);
+				g.lineStyle(2, 0xff2ea6, 0.72);
+				g.strokeCircle(
+					barrier.pulseCenterX,
+					barrier.y,
+					Math.max(0, barrier.pulseCurrentRadius - barrier.pulseBandWidth * 0.5)
+				);
+				g.strokeCircle(
+					barrier.pulseCenterX,
+					barrier.y,
+					barrier.pulseCurrentRadius + barrier.pulseBandWidth * 0.5
+				);
+			} else if (barrier.type === 'TELEPORT_GATE') {
+				if (
+					barrier.teleportAX === undefined ||
+					barrier.teleportBX === undefined ||
+					barrier.teleportRadius === undefined
+				) {
+					continue;
+				}
+				g.lineStyle(2, 0x7b9dff, 0.9);
+				g.strokeCircle(barrier.teleportAX, barrier.y, barrier.teleportRadius);
+				g.lineStyle(2, 0xff6bc6, 0.9);
+				g.strokeCircle(barrier.teleportBX, barrier.y, barrier.teleportRadius);
+			} else if (barrier.type === 'GRAVITY_FLIP_ZONE') {
+				if (barrier.gravityZoneHeight === undefined) {
+					continue;
+				}
+				const top = barrier.y - barrier.gravityZoneHeight * 0.5;
+				g.lineStyle(2, 0x7de5ff, 0.62);
+				g.strokeRect(0, top, this.worldWidth, barrier.gravityZoneHeight);
 			}
 		}
+	}
 
 	private endGame() {
 		if (this.isGameOver) {
@@ -3123,7 +3119,7 @@ export default class Level extends Phaser.Scene {
 		this.score = Math.floor(this.maxHeightScore / 10);
 
 		const boostText = this.boostedLaunches > 0 ? `  BOOST x${this.boostedLaunches}` : "";
-		this.scoreText.setText(`SCORE ${this.score}${boostText}`);
+		this.scoreText.setText(`${this.score}${boostText}`);
 	}
 
 	private ensureParticleTexture() {
@@ -3175,8 +3171,6 @@ export default class Level extends Phaser.Scene {
 
 		const pauseMenu = document.getElementById("pause-menu");
 		const gameOverMenu = document.getElementById("game-over-menu");
-		const hud = document.getElementById("hud");
-		const mainMenu = document.getElementById("main-menu");
 
 		// Reset visibility
 		pauseMenu?.classList.add("hidden");
@@ -3202,7 +3196,7 @@ export default class Level extends Phaser.Scene {
 		if (restartGameOverBtn) restartGameOverBtn.onclick = () => {
 			// Hide UI before restart
 			gameOverMenu?.classList.add("hidden");
-			hud?.classList.remove("hidden");
+			document.getElementById("hud")?.classList.remove("hidden");
 			this.scene.restart();
 		};
 
@@ -3211,7 +3205,7 @@ export default class Level extends Phaser.Scene {
 		};
 
 		// Settings Toggles
-		document.querySelectorAll(".toggle-setting").forEach(el => {
+		document.querySelectorAll(".setting-toggle").forEach(el => {
 			(el as HTMLElement).onclick = (e) => {
 				const target = (e.currentTarget as HTMLElement).dataset.setting;
 				if (target) this.toggleSetting(target);
@@ -3269,21 +3263,19 @@ export default class Level extends Phaser.Scene {
 	private updateSettingUI(key: string, enabled: boolean) {
 		const icon = document.getElementById(`icon-${key}`);
 		const iconMain = document.getElementById(`icon-${key}-main`);
-		const containers = document.querySelectorAll(`.toggle-setting[data-setting="${key}"]`);
+		const containers = document.querySelectorAll(`.setting-toggle[data-setting="${key}"]`);
 
 		containers.forEach(container => {
 			if (enabled) {
-				container.classList.remove("opacity-50");
-				container.classList.add("text-[var(--neon-green)]");
+				container.classList.add("active");
 			} else {
-				container.classList.add("opacity-50");
-				container.classList.remove("text-[var(--neon-green)]");
+				container.classList.remove("active");
 			}
 		});
 
 		const iconName = key === "music" ? (enabled ? "music_note" : "music_off") :
 			key === "sfx" ? (enabled ? "volume_up" : "volume_off") :
-				(enabled ? "vibration" : "smartphone");
+				(enabled ? "smartphone" : "smartphone"); // Material Symbols Rounded
 
 		if (icon) icon.innerText = iconName;
 		if (iconMain) iconMain.innerText = iconName;
@@ -3296,11 +3288,11 @@ export default class Level extends Phaser.Scene {
 		if (visible) {
 			mainMenu?.classList.remove("hidden");
 			hud?.classList.add("hidden");
-			this.titleText.setVisible(true);
+			this.titleText.setVisible(false);
 		} else {
 			mainMenu?.classList.add("hidden");
 			hud?.classList.remove("hidden");
-			this.titleText.setVisible(false);
+			this.titleText.setVisible(true);
 		}
 	}
 

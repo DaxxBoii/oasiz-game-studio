@@ -1,0 +1,81 @@
+Original prompt: kanka geri aldım çünkü kalite düşmesine rağmen fps düzelmedi, oyunu test edip en çok yük alan metod ve scriptleri loglayıp analiz yapabilir misin
+
+- Hedef: Kaliteyi düşürmeden performans darboğazını ölçmek.
+- Plan: `?profile=1` ile açılan metod-profiler + canvas op sayaçları eklemek, Playwright ile mobil emülasyonda koşup logları toplayarak analiz etmek.
+- Uygulama: `?profile=1` ile açılan metod-profiler ve canvas operasyon sayaçları eklendi.
+  - Toplanan metrikler: metod toplam/ortalama/max süreleri, pencere bazlı frame CPU süresi, canvas op adetleri (`drawImage`, `fillRect`, `fill`, `stroke`, `arc`, gradient oluşturma).
+- Test komutları:
+  - Mobil idle profil: `/tmp/perf-mobile-idle.log`
+  - Mobil aktif profil: `/tmp/perf-mobile-active.log`
+- Bulgular (PLAYING):
+  - En pahalı metod açık ara `render.drawMaze`.
+  - İkinci büyük maliyet `render.compositeToDisplay` (offscreen canvas -> display blit, bloom dahil).
+  - `update.*` metodları toplamda düşük maliyetli; update tarafı ana darboğaz değil.
+  - Canvas op yoğunluğu çok yüksek: 3 sn pencerede yaklaşık `drawImage ~30k-44k`, `fillRect ~84k-125k`, `gradients ~19k-29k`.
+- Sonuç: Sorun ağırlıklı olarak render aşamasında (özellikle maze + postprocess/composite), chunk üretiminde değil.
+- Not: Playwright `#playBtn` normal click'i menü animasyonu nedeniyle "element is not stable" hatası verebiliyor; profiling scripti bu yüzden DOM üzerinden click event dispatch ederek başlatıyor.
+- Genişletilmiş breakdown profiler eklendi:
+  - `drawMaze` alt segmentleri: `render.drawMaze.mainWalls`, `render.drawMaze.sideWalls`, `render.drawMaze.items`, `render.drawMaze.fog`, `render.drawMaze.sand`.
+  - Sayaçlar: `maze.mainWallTiles`, `maze.sideWallTiles`, `maze.itemTiles`, `maze.fogTiles`, `maze.sandSurfaceSamples`.
+- Analiz özeti (mobil emülasyon, PLAYING):
+  - Baskın maliyet `render.drawMaze.sideWalls` (çoğu pencerede `drawMaze` süresinin en büyük kısmı).
+  - `render.drawMaze.mainWalls` ikinci sırada ama sideWalls'tan belirgin düşük.
+  - `render.drawMaze.items` ve `render.drawMaze.fog` düşük/orta; darboğaz değil.
+  - Sayaçlar side-wall hacmini doğruluyor: 3s pencerede ~`5k-27k` side wall tile çizimi.
+  - Sonuç: `drawMaze` içindeki side-wall dekor katmanı ana darboğaz adayı.
+- Ham log dosyaları:
+  - `/tmp/perf-mobile-idle.log`
+  - `/tmp/perf-mobile-active.log`
+- Breakdown bulguları (özet):
+  - `render.drawMaze.sideWalls` sürekli en pahalı alt segment.
+  - `render.drawMaze.mainWalls` ikinci sırada.
+  - `render.drawMaze.items` ve `render.drawMaze.fog` düşük maliyetli.
+  - 3 saniyelik PLAYING pencerelerinde sayaçlar tipik olarak:
+    - `maze.sideWallTiles`: ~15k-33k
+    - `maze.mainWallTiles`: ~2.3k-4.0k
+    - `maze.fogTiles`: ~3.4k-5.8k
+    - `maze.itemTiles`: ~178-432
+- İstek: side wall'lar her frame devasa aralıkta çizilmesin, chunk oluşurken spawn edilip görünür alanda render edilsin.
+- Uygulama:
+  - `SideWallSpawn` veri modeli eklendi.
+  - Chunk üretiminde (`generateChunk`) satır başına side-wall spawn listesi cache'lendi.
+  - Margin collider duvarları `forceMarginWalls` ile chunk oluşturma anında row'a işlendi.
+  - `drawMaze.sideWalls` artık `startRow-100..+200` yerine yalnızca `row0..row1` görünür satırları çiziyor.
+- Doğrulama:
+  - `npm run typecheck` ✅
+  - `npm run build` ✅
+- Yeni istek: Yukarı ilerlerken oluşan donmayı azaltmak için chunk üretimi yerine pooling/reuse yaklaşımı.
+- Uygulama (src/main.ts):
+  - `ChunkTemplate` modeli eklendi (`rows`, `sideWallSpawns`).
+  - Chunk prune sırasında template'ler `recycledChunkTemplates` havuzuna alınıyor.
+  - `generateChunk` içinde önce havuzdan template çekilip `placeChunkRows(...)` ile tekrar sahneye yerleştiriliyor; havuz boşsa normal procedural üretim yapılıyor.
+  - Oyun resetinde pooling map/array yapıları temizleniyor.
+- Not: Bu yaklaşım tile-object spawn etmediği için mevcut map mimarisiyle uyumlu bir "pooling" karşılığıdır (chunk row verisini tekrar kullanır).
+- Ek doğrulama:
+  - `npm run typecheck` ✅
+  - `npm run build` ✅
+  - Playwright burst testi (`output/web-game/shot-0..5.png`) ✅
+  - Bu koşuda yeni console/page error dosyası oluşmadı.
+- Sonraki adım önerisi:
+  - Eğer mobilde halen chunk geçişinde spike varsa, resette N adet template prewarm edilip runtime procedural generate çağrısı ilk dakikalarda tamamen sıfırlanabilir.
+- Bugfix (chunk seam mismatch):
+  - Reused chunk template'lerine `entryX` eklendi.
+  - `placeChunkRows(...)` artık seam satırında yeni chunk girişini (`entryX`) template'in orijinal girişine (`templateEntryX`) yatay bir dot koridoruyla bağlıyor.
+  - Böylece pool'dan gelen chunk farklı girişte reuse edilse bile chunk sınırında kopukluk oluşmuyor.
+- Doğrulama:
+  - `npm run typecheck` ✅
+  - `npm run build` ✅
+- Ek seam güvenliği:
+  - Chunk giriş seçimi artık sadece `dot/power` değil, `wall/empty` dışındaki tüm yol tile'larını kabul ediyor.
+  - `MonotonicUpPath.generate` içinde prev-row komşuluk kontrolü de aynı şekilde güncellendi.
+  - Amaç: trap/buff tile üstünden gelen chunk geçişlerinde yanlış giriş seçilip kopuk seam oluşmasını engellemek.
+- Pooling seam düzeltmesi v2:
+  - Havuz artık tek listeden değil `entryX` bazlı bucket map'ten çalışıyor.
+  - Yeni chunk sadece aynı `entryX` bucket'ındaki template'i reuse ediyor.
+  - Böylece farklı giriş kolonundan gelen template'in seam'de ara duvar/blok geometrisini bozması engellendi.
+  - Pool kapasite limiti korunuyor (`maxRecycledChunkTemplates`).
+- Chaser catch-up logic: 5x when more than 1 chunk behind player; returns to 1x at <=1 chunk behind.
+- Corridor rule added: no more than 6 consecutive upward tiles in same column; forced lateral break inserted when limit is hit (including top-exit stitching).
+- Reworked UI input handling with pointer-first bindPress() (dedupes click/pointer/touch) and applied it to start menu, settings toggles/labels/close/backdrop, pause/game-over buttons.
+- Mobile swipe listeners remain canvas-scoped; UI buttons no longer depend on global window touch behavior.
+- Validation: npm run build passed; Playwright client smoke run completed against #optionsBtn flow.
