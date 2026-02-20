@@ -86,6 +86,7 @@ import {
   shipCenterFromBodyPosition,
   shipCenterVelocityFromBodyVelocity,
 } from "./shipTransform.js";
+import { lineIntersectsRect } from "./geometryMath.js";
 import {
   recordShipTransformHistory as syncRecordShipTransformHistory,
   syncPhysicsFromSim as syncPhysicsFromSimState,
@@ -1629,7 +1630,7 @@ export class AstroPartySimulation implements SimState {
         if (!block.body || block.hp <= 0) continue;
         const half = block.block.width * 0.5;
         if (
-          this.lineIntersectsRect(
+          lineIntersectsRect(
             start,
             end,
             block.body.position.x,
@@ -1641,68 +1642,6 @@ export class AstroPartySimulation implements SimState {
         }
       }
     }
-  }
-
-  private lineIntersectsRect(
-    start: { x: number; y: number },
-    end: { x: number; y: number },
-    rectX: number,
-    rectY: number,
-    halfSize: number,
-  ): boolean {
-    const left = rectX - halfSize;
-    const right = rectX + halfSize;
-    const top = rectY - halfSize;
-    const bottom = rectY + halfSize;
-
-    if (
-      this.pointInRect(start, left, right, top, bottom) ||
-      this.pointInRect(end, left, right, top, bottom)
-    ) {
-      return true;
-    }
-
-    return (
-      this.lineIntersectsLine(start, end, { x: left, y: top }, { x: right, y: top }) ||
-      this.lineIntersectsLine(start, end, { x: right, y: top }, { x: right, y: bottom }) ||
-      this.lineIntersectsLine(start, end, { x: right, y: bottom }, { x: left, y: bottom }) ||
-      this.lineIntersectsLine(start, end, { x: left, y: bottom }, { x: left, y: top })
-    );
-  }
-
-  private pointInRect(
-    point: { x: number; y: number },
-    left: number,
-    right: number,
-    top: number,
-    bottom: number,
-  ): boolean {
-    return (
-      point.x >= left &&
-      point.x <= right &&
-      point.y >= top &&
-      point.y <= bottom
-    );
-  }
-
-  private lineIntersectsLine(
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    p3: { x: number; y: number },
-    p4: { x: number; y: number },
-  ): boolean {
-    const denominator =
-      (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
-    if (denominator === 0) return false;
-
-    const ua =
-      ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) /
-      denominator;
-    const ub =
-      ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) /
-      denominator;
-
-    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
   }
 
   private checkJoustYellowBlockCollisions(): void {

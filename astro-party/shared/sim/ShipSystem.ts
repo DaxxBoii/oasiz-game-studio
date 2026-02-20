@@ -21,6 +21,11 @@ import {
 } from "./constants.js";
 import { normalizeAngle, clamp } from "./utils.js";
 import {
+  getAsteroidWorldVertices,
+  pointInPolygon,
+  segmentsIntersect,
+} from "./geometryMath.js";
+import {
   PILOT_COLLIDER_VERTICES,
   transformLocalVertices,
 } from "../geometry/EntityShapes.js";
@@ -456,87 +461,6 @@ function checkLinePilotCollision(
       return true;
     }
   }
-
-  return false;
-}
-
-function getAsteroidWorldVertices(asteroid: {
-  x: number;
-  y: number;
-  angle: number;
-  vertices: Array<{ x: number; y: number }>;
-}): Array<{ x: number; y: number }> {
-  return transformLocalVertices(
-    asteroid.vertices,
-    asteroid.x,
-    asteroid.y,
-    asteroid.angle,
-  );
-}
-
-function pointInPolygon(
-  x: number,
-  y: number,
-  vertices: Array<{ x: number; y: number }>,
-): boolean {
-  let inside = false;
-  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-    const xi = vertices[i].x;
-    const yi = vertices[i].y;
-    const xj = vertices[j].x;
-    const yj = vertices[j].y;
-    const intersects =
-      yi > y !== yj > y &&
-      x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-}
-
-function segmentsIntersect(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number,
-  dx: number,
-  dy: number,
-): boolean {
-  const orient = (
-    px: number,
-    py: number,
-    qx: number,
-    qy: number,
-    rx: number,
-    ry: number,
-  ): number => (qx - px) * (ry - py) - (qy - py) * (rx - px);
-
-  const onSegment = (
-    px: number,
-    py: number,
-    qx: number,
-    qy: number,
-    rx: number,
-    ry: number,
-  ): boolean =>
-    Math.min(px, qx) <= rx &&
-    rx <= Math.max(px, qx) &&
-    Math.min(py, qy) <= ry &&
-    ry <= Math.max(py, qy);
-
-  const o1 = orient(ax, ay, bx, by, cx, cy);
-  const o2 = orient(ax, ay, bx, by, dx, dy);
-  const o3 = orient(cx, cy, dx, dy, ax, ay);
-  const o4 = orient(cx, cy, dx, dy, bx, by);
-
-  if ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)) return true;
-
-  const eps = 1e-9;
-  if (Math.abs(o1) <= eps && onSegment(ax, ay, bx, by, cx, cy)) return true;
-  if (Math.abs(o2) <= eps && onSegment(ax, ay, bx, by, dx, dy)) return true;
-  if (Math.abs(o3) <= eps && onSegment(cx, cy, dx, dy, ax, ay)) return true;
-  if (Math.abs(o4) <= eps && onSegment(cx, cy, dx, dy, bx, by)) return true;
 
   return false;
 }

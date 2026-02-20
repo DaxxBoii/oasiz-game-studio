@@ -19,6 +19,11 @@ import {
 } from "./constants.js";
 import { TURRET_TUNING } from "./mapFeatureTuning.js";
 import { normalizeAngle, clamp } from "./utils.js";
+import {
+  distanceSqPointToSegment,
+  getAsteroidWorldVertices,
+  pointInPolygon,
+} from "./geometryMath.js";
 
 export function updateLaserBeams(sim: SimState): void {
   for (const beam of sim.laserBeams) {
@@ -515,58 +520,6 @@ function checkCircleAsteroidCollision(
   }
 
   return false;
-}
-
-function getAsteroidWorldVertices(asteroid: RuntimeAsteroid): Array<{ x: number; y: number }> {
-  const cos = Math.cos(asteroid.angle);
-  const sin = Math.sin(asteroid.angle);
-  return asteroid.vertices.map((vertex) => ({
-    x: asteroid.x + vertex.x * cos - vertex.y * sin,
-    y: asteroid.y + vertex.x * sin + vertex.y * cos,
-  }));
-}
-
-function pointInPolygon(
-  x: number,
-  y: number,
-  vertices: Array<{ x: number; y: number }>,
-): boolean {
-  let inside = false;
-  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-    const xi = vertices[i].x;
-    const yi = vertices[i].y;
-    const xj = vertices[j].x;
-    const yj = vertices[j].y;
-    const intersects =
-      yi > y !== yj > y &&
-      x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi;
-    if (intersects) inside = !inside;
-  }
-  return inside;
-}
-
-function distanceSqPointToSegment(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-): number {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq <= 1e-9) {
-    const vx = px - ax;
-    const vy = py - ay;
-    return vx * vx + vy * vy;
-  }
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
-  const cx = ax + t * dx;
-  const cy = ay + t * dy;
-  const vx = px - cx;
-  const vy = py - cy;
-  return vx * vx + vy * vy;
 }
 
 export function getJoustSwordGeometry(ship: ShipState): {
