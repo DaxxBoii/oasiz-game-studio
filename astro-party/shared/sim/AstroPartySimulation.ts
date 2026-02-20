@@ -24,7 +24,6 @@ import type {
   PlayerListPayload,
   PlayerListMeta,
   RoundResultPayload,
-  ShipState,
   DebugPhysicsTuningPayload,
   DebugPhysicsTuningSnapshot,
   SimState,
@@ -45,11 +44,7 @@ import {
   ROUND_RESULTS_DURATION_MS,
   FIRE_COOLDOWN_MS,
   MAX_AMMO,
-  PILOT_SURVIVAL_MS,
-  POWERUP_DESPAWN_MS,
   HOMING_MISSILE_LIFETIME_MS,
-  ASTEROID_RESTITUTION,
-  ASTEROID_FRICTION,
   POWERUP_SHIELD_HITS,
   POWERUP_MAGNETIC_RADIUS,
   POWERUP_MAGNETIC_SPEED,
@@ -67,7 +62,6 @@ import {
 } from "./maps.js";
 import {
   REPULSION_TUNING,
-  TURRET_TUNING,
   VORTEX_TUNING,
   sampleMapField,
 } from "./mapFeatureTuning.js";
@@ -83,11 +77,21 @@ import {
   sanitizeDebugPhysicsTuningPayload,
 } from "./simulationPhysicsTuning.js";
 import {
+  buildPlayerListPayload,
+  buildSimulationSnapshot,
+} from "./simulationSnapshot.js";
+import {
   shipBodyPositionFromCenter,
   shipBodyVelocityFromCenterVelocity,
   shipCenterFromBodyPosition,
   shipCenterVelocityFromBodyVelocity,
 } from "./shipTransform.js";
+import {
+  recordShipTransformHistory as syncRecordShipTransformHistory,
+  syncPhysicsFromSim as syncPhysicsFromSimState,
+  syncSimFromPhysics as syncSimFromPhysicsState,
+  type ShipTransformHistoryEntry,
+} from "./simulationStateSync.js";
 
 // System imports
 import { updateBots } from "./AISystem.js";
@@ -131,15 +135,7 @@ import {
 
 const { Body } = Matter;
 
-const LAG_COMP_HISTORY_MS = 500;
 const LAG_COMP_MAX_REWIND_MS = 200;
-
-interface ShipTransformHistoryEntry {
-  atMs: number;
-  x: number;
-  y: number;
-  angle: number;
-}
 
 interface RuntimeYellowBlock {
   block: YellowBlock;
@@ -1420,307 +1416,58 @@ export class AstroPartySimulation implements SimState {
   // ============= PRIVATE HELPERS =============
 
   private recordShipTransformHistory(): void {
-    const minTimeMs = this.nowMs - LAG_COMP_HISTORY_MS;
-
-    for (const playerId of this.playerOrder) {
-      const player = this.players.get(playerId);
-      if (!player || !player.ship.alive) continue;
-
-      let history = this.shipTransformHistory.get(playerId);
-      if (!history) {
-        history = [];
-        this.shipTransformHistory.set(playerId, history);
-      }
-
-      history.push({
-        atMs: this.nowMs,
-        x: player.ship.x,
-        y: player.ship.y,
-        angle: player.ship.angle,
-      });
-
-      while (history.length > 0 && history[0].atMs < minTimeMs) {
-        history.shift();
-      }
-    }
-
-    for (const [playerId, history] of this.shipTransformHistory) {
-      if (!this.players.has(playerId)) {
-        this.shipTransformHistory.delete(playerId);
-        continue;
-      }
-      while (history.length > 0 && history[0].atMs < minTimeMs) {
-        history.shift();
-      }
-      if (history.length <= 0) {
-        this.shipTransformHistory.delete(playerId);
-      }
-    }
+    syncRecordShipTransformHistory({
+      nowMs: this.nowMs,
+      playerOrder: this.playerOrder,
+      players: this.players,
+      shipTransformHistory: this.shipTransformHistory,
+    });
   }
 
   private syncPhysicsFromSim(): void {
-    const materials = this.resolveMaterialValues();
-    const shipRestitution = materials.SHIP_RESTITUTION;
-    const shipFriction = materials.SHIP_FRICTION;
-    const shipFrictionAir = materials.SHIP_FRICTION_AIR;
-    const shipAngularDamping = materials.SHIP_ANGULAR_DAMPING;
-    const wallRestitution = materials.WALL_RESTITUTION;
-    const wallFriction = materials.WALL_FRICTION;
-    this.physics.setWallMaterials(wallRestitution, wallFriction);
-
-    const aliveShips = new Set<string>();
-    for (const playerId of this.playerOrder) {
-      const player = this.players.get(playerId);
-      if (!player || !player.ship.alive) continue;
-      aliveShips.add(playerId);
-      const existing = this.shipBodies.get(playerId);
-      if (!existing) {
-        const body = this.physics.createShip(player.ship.x, player.ship.y, playerId, {
-          frictionAir: shipFrictionAir,
-          restitution: shipRestitution,
-          friction: shipFriction,
-          angularDamping: shipAngularDamping,
-        });
-        Body.setAngle(body, player.ship.angle);
-        Body.setPosition(
-          body,
-          shipBodyPositionFromCenter(player.ship.x, player.ship.y, player.ship.angle),
-        );
-        Body.setAngularVelocity(body, player.angularVelocity);
-        Body.setVelocity(
-          body,
-          shipBodyVelocityFromCenterVelocity(
-            player.ship.vx,
-            player.ship.vy,
-            player.ship.angle,
-            player.angularVelocity,
-          ),
-        );
-        this.shipBodies.set(playerId, body);
-      } else {
-        existing.restitution = shipRestitution;
-        existing.friction = shipFriction;
-        existing.frictionAir = shipFrictionAir;
-        (existing as unknown as { angularDamping?: number }).angularDamping =
-          shipAngularDamping;
-      }
-    }
-    for (const [playerId] of this.shipBodies) {
-      if (!aliveShips.has(playerId)) this.removeShipBody(playerId);
-    }
-
-    const aliveAsteroids = new Set<string>();
-    for (const asteroid of this.asteroids) {
-      if (!asteroid.alive) continue;
-      aliveAsteroids.add(asteroid.id);
-      const existing = this.asteroidBodies.get(asteroid.id);
-      if (!existing) {
-        const body = this.physics.createAsteroid(
-          asteroid.x,
-          asteroid.y,
-          asteroid.vertices.map((vertex) => ({ x: vertex.x, y: vertex.y })),
-          { x: asteroid.vx, y: asteroid.vy },
-          asteroid.angle,
-          asteroid.angularVelocity,
-          asteroid.id,
-          ASTEROID_RESTITUTION,
-          ASTEROID_FRICTION,
-        );
-        this.asteroidBodies.set(asteroid.id, body);
-      }
-    }
-    for (const [asteroidId] of this.asteroidBodies) {
-      if (!aliveAsteroids.has(asteroidId)) this.removeAsteroidBody(asteroidId);
-    }
-
-    const alivePilots = new Set<string>();
-    for (const [playerId, pilot] of this.pilots) {
-      if (!pilot.alive) continue;
-      alivePilots.add(playerId);
-      const existing = this.pilotBodies.get(playerId);
-      if (!existing) {
-        const body = this.physics.createPilot(pilot.x, pilot.y, playerId, {
-          frictionAir: materials.PILOT_FRICTION_AIR,
-          angularDamping: materials.PILOT_ANGULAR_DAMPING,
-          initialAngle: pilot.angle,
-          initialAngularVelocity: pilot.angularVelocity,
-          vx: pilot.vx,
-          vy: pilot.vy,
-        });
-        this.pilotBodies.set(playerId, body);
-      } else {
-        existing.frictionAir = materials.PILOT_FRICTION_AIR;
-        (existing as unknown as { angularDamping?: number }).angularDamping =
-          materials.PILOT_ANGULAR_DAMPING;
-      }
-    }
-    for (const [playerId] of this.pilotBodies) {
-      if (!alivePilots.has(playerId)) this.removePilotBody(playerId);
-    }
-
-    const aliveProjectiles = new Set<string>();
-    for (const projectile of this.projectiles) {
-      aliveProjectiles.add(projectile.id);
-      const existing = this.projectileBodies.get(projectile.id);
-      if (!existing) {
-        const body = this.physics.createProjectile(
-          projectile.x,
-          projectile.y,
-          projectile.vx,
-          projectile.vy,
-          projectile.ownerId,
-          projectile.id,
-        );
-        this.projectileBodies.set(projectile.id, body);
-      }
-    }
-    for (const [projectileId] of this.projectileBodies) {
-      if (!aliveProjectiles.has(projectileId)) this.removeProjectileBody(projectileId);
-    }
-
-    const alivePowerUps = new Set<string>();
-    for (const powerUp of this.powerUps) {
-      if (!powerUp.alive) continue;
-      alivePowerUps.add(powerUp.id);
-      const existing = this.powerUpBodies.get(powerUp.id);
-      if (!existing) {
-        const body = this.physics.createPowerUp(
-          powerUp.x,
-          powerUp.y,
-          powerUp.type,
-          powerUp.id,
-        );
-        this.powerUpBodies.set(powerUp.id, body);
-      } else {
-        Body.setPosition(existing, { x: powerUp.x, y: powerUp.y });
-      }
-    }
-    for (const [powerUpId] of this.powerUpBodies) {
-      if (!alivePowerUps.has(powerUpId)) this.removePowerUpBody(powerUpId);
-    }
-
-    const aliveBullets = new Set<string>();
-    for (const bullet of this.turretBullets) {
-      if (!bullet.alive || bullet.exploded) continue;
-      aliveBullets.add(bullet.id);
-      const existing = this.turretBulletBodies.get(bullet.id);
-      if (!existing) {
-        const body = this.physics.createTurretBullet(
-          bullet.x,
-          bullet.y,
-          bullet.vx,
-          bullet.vy,
-          TURRET_TUNING.bulletRadius,
-          bullet.id,
-        );
-        this.turretBulletBodies.set(bullet.id, body);
-      }
-    }
-    for (const [bulletId] of this.turretBulletBodies) {
-      if (!aliveBullets.has(bulletId)) this.removeTurretBulletBody(bulletId);
-    }
-
-    if (this.turret && this.turret.alive) {
-      if (!this.turretBody) {
-        this.turretBody = this.physics.createTurret(this.turret.x, this.turret.y);
-      } else {
-        Body.setPosition(this.turretBody, { x: this.turret.x, y: this.turret.y });
-      }
-    } else if (this.turretBody) {
-      this.physics.removeBody(this.turretBody);
-      this.turretBody = null;
-    }
+    syncPhysicsFromSimState({
+      resolveMaterialValues: () => this.resolveMaterialValues(),
+      physics: this.physics,
+      playerOrder: this.playerOrder,
+      players: this.players,
+      shipBodies: this.shipBodies,
+      asteroids: this.asteroids,
+      asteroidBodies: this.asteroidBodies,
+      pilots: this.pilots,
+      pilotBodies: this.pilotBodies,
+      projectiles: this.projectiles,
+      projectileBodies: this.projectileBodies,
+      powerUps: this.powerUps,
+      powerUpBodies: this.powerUpBodies,
+      turretBullets: this.turretBullets,
+      turretBulletBodies: this.turretBulletBodies,
+      turret: this.turret,
+      getTurretBody: () => this.turretBody,
+      setTurretBody: (body) => {
+        this.turretBody = body;
+      },
+      removeShipBody: this.removeShipBody.bind(this),
+      removeAsteroidBody: this.removeAsteroidBody.bind(this),
+      removePilotBody: this.removePilotBody.bind(this),
+      removeProjectileBody: this.removeProjectileBody.bind(this),
+      removePowerUpBody: this.removePowerUpBody.bind(this),
+      removeTurretBulletBody: this.removeTurretBulletBody.bind(this),
+    });
   }
 
   private syncSimFromPhysics(): void {
-    for (const [playerId, body] of this.shipBodies) {
-      const player = this.players.get(playerId);
-      if (!player || !player.ship.alive) continue;
-      const centerPosition = shipCenterFromBodyPosition(
-        body.position.x,
-        body.position.y,
-        body.angle,
-      );
-      const centerVelocity = shipCenterVelocityFromBodyVelocity(
-        body.velocity.x,
-        body.velocity.y,
-        body.angle,
-        body.angularVelocity,
-      );
-      let x = centerPosition.x;
-      let y = centerPosition.y;
-      let vx = centerVelocity.x;
-      let vy = centerVelocity.y;
-
-      // Safety guard: keep ships recoverable if an extreme impulse tunnels past boundaries.
-      const minX = -ARENA_PADDING;
-      const maxX = ARENA_WIDTH + ARENA_PADDING;
-      const minY = -ARENA_PADDING;
-      const maxY = ARENA_HEIGHT + ARENA_PADDING;
-      if (x < minX || x > maxX || y < minY || y > maxY) {
-        x = clamp(x, 0, ARENA_WIDTH);
-        y = clamp(y, 0, ARENA_HEIGHT);
-
-        if ((x <= 0 && vx < 0) || (x >= ARENA_WIDTH && vx > 0)) vx = 0;
-        if ((y <= 0 && vy < 0) || (y >= ARENA_HEIGHT && vy > 0)) vy = 0;
-
-        Body.setPosition(body, shipBodyPositionFromCenter(x, y, body.angle));
-        Body.setVelocity(
-          body,
-          shipBodyVelocityFromCenterVelocity(vx, vy, body.angle, body.angularVelocity),
-        );
-      }
-
-      player.ship.x = x;
-      player.ship.y = y;
-      player.ship.vx = vx;
-      player.ship.vy = vy;
-      player.ship.angle = body.angle;
-      player.angularVelocity = body.angularVelocity;
-    }
-
-    for (const asteroid of this.asteroids) {
-      if (!asteroid.alive) continue;
-      const body = this.asteroidBodies.get(asteroid.id);
-      if (!body) continue;
-      asteroid.x = body.position.x;
-      asteroid.y = body.position.y;
-      asteroid.vx = body.velocity.x;
-      asteroid.vy = body.velocity.y;
-      asteroid.angle = body.angle;
-      asteroid.angularVelocity = body.angularVelocity;
-    }
-
-    for (const [playerId, pilot] of this.pilots) {
-      if (!pilot.alive) continue;
-      const body = this.pilotBodies.get(playerId);
-      if (!body) continue;
-      pilot.x = body.position.x;
-      pilot.y = body.position.y;
-      pilot.vx = body.velocity.x;
-      pilot.vy = body.velocity.y;
-      pilot.angle = body.angle;
-      pilot.angularVelocity = body.angularVelocity;
-    }
-
-    for (const projectile of this.projectiles) {
-      const body = this.projectileBodies.get(projectile.id);
-      if (!body) continue;
-      projectile.x = body.position.x;
-      projectile.y = body.position.y;
-      projectile.vx = body.velocity.x;
-      projectile.vy = body.velocity.y;
-    }
-
-    for (const bullet of this.turretBullets) {
-      if (!bullet.alive || bullet.exploded) continue;
-      const body = this.turretBulletBodies.get(bullet.id);
-      if (!body) continue;
-      bullet.x = body.position.x;
-      bullet.y = body.position.y;
-      bullet.vx = body.velocity.x;
-      bullet.vy = body.velocity.y;
-    }
+    syncSimFromPhysicsState({
+      players: this.players,
+      shipBodies: this.shipBodies,
+      asteroids: this.asteroids,
+      asteroidBodies: this.asteroidBodies,
+      pilots: this.pilots,
+      pilotBodies: this.pilotBodies,
+      projectiles: this.projectiles,
+      projectileBodies: this.projectileBodies,
+      turretBullets: this.turretBullets,
+      turretBulletBodies: this.turretBulletBodies,
+    });
   }
 
   private handleProjectileHitShip(projectileBody: Matter.Body, shipBody: Matter.Body): void {
@@ -2323,185 +2070,39 @@ export class AstroPartySimulation implements SimState {
   }
 
   private buildPlayerPayload(): PlayerListPayload {
-    const meta: PlayerListMeta[] = this.playerOrder
-      .map((playerId) => this.players.get(playerId))
-      .filter((player): player is RuntimePlayer => Boolean(player))
-      .map((player) => ({
-        id: player.id,
-        customName: player.name,
-        profileName: player.name,
-        botType: player.botType ?? undefined,
-        colorIndex: player.colorIndex,
-        keySlot: player.keySlot,
-        kills: player.kills,
-        roundWins: player.roundWins,
-        score: player.score,
-        playerState: player.state,
-        isBot: player.isBot,
-      }));
-
-    this.revision += 1;
-    return {
-      order: [...this.playerOrder],
-      meta,
-      hostId: this.leaderPlayerId,
+    const payload = buildPlayerListPayload({
+      playerOrder: this.playerOrder,
+      players: this.players,
+      leaderPlayerId: this.leaderPlayerId,
       revision: this.revision,
-    };
+    });
+    this.revision = payload.revision;
+    return payload;
   }
 
   private buildSnapshot(): SnapshotPayload {
-    const ships: ShipState[] = [];
-    for (const playerId of this.playerOrder) {
-      const player = this.players.get(playerId);
-      if (!player) continue;
-      ships.push({ ...player.ship });
-    }
-
-    const pilots = [...this.pilots.values()]
-      .filter((pilot) => pilot.alive)
-      .map((pilot) => ({
-        id: pilot.id,
-        playerId: pilot.playerId,
-        x: pilot.x,
-        y: pilot.y,
-        vx: pilot.vx,
-        vy: pilot.vy,
-        angle: pilot.angle,
-        spawnTime: pilot.spawnTime,
-        survivalProgress: clamp((this.nowMs - pilot.spawnTime) / PILOT_SURVIVAL_MS, 0, 1),
-        alive: true,
-      }));
-
-    const playerPowerUps: Record<string, PlayerPowerUp | null> = {};
-    this.playerPowerUps.forEach((value, key) => {
-      playerPowerUps[key] = value;
-    });
-
-    const lastProcessedInputSequenceByPlayer: Record<string, number> = {};
-    for (const [playerId, player] of this.players) {
-      lastProcessedInputSequenceByPlayer[playerId] = player.lastProcessedInputSequence;
-    }
-
-    return {
-      ships,
-      pilots,
-      projectiles: this.projectiles.map((proj) => ({
-        id: proj.id,
-        ownerId: proj.ownerId,
-        x: proj.x,
-        y: proj.y,
-        vx: proj.vx,
-        vy: proj.vy,
-        spawnTime: proj.spawnTime,
-      })),
-      asteroids: this.asteroids
-        .filter((asteroid) => asteroid.alive)
-        .map((asteroid) => ({
-          id: asteroid.id,
-          x: asteroid.x,
-          y: asteroid.y,
-          vx: asteroid.vx,
-          vy: asteroid.vy,
-          angle: asteroid.angle,
-          angularVelocity: asteroid.angularVelocity,
-          size: asteroid.size,
-          alive: asteroid.alive,
-          vertices: asteroid.vertices,
-          variant: asteroid.variant,
-          hp: asteroid.hp,
-          maxHp: asteroid.maxHp,
-        })),
-      powerUps: this.powerUps
-        .filter((powerUp) => powerUp.alive)
-        .map((powerUp) => ({
-          id: powerUp.id,
-          x: powerUp.x,
-          y: powerUp.y,
-          type: powerUp.type,
-          spawnTime: powerUp.spawnTime,
-          remainingTimeFraction: clamp(
-            (POWERUP_DESPAWN_MS - (this.nowMs - powerUp.spawnTime)) / POWERUP_DESPAWN_MS,
-            0,
-            1,
-          ),
-          alive: powerUp.alive,
-          magneticRadius: powerUp.magneticRadius,
-          isMagneticActive: powerUp.isMagneticActive,
-        })),
-      laserBeams: this.laserBeams.filter((beam) => beam.alive).map((beam) => ({
-        id: beam.id,
-        ownerId: beam.ownerId,
-        x: beam.x,
-        y: beam.y,
-        angle: beam.angle,
-        spawnTime: beam.spawnTime,
-        alive: beam.alive,
-      })),
-      mines: this.mines.filter((mine) => mine.alive).map((mine) => ({
-        id: mine.id,
-        ownerId: mine.ownerId,
-        x: mine.x,
-        y: mine.y,
-        spawnTime: mine.spawnTime,
-        alive: mine.alive,
-        exploded: mine.exploded,
-        explosionTime: mine.explosionTime,
-        arming: mine.arming,
-        armingStartTime: mine.armingStartTime,
-        triggeringPlayerId: mine.triggeringPlayerId,
-      })),
-      homingMissiles: this.homingMissiles
-        .filter((missile) => missile.alive)
-        .map((missile) => ({
-          id: missile.id,
-          ownerId: missile.ownerId,
-          x: missile.x,
-          y: missile.y,
-          vx: missile.vx,
-          vy: missile.vy,
-          angle: missile.angle,
-          spawnTime: missile.spawnTime,
-          alive: missile.alive,
-        })),
-      turret: this.turret
-        ? {
-            id: this.turret.id,
-            x: this.turret.x,
-            y: this.turret.y,
-            angle: this.turret.angle,
-            alive: this.turret.alive,
-            detectionRadius: this.turret.detectionRadius,
-            orbitRadius: this.turret.orbitRadius,
-            isTracking: this.turret.isTracking,
-            targetAngle: this.turret.targetAngle,
-          }
-        : undefined,
-      turretBullets: this.turretBullets
-        .filter((bullet) => bullet.alive)
-        .map((bullet) => ({
-          id: bullet.id,
-          x: bullet.x,
-          y: bullet.y,
-          vx: bullet.vx,
-          vy: bullet.vy,
-          angle: bullet.angle,
-          spawnTime: bullet.spawnTime,
-          alive: bullet.alive,
-          exploded: bullet.exploded,
-          explosionTime: bullet.explosionTime,
-          explosionRadius: bullet.explosionRadius,
-        })),
-      playerPowerUps,
+    return buildSimulationSnapshot({
+      nowMs: this.nowMs,
+      playerOrder: this.playerOrder,
+      players: this.players,
+      pilots: this.pilots,
+      projectiles: this.projectiles,
+      asteroids: this.asteroids,
+      powerUps: this.powerUps,
+      laserBeams: this.laserBeams,
+      mines: this.mines,
+      homingMissiles: this.homingMissiles,
+      turret: this.turret,
+      turretBullets: this.turretBullets,
+      playerPowerUps: this.playerPowerUps,
       rotationDirection: this.rotationDirection,
       screenShakeIntensity: this.screenShakeIntensity,
       screenShakeDuration: this.screenShakeDuration,
       hostTick: this.hostTick,
       tickDurationMs: this.tickDurationMs,
-      serverNowMs: Date.now(),
-      lastProcessedInputSequenceByPlayer,
       mapId: this.mapId,
       yellowBlockHp: this.yellowBlocks.map((block) => block.hp),
-    };
+    });
   }
 }
 
