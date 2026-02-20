@@ -206,7 +206,13 @@ export class GameRenderer {
 
         renderTurretBullets.forEach((state) => {
           if (state.alive && !state.exploded) {
-            this.renderer.drawTurretBulletRadius(state.x, state.y, 100);
+            this.renderer.drawTurretBulletRadius(
+              state.x,
+              state.y,
+              Number.isFinite(state.explosionRadius)
+                ? state.explosionRadius
+                : 100,
+            );
           }
         });
 

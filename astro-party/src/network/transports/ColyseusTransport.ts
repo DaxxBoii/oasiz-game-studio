@@ -813,10 +813,10 @@ export class ColyseusTransport implements NetworkTransport {
     }
 
     this.applyRoundResultFromState(state);
+    this.applyMapFromState(state);
+    this.applyAdvancedSettingsFromState(state);
     this.applyPhaseFromState(state);
     this.applyCountdownFromState(state);
-    this.applyAdvancedSettingsFromState(state);
-    this.applyMapFromState(state);
     this.applyDevModeFromState(state);
     this.applyDebugStateFromState(state);
 

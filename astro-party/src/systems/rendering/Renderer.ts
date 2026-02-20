@@ -401,14 +401,15 @@ export class Renderer {
 
   drawTurretBullet(state: import("../../types").TurretBulletState): void {
     const { ctx } = this;
-    const { x, y, vx, vy, exploded, explosionTime } = state;
+    const { x, y, vx, vy, exploded, explosionTime, explosionRadius } = state;
     const nowMs = this.getNowMs();
 
     if (exploded && explosionTime > 0) {
       // Draw explosion effect
       const elapsed = nowMs - explosionTime;
       const progress = this.clamp01(elapsed / 500);
-      const radius = 100 * (0.3 + progress * 0.7); // 100px explosion radius
+      const blastRadius = Number.isFinite(explosionRadius) ? explosionRadius : 100;
+      const radius = blastRadius * (0.3 + progress * 0.7);
       const alpha = 1 - progress;
 
       ctx.save();

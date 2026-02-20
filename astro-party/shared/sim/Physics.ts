@@ -386,9 +386,10 @@ export class Physics {
     y: number,
     vx: number,
     vy: number,
+    radius: number,
     bulletId: string,
   ): Matter.Body {
-    const body = Bodies.circle(x, y, 5, {
+    const body = Bodies.circle(x, y, radius, {
       label: "turretBullet",
       frictionAir: 0,
       restitution: 0.5,

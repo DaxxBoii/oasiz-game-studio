@@ -14,17 +14,10 @@ import {
   JOUST_SWORD_LENGTH,
   JOUST_COLLISION_RADIUS,
   POWERUP_SHIELD_HITS,
-  TURRET_ROTATION_SPEED,
-  TURRET_IDLE_ROTATION_SPEED,
-  TURRET_BULLET_SPEED,
-  TURRET_BULLET_LIFETIME_MS,
-  TURRET_BULLET_RADIUS,
-  TURRET_BULLET_IMPACT_RADIUS,
-  TURRET_BULLET_EXPLOSION_RADIUS,
-  TURRET_BULLET_EXPLOSION_DURATION_MS,
   ARENA_WIDTH,
   ARENA_HEIGHT,
 } from "./constants.js";
+import { TURRET_TUNING } from "./mapFeatureTuning.js";
 import { normalizeAngle, clamp } from "./utils.js";
 
 export function updateLaserBeams(sim: SimState): void {
@@ -657,24 +650,29 @@ export function updateTurret(sim: SimState, dtSec: number): void {
       nearest.ship.x - sim.turret.x,
     );
     const diff = normalizeAngle(targetAngle - sim.turret.angle);
-    sim.turret.angle = normalizeAngle(sim.turret.angle + diff * 3.0 * dtSec);
+    sim.turret.angle = normalizeAngle(
+      sim.turret.angle + diff * sim.turret.trackingResponse * dtSec,
+    );
     sim.turret.targetAngle = targetAngle;
     sim.turret.isTracking = true;
-    if (sim.nowMs - sim.turret.lastFireTimeMs >= sim.turret.fireCooldownMs) {
+    if (
+      Math.abs(diff) <= sim.turret.fireAngleThreshold &&
+      sim.nowMs - sim.turret.lastFireTimeMs >= sim.turret.fireCooldownMs
+    ) {
       sim.turret.lastFireTimeMs = sim.nowMs;
       sim.turretBullets.push({
         id: sim.nextEntityId("turret_bullet"),
-        x: sim.turret.x + Math.cos(sim.turret.angle) * 40,
-        y: sim.turret.y + Math.sin(sim.turret.angle) * 40,
-        vx: Math.cos(sim.turret.angle) * TURRET_BULLET_SPEED,
-        vy: Math.sin(sim.turret.angle) * TURRET_BULLET_SPEED,
+        x: sim.turret.x + Math.cos(sim.turret.angle) * sim.turret.muzzleOffset,
+        y: sim.turret.y + Math.sin(sim.turret.angle) * sim.turret.muzzleOffset,
+        vx: Math.cos(sim.turret.angle) * TURRET_TUNING.bulletSpeed,
+        vy: Math.sin(sim.turret.angle) * TURRET_TUNING.bulletSpeed,
         angle: sim.turret.angle,
         spawnTime: sim.nowMs,
         alive: true,
         exploded: false,
         explosionTime: 0,
-        lifetimeMs: TURRET_BULLET_LIFETIME_MS,
-        explosionRadius: TURRET_BULLET_EXPLOSION_RADIUS,
+        lifetimeMs: TURRET_TUNING.bulletLifetimeMs,
+        explosionRadius: TURRET_TUNING.bulletExplosionRadius,
         hitsApplied: false,
       });
       sim.hooks.onSound("fire", "turret");
@@ -684,7 +682,7 @@ export function updateTurret(sim: SimState, dtSec: number): void {
 
   sim.turret.isTracking = false;
   sim.turret.angle = normalizeAngle(
-    sim.turret.angle + TURRET_IDLE_ROTATION_SPEED * dtSec,
+    sim.turret.angle + sim.turret.idleRotationSpeed * dtSec,
   );
 }
 
@@ -708,7 +706,7 @@ export function updateTurretBullets(sim: SimState, dtSec: number): void {
 
     const stillActive =
       !bullet.exploded ||
-      sim.nowMs - bullet.explosionTime < TURRET_BULLET_EXPLOSION_DURATION_MS;
+      sim.nowMs - bullet.explosionTime < TURRET_TUNING.bulletExplosionDurationMs;
 
     if (!bullet.exploded) {
       if (sim.nowMs - bullet.spawnTime > bullet.lifetimeMs) {
@@ -723,7 +721,10 @@ export function updateTurretBullets(sim: SimState, dtSec: number): void {
           if (!player || !player.ship.alive) continue;
           const dx = player.ship.x - bullet.x;
           const dy = player.ship.y - bullet.y;
-          if (dx * dx + dy * dy > TURRET_BULLET_IMPACT_RADIUS * TURRET_BULLET_IMPACT_RADIUS) {
+          if (
+            dx * dx + dy * dy >
+            TURRET_TUNING.bulletImpactRadius * TURRET_TUNING.bulletImpactRadius
+          ) {
             continue;
           }
           bullet.exploded = true;

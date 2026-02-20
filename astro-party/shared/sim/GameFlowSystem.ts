@@ -6,15 +6,12 @@ import {
   MAX_AMMO,
   PILOT_DASH_COOLDOWN_MS,
   PILOT_SURVIVAL_MS,
-  TURRET_DETECTION_RADIUS,
-  TURRET_ORBIT_RADIUS,
-  TURRET_FIRE_COOLDOWN_MS,
-  TURRET_FIRE_ANGLE_THRESHOLD,
   POWERUP_DESPAWN_MS,
   HOMING_MISSILE_LIFETIME_MS,
   MINE_POST_EXPIRY_MS,
   ROUND_RESULTS_DURATION_MS,
 } from "./constants.js";
+import { TURRET_TUNING } from "./mapFeatureTuning.js";
 import { normalizeAngle } from "./utils.js";
 import { spawnInitialAsteroids, scheduleAsteroidSpawn } from "./AsteroidSystem.js";
 import { grantStartingPowerups } from "./PowerUpSystem.js";
@@ -362,13 +359,16 @@ export function spawnTurret(sim: SimState): void {
     y: ARENA_HEIGHT * 0.5,
     angle: 0,
     alive: true,
-    detectionRadius: TURRET_DETECTION_RADIUS,
-    orbitRadius: TURRET_ORBIT_RADIUS,
+    detectionRadius: TURRET_TUNING.detectionRadius,
+    orbitRadius: TURRET_TUNING.orbitRadius,
     isTracking: false,
     targetAngle: 0,
-    lastFireTimeMs: sim.nowMs - TURRET_FIRE_COOLDOWN_MS - 1,
-    fireCooldownMs: TURRET_FIRE_COOLDOWN_MS,
-    fireAngleThreshold: TURRET_FIRE_ANGLE_THRESHOLD,
+    lastFireTimeMs: sim.nowMs - TURRET_TUNING.fireCooldownMs - 1,
+    fireCooldownMs: TURRET_TUNING.fireCooldownMs,
+    fireAngleThreshold: TURRET_TUNING.fireAngleThreshold,
+    trackingResponse: TURRET_TUNING.trackingResponse,
+    idleRotationSpeed: TURRET_TUNING.idleRotationSpeed,
+    muzzleOffset: TURRET_TUNING.muzzleOffset,
   };
 }
 

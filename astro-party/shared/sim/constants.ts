@@ -137,25 +137,6 @@ export const HOMING_MISSILE_ACCURACY = 0.85;
 export const HOMING_MISSILE_DETECTION_RADIUS = 200;
 export const HOMING_MISSILE_RADIUS = 6;
 
-// ============= TURRET =============
-
-export const TURRET_RADIUS = 20;
-export const TURRET_DETECTION_RADIUS = 300;
-export const TURRET_ORBIT_RADIUS = 50;
-export const TURRET_ROTATION_SPEED = 4.0;
-export const TURRET_FIRE_COOLDOWN_MS = 1500;
-export const TURRET_FIRE_ANGLE_THRESHOLD = 0.25;
-export const TURRET_IDLE_ROTATION_SPEED = 0.5;
-
-// ============= TURRET BULLET =============
-
-export const TURRET_BULLET_SPEED = 12;
-export const TURRET_BULLET_LIFETIME_MS = 3000;
-export const TURRET_BULLET_RADIUS = 5;
-export const TURRET_BULLET_IMPACT_RADIUS = 25;
-export const TURRET_BULLET_EXPLOSION_RADIUS = 100;
-export const TURRET_BULLET_EXPLOSION_DURATION_MS = 500;
-
 // ============= AI =============
 
 export const AI_CONFIG = {

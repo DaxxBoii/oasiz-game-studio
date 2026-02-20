@@ -191,6 +191,7 @@ export interface TurretBulletState {
   alive: boolean;
   exploded: boolean;
   explosionTime: number;
+  explosionRadius: number;
 }
 
 export interface PlayerPowerUp {
@@ -377,11 +378,13 @@ export interface RuntimeTurret extends TurretState {
   lastFireTimeMs: number;
   fireCooldownMs: number;
   fireAngleThreshold: number;
+  trackingResponse: number;
+  idleRotationSpeed: number;
+  muzzleOffset: number;
 }
 
 export interface RuntimeTurretBullet extends TurretBulletState {
   lifetimeMs: number;
-  explosionRadius: number;
   hitsApplied: boolean;
 }
 

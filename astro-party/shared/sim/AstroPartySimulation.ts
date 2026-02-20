@@ -78,6 +78,12 @@ import {
   type MapDefinition,
   type YellowBlock,
 } from "./maps.js";
+import {
+  REPULSION_TUNING,
+  TURRET_TUNING,
+  VORTEX_TUNING,
+  sampleMapField,
+} from "./mapFeatureTuning.js";
 import { SHIP_CENTER_OF_GRAVITY_LOCAL } from "../geometry/EntityShapes.js";
 
 // System imports
@@ -611,9 +617,11 @@ export class AstroPartySimulation implements SimState {
     this.countdownValue = COUNTDOWN_SECONDS;
     this.roundEndMs = 0;
     this.resetScoreAndState();
+    // Publish map/room meta before phase/countdown callbacks so clients
+    // can swap visuals before entering the next phase.
+    syncRoomMeta(this);
     this.hooks.onPhase("COUNTDOWN");
     this.hooks.onCountdown(this.countdownValue);
-    syncRoomMeta(this);
     this.syncPlayers();
   }
 
@@ -933,9 +941,11 @@ export class AstroPartySimulation implements SimState {
           player.state = "ACTIVE";
           player.ship.alive = false;
         }
+        // Publish rotated map first so remote clients don't briefly render
+        // countdown with the previous round's map.
+        syncRoomMeta(this);
         this.hooks.onPhase("COUNTDOWN");
         this.hooks.onCountdown(this.countdownValue);
-        syncRoomMeta(this);
         this.syncPlayers();
       }
     }
@@ -1355,11 +1365,9 @@ export class AstroPartySimulation implements SimState {
     const map = this.getCurrentMap();
 
     if (map.centerHoles.length > 0) {
-      const PROJECTILE_VORTEX_DIVERGENCE_FACTOR = 0.45;
-      const TURRET_BULLET_VORTEX_DIVERGENCE_FACTOR = 0.55;
-      const VORTEX_PROJECTILE_DISTANCE_DAMPING = 18;
       for (const hole of map.centerHoles) {
-        const influenceRadius = hole.radius * 2.5;
+        const influenceRadius =
+          hole.radius * VORTEX_TUNING.profile.influenceRadiusMultiplier;
 
         const applyRotationalForce = (
           body: Matter.Body | undefined,
@@ -1370,21 +1378,31 @@ export class AstroPartySimulation implements SimState {
           const dx = body.position.x - hole.x;
           const dy = body.position.y - hole.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist >= influenceRadius || dist <= hole.radius + 10) return;
+          const sample = sampleMapField(
+            dist,
+            influenceRadius,
+            VORTEX_TUNING.profile,
+          );
+          if (!sample) return;
 
           const tx = (-dy / dist) * this.rotationDirection;
           const ty = (dx / dist) * this.rotationDirection;
-          const falloff = (influenceRadius - dist) / influenceRadius;
-          let forceMagnitude = 0.0015 * falloff * falloff;
+          let forceMagnitude = VORTEX_TUNING.baseForce * sample.falloff;
 
           // Projectiles/bullets should curve less aggressively in vortex maps.
           // This makes their divergence feel closer to repulse-style handling.
           if (divergenceFactor < 1) {
-            const damping =
+            // Keep damping floor in tuning so lowering/raising distance
+            // sensitivity stays predictable.
+            const dampingWithFloor =
               distanceDamping > 0
-                ? influenceRadius / Math.max(dist * distanceDamping, 120)
+                ? influenceRadius /
+                  Math.max(
+                    dist * distanceDamping,
+                    VORTEX_TUNING.profile.distanceFloor,
+                  )
                 : 1;
-            forceMagnitude *= divergenceFactor * damping;
+            forceMagnitude *= divergenceFactor * dampingWithFloor;
           }
 
           Body.applyForce(body, body.position, {
@@ -1411,23 +1429,82 @@ export class AstroPartySimulation implements SimState {
         for (const projectile of this.projectiles) {
           applyRotationalForce(
             this.projectileBodies.get(projectile.id),
-            PROJECTILE_VORTEX_DIVERGENCE_FACTOR,
-            VORTEX_PROJECTILE_DISTANCE_DAMPING,
+            VORTEX_TUNING.projectileDivergenceFactor,
+            VORTEX_TUNING.projectileDistanceDamping,
           );
-        }
-
-        for (const powerUp of this.powerUps) {
-          if (!powerUp.alive) continue;
-          applyRotationalForce(this.powerUpBodies.get(powerUp.id));
         }
 
         for (const bullet of this.turretBullets) {
           if (!bullet.alive) continue;
           applyRotationalForce(
             this.turretBulletBodies.get(bullet.id),
-            TURRET_BULLET_VORTEX_DIVERGENCE_FACTOR,
-            VORTEX_PROJECTILE_DISTANCE_DAMPING,
+            VORTEX_TUNING.turretBulletDivergenceFactor,
+            VORTEX_TUNING.projectileDistanceDamping,
           );
+        }
+
+        for (const missile of this.homingMissiles) {
+          if (!missile.alive) continue;
+          const dx = missile.x - hole.x;
+          const dy = missile.y - hole.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const sample = sampleMapField(
+            dist,
+            influenceRadius,
+            VORTEX_TUNING.profile,
+          );
+          if (!sample) continue;
+          const tx = (-dy / dist) * this.rotationDirection;
+          const ty = (dx / dist) * this.rotationDirection;
+          const drift =
+            VORTEX_TUNING.homingMissileTangentialBase +
+            sample.falloff * VORTEX_TUNING.homingMissileTangentialFalloff;
+          missile.vx += tx * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+          missile.vy += ty * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+        }
+
+        for (const mine of this.mines) {
+          if (!mine.alive || mine.exploded) continue;
+          const dx = mine.x - hole.x;
+          const dy = mine.y - hole.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const sample = sampleMapField(
+            dist,
+            influenceRadius,
+            VORTEX_TUNING.profile,
+          );
+          if (!sample) continue;
+          const tx = (-dy / dist) * this.rotationDirection;
+          const ty = (dx / dist) * this.rotationDirection;
+          const drift =
+            VORTEX_TUNING.mineTangentialBase +
+            sample.falloff * VORTEX_TUNING.mineTangentialFalloff;
+          mine.x += tx * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+          mine.y += ty * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+          mine.x = clamp(mine.x, 0, ARENA_WIDTH);
+          mine.y = clamp(mine.y, 0, ARENA_HEIGHT);
+        }
+
+        for (const powerUp of this.powerUps) {
+          if (!powerUp.alive) continue;
+          const dx = powerUp.x - hole.x;
+          const dy = powerUp.y - hole.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const sample = sampleMapField(
+            dist,
+            influenceRadius,
+            VORTEX_TUNING.profile,
+          );
+          if (!sample) continue;
+          const tx = (-dy / dist) * this.rotationDirection;
+          const ty = (dx / dist) * this.rotationDirection;
+          const drift =
+            VORTEX_TUNING.powerUpTangentialBase +
+            sample.falloff * VORTEX_TUNING.powerUpTangentialFalloff;
+          powerUp.x += tx * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+          powerUp.y += ty * drift * dtSec * VORTEX_TUNING.kinematicStepScale;
+          powerUp.x = clamp(powerUp.x, 0, ARENA_WIDTH);
+          powerUp.y = clamp(powerUp.y, 0, ARENA_HEIGHT);
         }
       }
     }
@@ -1435,20 +1512,32 @@ export class AstroPartySimulation implements SimState {
     if (map.repulsionZones.length === 0) return;
 
     for (const zone of map.repulsionZones) {
-      const influenceRadius = zone.radius * 1.75;
+      const influenceRadius =
+        zone.radius * REPULSION_TUNING.profile.influenceRadiusMultiplier;
 
       const applyForceToBody = (body: Matter.Body | undefined): void => {
         if (!body) return;
         const dx = body.position.x - zone.x;
         const dy = body.position.y - zone.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist >= influenceRadius || dist <= 8) return;
+        const sample = sampleMapField(
+          dist,
+          influenceRadius,
+          REPULSION_TUNING.profile,
+        );
+        if (!sample) return;
 
         const nx = dx / dist;
         const ny = dy / dist;
-        const falloff = (influenceRadius - dist) / influenceRadius;
-        const strengthScale = 0.8 + falloff * 1.4;
-        const forceMagnitude = (zone.strength * strengthScale) / Math.max(dist * dist, 60);
+        const strengthScale =
+          REPULSION_TUNING.bodyStrengthBaseScale +
+          sample.falloff * REPULSION_TUNING.bodyStrengthFalloffScale;
+        const forceMagnitude =
+          (zone.strength * strengthScale) /
+          Math.max(
+            Math.pow(dist, REPULSION_TUNING.bodyDistanceExponent),
+            REPULSION_TUNING.profile.distanceFloor,
+          );
 
         Body.applyForce(body, body.position, {
           x: nx * forceMagnitude,
@@ -1475,11 +1564,6 @@ export class AstroPartySimulation implements SimState {
         applyForceToBody(this.projectileBodies.get(projectile.id));
       }
 
-      for (const powerUp of this.powerUps) {
-        if (!powerUp.alive) continue;
-        applyForceToBody(this.powerUpBodies.get(powerUp.id));
-      }
-
       for (const bullet of this.turretBullets) {
         if (!bullet.alive) continue;
         applyForceToBody(this.turretBulletBodies.get(bullet.id));
@@ -1490,13 +1574,20 @@ export class AstroPartySimulation implements SimState {
         const dx = missile.x - zone.x;
         const dy = missile.y - zone.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist >= influenceRadius || dist <= 8) continue;
+        const sample = sampleMapField(
+          dist,
+          influenceRadius,
+          REPULSION_TUNING.profile,
+        );
+        if (!sample) continue;
         const nx = dx / dist;
         const ny = dy / dist;
-        const falloff = (influenceRadius - dist) / influenceRadius;
-        const accel = zone.strength * (6 + falloff * 10);
-        missile.vx += nx * accel * dtSec * 60;
-        missile.vy += ny * accel * dtSec * 60;
+        const accel =
+          zone.strength *
+          (REPULSION_TUNING.homingMissileAccelBase +
+            sample.falloff * REPULSION_TUNING.homingMissileAccelFalloff);
+        missile.vx += nx * accel * dtSec * REPULSION_TUNING.kinematicStepScale;
+        missile.vy += ny * accel * dtSec * REPULSION_TUNING.kinematicStepScale;
       }
 
       for (const mine of this.mines) {
@@ -1504,13 +1595,20 @@ export class AstroPartySimulation implements SimState {
         const dx = mine.x - zone.x;
         const dy = mine.y - zone.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist >= influenceRadius || dist <= 8) continue;
+        const sample = sampleMapField(
+          dist,
+          influenceRadius,
+          REPULSION_TUNING.profile,
+        );
+        if (!sample) continue;
         const nx = dx / dist;
         const ny = dy / dist;
-        const falloff = (influenceRadius - dist) / influenceRadius;
-        const drift = zone.strength * (12 + falloff * 16);
-        mine.x += nx * drift * dtSec * 60;
-        mine.y += ny * drift * dtSec * 60;
+        const drift =
+          zone.strength *
+          (REPULSION_TUNING.mineDriftBase +
+            sample.falloff * REPULSION_TUNING.mineDriftFalloff);
+        mine.x += nx * drift * dtSec * REPULSION_TUNING.kinematicStepScale;
+        mine.y += ny * drift * dtSec * REPULSION_TUNING.kinematicStepScale;
         mine.x = clamp(mine.x, 0, ARENA_WIDTH);
         mine.y = clamp(mine.y, 0, ARENA_HEIGHT);
       }
@@ -1520,13 +1618,20 @@ export class AstroPartySimulation implements SimState {
         const dx = powerUp.x - zone.x;
         const dy = powerUp.y - zone.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist >= influenceRadius || dist <= 8) continue;
+        const sample = sampleMapField(
+          dist,
+          influenceRadius,
+          REPULSION_TUNING.profile,
+        );
+        if (!sample) continue;
         const nx = dx / dist;
         const ny = dy / dist;
-        const falloff = (influenceRadius - dist) / influenceRadius;
-        const drift = zone.strength * (8 + falloff * 12);
-        powerUp.x += nx * drift * dtSec * 60;
-        powerUp.y += ny * drift * dtSec * 60;
+        const drift =
+          zone.strength *
+          (REPULSION_TUNING.powerUpDriftBase +
+            sample.falloff * REPULSION_TUNING.powerUpDriftFalloff);
+        powerUp.x += nx * drift * dtSec * REPULSION_TUNING.kinematicStepScale;
+        powerUp.y += ny * drift * dtSec * REPULSION_TUNING.kinematicStepScale;
         powerUp.x = clamp(powerUp.x, 0, ARENA_WIDTH);
         powerUp.y = clamp(powerUp.y, 0, ARENA_HEIGHT);
       }
@@ -1831,6 +1936,7 @@ export class AstroPartySimulation implements SimState {
           bullet.y,
           bullet.vx,
           bullet.vy,
+          TURRET_TUNING.bulletRadius,
           bullet.id,
         );
         this.turretBulletBodies.set(bullet.id, body);
@@ -2709,6 +2815,7 @@ export class AstroPartySimulation implements SimState {
           alive: bullet.alive,
           exploded: bullet.exploded,
           explosionTime: bullet.explosionTime,
+          explosionRadius: bullet.explosionRadius,
         })),
       playerPowerUps,
       rotationDirection: this.rotationDirection,
