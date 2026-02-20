@@ -1,6 +1,9 @@
-import { SettingsManager } from "../../SettingsManager";
 import { DOUBLE_TAP_WINDOW } from "./constants";
 import { ButtonType, SlotState } from "./types";
+import {
+  triggerInputDashFeedback,
+  triggerInputPressFeedback,
+} from "../../feedback/inputFeedback";
 
 interface KeyPreset {
   name: string;
@@ -112,7 +115,7 @@ export class KeyBindingsManager {
           const now = performance.now();
           if (now - state.lastButtonATime < DOUBLE_TAP_WINDOW) {
             state.dashPending = true;
-            SettingsManager.triggerHaptic("medium");
+            triggerInputDashFeedback();
           }
           state.lastButtonATime = now;
         }
@@ -121,7 +124,7 @@ export class KeyBindingsManager {
         state.buttonB = true;
       }
 
-      SettingsManager.triggerHaptic("light");
+      triggerInputPressFeedback();
     });
 
     window.addEventListener("keyup", (e) => {

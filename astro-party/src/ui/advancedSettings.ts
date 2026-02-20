@@ -7,9 +7,8 @@ import {
   ModePreset,
   SpeedPreset,
 } from "../types";
-import { AudioManager } from "../AudioManager";
-import { triggerHaptic } from "./haptics";
 import { elements } from "./elements";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 type SettingsTab = "elements" | "physics";
 
@@ -78,6 +77,7 @@ export interface AdvancedSettingsUI {
 }
 
 export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
+  const feedback = createUIFeedback("advancedSettings");
   let activeTab: SettingsTab = "elements";
 
   function setActiveTab(tab: SettingsTab): void {
@@ -93,7 +93,6 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
 
   function openModal(): void {
     if (!game.isLeader()) return;
-    triggerHaptic("light");
     elements.advancedSettingsModal.classList.add("active");
     elements.advancedSettingsBackdrop.classList.add("active");
   }
@@ -163,7 +162,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
 
   elements.advancedSettingsBtn.addEventListener("click", () => {
     if (!game.isLeader()) return;
-    AudioManager.playUIClick();
+    feedback.button();
     openModal();
   });
 
@@ -172,82 +171,70 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.advancedSettingsClose.addEventListener("click", () => {
-    AudioManager.playUIClick();
-    triggerHaptic("light");
+    feedback.button();
     closeModal();
   });
 
   elements.advancedSettingsDone.addEventListener("click", () => {
-    AudioManager.playUIClick();
-    triggerHaptic("light");
+    feedback.button();
     closeModal();
   });
 
   elements.advancedTabElements.addEventListener("click", () => {
-    AudioManager.playUIClick();
-    triggerHaptic("light");
+    feedback.button();
     setActiveTab("elements");
   });
 
   elements.advancedTabPhysics.addEventListener("click", () => {
-    AudioManager.playUIClick();
-    triggerHaptic("light");
+    feedback.button();
     setActiveTab("physics");
   });
 
   elements.asteroidsCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().asteroidDensity;
     applySettings({ asteroidDensity: nextInCycle(ASTEROID_ORDER, current) });
   });
 
   elements.startPowerupsToggle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().startPowerups;
     applySettings({ startPowerups: !current });
   });
 
   elements.roundsCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().roundsToWin;
     const next = current >= 6 ? 3 : current + 1;
     applySettings({ roundsToWin: next });
   });
 
   elements.shipSpeedCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().shipSpeed;
     applySettings({ shipSpeed: nextInCycle(SPEED_ORDER, current) });
   });
 
   elements.dashPowerCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().dashPower;
     applySettings({ dashPower: nextInCycle(DASH_ORDER, current) });
   });
 
   elements.rotationPresetCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().rotationPreset;
     applySettings({ rotationPreset: nextInCycle(MODE_PRESET_ORDER, current) });
   });
 
   elements.recoilPresetCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().recoilPreset;
     applySettings({ recoilPreset: nextInCycle(MODE_PRESET_ORDER, current) });
   });
 
   elements.shipRestitutionCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().shipRestitutionPreset;
     applySettings({
       shipRestitutionPreset: nextInCycle(MODE_PRESET_ORDER, current),
@@ -255,8 +242,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.shipFrictionAirCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().shipFrictionAirPreset;
     applySettings({
       shipFrictionAirPreset: nextInCycle(MODE_PRESET_ORDER, current),
@@ -264,8 +250,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.wallRestitutionCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().wallRestitutionPreset;
     applySettings({
       wallRestitutionPreset: nextInCycle(MODE_PRESET_ORDER, current),
@@ -273,8 +258,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.wallFrictionCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().wallFrictionPreset;
     applySettings({
       wallFrictionPreset: nextInCycle(MODE_PRESET_ORDER, current),
@@ -282,8 +266,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.shipFrictionCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().shipFrictionPreset;
     applySettings({
       shipFrictionPreset: nextInCycle(MODE_PRESET_ORDER, current),
@@ -291,8 +274,7 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   });
 
   elements.angularDampingCycle.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const current = game.getAdvancedSettings().angularDampingPreset;
     applySettings({
       angularDampingPreset: nextInCycle(MODE_PRESET_ORDER, current),

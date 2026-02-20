@@ -1,7 +1,10 @@
 import { PLAYER_COLORS } from "../../types";
-import { SettingsManager } from "../../SettingsManager";
 import { DOUBLE_TAP_WINDOW } from "./constants";
 import { ButtonType, SlotState, TouchLayout } from "./types";
+import {
+  triggerInputDashFeedback,
+  triggerInputPressFeedback,
+} from "../../feedback/inputFeedback";
 
 // Corner assignments for 3-4 player layout
 // Each corner has two buttons on adjacent edges
@@ -378,7 +381,7 @@ export class TouchZoneManager {
         }
         this.updateSlotFromTouch(config.slot, config.button, true);
         zone.classList.add("pressed");
-        SettingsManager.triggerHaptic("light");
+        triggerInputPressFeedback();
       },
       { passive: false },
     );
@@ -437,7 +440,7 @@ export class TouchZoneManager {
         const now = performance.now();
         if (now - state.lastButtonATime < DOUBLE_TAP_WINDOW) {
           state.dashPending = true;
-          SettingsManager.triggerHaptic("medium");
+          triggerInputDashFeedback();
         }
         state.lastButtonATime = now;
       }

@@ -1,7 +1,5 @@
 import { Game } from "./Game";
 import { GamePhase, GameMode, MapId, PlayerData } from "./types";
-import { AudioManager } from "./AudioManager";
-import { triggerHaptic } from "./ui/haptics";
 import { createViewportController, tryLockOrientation } from "./ui/viewport";
 import { createScreenController, bindEndScreenUI } from "./ui/screens";
 import { createStartScreenUI } from "./ui/startScreen";
@@ -11,6 +9,10 @@ import { createSettingsUI } from "./ui/settings";
 import { createAdvancedSettingsUI } from "./ui/advancedSettings";
 import { createMapPreviewUI } from "./ui/mapPreview";
 import { CLIENT_DEBUG_BUILD_ENABLED } from "./debug/debugTools";
+import {
+  playCountdownFeedback,
+  playGameEndFeedback,
+} from "./feedback/mainFlowFeedback";
 
 // Declare platform-injected variables
 declare global {
@@ -89,7 +91,7 @@ async function init(): Promise<void> {
         screenController.showScreen("end");
         screenController.updateGameEnd(game.getPlayers());
         if (triggerPhaseEffects) {
-          triggerHaptic("success");
+          playGameEndFeedback();
         }
         screenController.updateControlHints();
         break;
@@ -120,13 +122,7 @@ async function init(): Promise<void> {
     },
 
     onCountdownUpdate: (count: number) => {
-      if (count > 0) {
-        triggerHaptic("light");
-        AudioManager.playCountdown(count);
-      } else {
-        triggerHaptic("medium");
-        AudioManager.playFight();
-      }
+      playCountdownFeedback(count);
     },
     onGameModeChange: (mode: GameMode) => {
       lobbyUI.setModeUI(mode, "remote");

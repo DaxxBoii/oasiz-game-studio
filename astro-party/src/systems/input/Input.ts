@@ -1,5 +1,8 @@
 import { PlayerInput } from "../../types";
-import { SettingsManager } from "../../SettingsManager";
+import {
+  triggerInputDashFeedback,
+  triggerInputPressFeedback,
+} from "../../feedback/inputFeedback";
 
 const DOUBLE_TAP_WINDOW = 300; // ms
 
@@ -76,7 +79,7 @@ export class InputManager {
     e.preventDefault();
     this.buttonA = true;
     this.leftZone?.classList.add("active");
-    this.triggerHaptic("light");
+    triggerInputPressFeedback();
   };
 
   private readonly handleLeftTouchEnd = (): void => {
@@ -93,7 +96,7 @@ export class InputManager {
     e.preventDefault();
     this.buttonB = true;
     this.rightZone?.classList.add("active");
-    this.triggerHaptic("light");
+    triggerInputPressFeedback();
   };
 
   private readonly handleRightTouchEnd = (): void => {
@@ -218,7 +221,7 @@ export class InputManager {
     // Detect double-tap on Button A for dash
     if (this.buttonA && !this.wasButtonA) {
       if (now - this.lastButtonATime < DOUBLE_TAP_WINDOW) {
-        this.triggerHaptic("medium");
+        triggerInputDashFeedback();
         this.onDashDetected?.(); // Send RPC immediately
       }
       this.lastButtonATime = now;
@@ -232,12 +235,6 @@ export class InputManager {
       clientTimeMs: now,
       inputSequence: 0,
     };
-  }
-
-  private triggerHaptic(
-    type: "light" | "medium" | "heavy" | "success" | "error",
-  ): void {
-    SettingsManager.triggerHaptic(type);
   }
 
   getIsMobile(): boolean {

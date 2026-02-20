@@ -1,14 +1,16 @@
 import { Game } from "../Game";
-import { triggerHaptic } from "./haptics";
 import { elements } from "./elements";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 export interface LeaveModalUI {
   openLeaveModal: () => void;
 }
 
 export function createLeaveModal(game: Game): LeaveModalUI {
+  const feedback = createUIFeedback("modals");
+
   function openLeaveModal(): void {
-    triggerHaptic("light");
+    feedback.subtle();
     elements.leaveModal.classList.add("active");
     elements.leaveBackdrop.classList.add("active");
   }
@@ -23,7 +25,7 @@ export function createLeaveModal(game: Game): LeaveModalUI {
   });
 
   elements.leaveCancelBtn.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     closeLeaveModal();
   });
 
@@ -32,7 +34,7 @@ export function createLeaveModal(game: Game): LeaveModalUI {
   });
 
   elements.leaveConfirmBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
+    feedback.subtle();
     closeLeaveModal();
     await game.leaveGame();
   });

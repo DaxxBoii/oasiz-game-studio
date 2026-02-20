@@ -1,13 +1,14 @@
 import { Game } from "../Game";
-import { AudioManager } from "../AudioManager";
-import { triggerHaptic } from "./haptics";
 import { elements } from "./elements";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 export interface StartScreenUI {
   resetStartButtons: () => void;
 }
 
 export function createStartScreenUI(game: Game): StartScreenUI {
+  const feedback = createUIFeedback("startScreen");
+
   function showJoinSection(): void {
     elements.mainButtons.style.display = "none";
     elements.joinSection.classList.add("active");
@@ -30,8 +31,7 @@ export function createStartScreenUI(game: Game): StartScreenUI {
   }
 
   elements.createRoomBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     game.setSessionMode("online");
     elements.createRoomBtn.disabled = true;
     elements.createRoomBtn.textContent = "Creating...";
@@ -50,14 +50,13 @@ export function createStartScreenUI(game: Game): StartScreenUI {
   });
 
   elements.joinRoomBtn.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     game.setSessionMode("online");
     showJoinSection();
   });
 
   elements.localMatchBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     game.setSessionMode("local");
     elements.localMatchBtn.disabled = true;
     elements.localMatchBtn.textContent = "Starting...";
@@ -76,7 +75,7 @@ export function createStartScreenUI(game: Game): StartScreenUI {
   });
 
   elements.backToStartBtn.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     hideJoinSection();
   });
 
@@ -100,12 +99,11 @@ export function createStartScreenUI(game: Game): StartScreenUI {
     if (code.length < 4) {
       elements.joinError.textContent = "Code must be 4 characters";
       elements.joinError.classList.add("active");
-      triggerHaptic("error");
+      feedback.error();
       return;
     }
 
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     elements.submitJoinBtn.disabled = true;
     elements.submitJoinBtn.textContent = "Joining...";
 
@@ -119,13 +117,13 @@ export function createStartScreenUI(game: Game): StartScreenUI {
         elements.joinError.textContent =
           game.consumeLastTransportErrorMessage() ?? "Could not join room";
         elements.joinError.classList.add("active");
-        triggerHaptic("error");
+        feedback.error();
       }
     } catch (e) {
       console.error("[Main] Failed to join room:", e);
       elements.joinError.textContent = "Connection failed";
       elements.joinError.classList.add("active");
-      triggerHaptic("error");
+      feedback.error();
     }
 
     elements.submitJoinBtn.disabled = false;

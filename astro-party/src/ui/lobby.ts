@@ -1,11 +1,10 @@
 import { Game } from "../Game";
 import { BaseGameMode, GameMode, MapId, PlayerData } from "../types";
-import { AudioManager } from "../AudioManager";
-import { triggerHaptic } from "./haptics";
 import { elements } from "./elements";
 import { getMapDefinition } from "../../shared/sim/maps.js";
 import { renderMapPreviewOnCanvas } from "./mapPreview";
 import { escapeHtml } from "./text";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 export interface LobbyUI {
   updateLobbyUI: (players: PlayerData[]) => void;
@@ -17,6 +16,7 @@ export interface LobbyUI {
 }
 
 export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
+  const feedback = createUIFeedback("lobby");
   let addingBot = false;
   let addButtonGuardUntilMs = 0;
   const ADD_BUTTON_TAP_GUARD_MS = 450;
@@ -89,8 +89,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
         e.stopPropagation();
         const playerId = (btn as HTMLElement).dataset.playerId;
         if (playerId) {
-          triggerHaptic("light");
-          AudioManager.playUIClick();
+          feedback.button();
           await game.removeBot(playerId);
         }
       });
@@ -104,8 +103,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
         e.stopPropagation();
         const playerId = (btn as HTMLElement).dataset.playerId;
         if (!playerId) return;
-        triggerHaptic("light");
-        AudioManager.playUIClick();
+        feedback.button();
         (btn as HTMLButtonElement).disabled = true;
         try {
           await game.kickPlayer(playerId);
@@ -334,8 +332,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
 
       card.addEventListener("click", () => {
         if (!game.isLeader()) return;
-        triggerHaptic("light");
-        AudioManager.playUIClick();
+        feedback.button();
         setMapUI(mapId, "local");
         closeMapPicker();
       });
@@ -386,13 +383,13 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     if (game.getSessionMode() === "local") return;
     const code = game.getRoomCode();
     if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
-      triggerHaptic("error");
+      feedback.error();
       console.error("[Lobby] Clipboard API unavailable");
       return;
     }
     void navigator.clipboard.writeText(code)
       .then(() => {
-        triggerHaptic("light");
+        feedback.subtle();
         elements.copyCodeBtn.innerHTML =
           '<svg viewBox="0 0 24 24"><path fill="#22c55e" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
         setTimeout(() => {
@@ -401,15 +398,14 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
         }, 2000);
       })
       .catch((err: unknown) => {
-        triggerHaptic("error");
+        feedback.error();
         console.error("[Lobby] Failed to copy room code:", err);
       });
   });
 
   elements.addAIBotBtn.addEventListener("click", async () => {
     if (!beginAddButtonAction()) return;
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     elements.addAIBotBtn.disabled = true;
 
     try {
@@ -428,8 +424,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     }
     if (!beginAddButtonAction()) return;
     elements.addLocalPlayerBtn.disabled = true;
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
 
     try {
       if (isMobile) {
@@ -457,7 +452,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
 
   elements.keySelectBackdrop.addEventListener("click", hideKeySelectModal);
   elements.keySelectCancel.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     hideKeySelectModal();
   });
 
@@ -468,8 +463,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     if (!option || option.disabled || addingBot) return;
 
     addingBot = true;
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     hideKeySelectModal();
 
     const slot = Number.parseInt(option.dataset.slot || "1");
@@ -483,14 +477,13 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
 
   elements.startGameBtn.addEventListener("click", () => {
     if (!game.canStartGame()) return;
-    triggerHaptic("medium");
+    feedback.confirm();
     game.startGame();
   });
 
   elements.modeCycleBtn.addEventListener("click", () => {
     if (!game.isLeader()) return;
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     const mode = game.getGameMode();
     const anchorMode: BaseGameMode =
       mode === "CUSTOM" ? game.getBaseMode() : mode;
@@ -501,8 +494,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.openMapPickerBtn.addEventListener("click", () => {
-    triggerHaptic("light");
-    AudioManager.playUIClick();
+    feedback.button();
     ensureMapPickerCards();
     updateMapPickerState(game.getMapId());
     renderMapPickerPreviews();
@@ -511,7 +503,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.mapPickerClose.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     closeMapPicker();
   });
 
@@ -523,7 +515,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.leaveLobbyBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
+    feedback.subtle();
     closeMapPicker();
     elements.leaveLobbyBtn.disabled = true;
     await game.leaveGame();

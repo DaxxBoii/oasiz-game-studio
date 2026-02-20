@@ -1,9 +1,12 @@
 import { Renderer } from "../systems/rendering/Renderer";
 import { NetworkManager } from "./NetworkManager";
 import { PlayerManager } from "../managers/PlayerManager";
-import { SettingsManager } from "../SettingsManager";
 import { NETWORK_GAME_FEEL_TUNING } from "./gameFeel/NetworkGameFeelTuning";
 import { SHIP_DODGE_ANGLE_DEG } from "../../shared/sim/constants.js";
+import {
+  triggerMineArmingFeedback,
+  triggerMineExplodeFeedback,
+} from "../feedback/networkFeedback";
 import {
   ASTEROID_COLLIDER_VERTEX_SCALE,
   AsteroidColliderSync,
@@ -671,7 +674,7 @@ export class NetworkSyncSystem {
       ) {
         this.clientArmingMines.add(mineState.id);
         this.renderer.spawnExplosion(mineState.x, mineState.y, "#ff4400");
-        SettingsManager.triggerHaptic("medium");
+        triggerMineArmingFeedback();
       }
       if (mineState.exploded && !this.clientExplodedMines.has(mineState.id)) {
         this.clientExplodedMines.add(mineState.id);
@@ -680,7 +683,7 @@ export class NetworkSyncSystem {
           mineState.y,
           GAME_CONFIG.POWERUP_MINE_EXPLOSION_RADIUS,
         );
-        SettingsManager.triggerHaptic("heavy");
+        triggerMineExplodeFeedback();
       }
     }
 

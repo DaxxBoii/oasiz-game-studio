@@ -14,9 +14,12 @@ import type {
 import { PlayerInputResolver } from "./systems/input/PlayerInputResolver";
 import { DeterministicRNGManager } from "./systems/DeterministicRNGManager";
 import { AdaptiveCameraController } from "./systems/camera/AdaptiveCameraController";
-import { AudioManager } from "./AudioManager";
-import { SettingsManager } from "./SettingsManager";
 import { NETWORK_GAME_FEEL_TUNING } from "./network/gameFeel/NetworkGameFeelTuning";
+import {
+  playAuthoritativeGameSound,
+  playPredictedDashFeedback,
+  playPredictedFireFeedback,
+} from "./feedback/gameplayFeedback";
 import {
   GamePhase,
   GameMode,
@@ -513,8 +516,7 @@ export class Game {
 
     if (NETWORK_GAME_FEEL_TUNING.predictedLocalActionCosmetics.dash) {
       this.networkSync.triggerLocalDashPrediction(myPlayerId);
-      AudioManager.playDash();
-      SettingsManager.triggerHaptic("medium");
+      playPredictedDashFeedback();
       this.lastPredictedDashAtMs = performance.now();
     }
     this.network.sendDashRequest();
@@ -777,8 +779,7 @@ export class Game {
     if (!NETWORK_GAME_FEEL_TUNING.predictedLocalActionCosmetics.fire) return;
 
     this.networkSync.triggerLocalFirePrediction(myPlayerId);
-    AudioManager.playFire();
-    SettingsManager.triggerHaptic("light");
+    playPredictedFireFeedback();
     this.lastPredictedFireAtMs = nowMs;
   }
 
@@ -832,30 +833,7 @@ export class Game {
   }
 
   private playGameSoundLocal(type: string): void {
-    switch (type) {
-      case "fire":
-        AudioManager.playFire();
-        break;
-      case "dash":
-        AudioManager.playDash();
-        break;
-      case "explosion":
-        AudioManager.playExplosion();
-        AudioManager.playPilotEject();
-        break;
-      case "kill":
-        AudioManager.playKill();
-        AudioManager.playPilotDeath();
-        break;
-      case "respawn":
-        AudioManager.playRespawn();
-        break;
-      case "win":
-        AudioManager.playWin();
-        break;
-      default:
-        break;
-    }
+    playAuthoritativeGameSound(type);
   }
 
   private applyRoundResult(payload: RoundResultPayload): void {

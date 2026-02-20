@@ -1,9 +1,9 @@
 import { Game } from "../Game";
 import { PlayerData } from "../types";
-import { triggerHaptic } from "./haptics";
 import { SettingsManager } from "../SettingsManager";
 import { elements } from "./elements";
 import { escapeHtml } from "./text";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 type Screen = "start" | "lobby" | "game" | "end";
 
@@ -311,8 +311,10 @@ export function createScreenController(
 }
 
 export function bindEndScreenUI(game: Game): void {
+  const feedback = createUIFeedback("endScreen");
+
   elements.playAgainBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
+    feedback.subtle();
     if (game.isLeader()) {
       elements.playAgainBtn.disabled = true;
       elements.playAgainBtn.textContent = "Restarting...";
@@ -324,7 +326,7 @@ export function bindEndScreenUI(game: Game): void {
   });
 
   elements.leaveEndBtn.addEventListener("click", async () => {
-    triggerHaptic("light");
+    feedback.subtle();
     elements.leaveEndBtn.disabled = true;
     elements.leaveEndBtn.textContent = "Leaving...";
     await game.leaveGame();

@@ -1,12 +1,14 @@
 import { SettingsManager } from "../SettingsManager";
-import { triggerHaptic, forceLightHaptic } from "./haptics";
 import { elements } from "./elements";
+import { createUIFeedback } from "../feedback/uiFeedback";
 
 export interface SettingsUI {
   updateSettingsUI: () => void;
 }
 
 export function createSettingsUI(openLeaveModal: () => void): SettingsUI {
+  const feedback = createUIFeedback("settings");
+
   function updateSettingsUI(): void {
     const settings = SettingsManager.get();
     elements.toggleMusic.classList.toggle("active", settings.music);
@@ -16,7 +18,7 @@ export function createSettingsUI(openLeaveModal: () => void): SettingsUI {
   }
 
   function openSettingsModal(): void {
-    triggerHaptic("light");
+    feedback.subtle();
     elements.settingsModal.classList.add("active");
     elements.settingsBackdrop.classList.add("active");
   }
@@ -44,32 +46,32 @@ export function createSettingsUI(openLeaveModal: () => void): SettingsUI {
   });
 
   elements.settingsClose.addEventListener("click", () => {
-    triggerHaptic("light");
+    feedback.subtle();
     closeSettingsModal();
   });
 
   elements.toggleMusic.addEventListener("click", () => {
     SettingsManager.toggle("music");
     updateSettingsUI();
-    triggerHaptic("light");
+    feedback.subtle();
   });
 
   elements.toggleFx.addEventListener("click", () => {
     SettingsManager.toggle("fx");
     updateSettingsUI();
-    triggerHaptic("light");
+    feedback.subtle();
   });
 
   elements.toggleHaptics.addEventListener("click", () => {
     SettingsManager.toggle("haptics");
     updateSettingsUI();
-    forceLightHaptic();
+    feedback.forceLight();
   });
 
   elements.toggleHints.addEventListener("click", () => {
     SettingsManager.toggle("controlHints");
     updateSettingsUI();
-    triggerHaptic("light");
+    feedback.subtle();
   });
 
   return { updateSettingsUI };
