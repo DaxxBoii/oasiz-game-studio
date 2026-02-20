@@ -1,8 +1,9 @@
 /**
- * ARCHERY ATTACK — 2D Slingshot Archery Game
+ * ARCHERY ATTACK — Mongolian Horse Archer Game
  *
- * Pull back to aim, wait for the steady window, release to fire.
- * Pure 2D canvas, no external libraries.
+ * Horse gallops across the steppe on a sine-wave bob.
+ * Tap to fire — arrow inherits the horse's vertical velocity.
+ * Time your shot at the top or bottom of the wave where vy ≈ 0.
  */
 
 // ============= TYPES =============
@@ -15,25 +16,44 @@ interface Settings {
 }
 
 interface Arrow {
-  x: number;
-  y: number;
+  worldX: number;
+  screenY: number;
   vx: number;
   vy: number;
   active: boolean;
   angle: number;
+  perfect: boolean;
 }
 
-interface Target {
+interface WorldTarget {
+  worldX: number;
+  screenY: number;
+  postHeight: number;
+  radius: number;
+  hit: boolean;
+}
+
+interface Horse {
+  screenX: number;
+  screenY: number;
+  baseY: number;
+  legPhase: number;
+  bobPhase: number;
+}
+
+interface World {
+  cameraX: number;
+  speed: number;
+  width: number;
+}
+
+interface ScorePopup {
   x: number;
   y: number;
-  radius: number;
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  pathT: number;
-  pathSpeed: number;
-  pathDir: 1 | -1;
+  text: string;
+  color: string;
+  life: number;
+  vy: number;
 }
 
 interface Cloud {
@@ -56,44 +76,44 @@ interface Particle {
 
 // ============= CONFIG =============
 const CONFIG = {
-  // Physics
-  GRAVITY: 0.0012,
-  POWER_SCALE: 0.018,
-  MAX_PULL: 140,
-  PULL_ZONE_RADIUS: 200,
+  // Horse bob (sine wave)
+  BOB_AMPLITUDE: 55,        // px peak-to-center
+  BOB_FREQUENCY: 0.003,     // rad/ms (~2s period)
+  VELOCITY_TRANSFER: 2.0,   // how much bob vy transfers to arrow
+  PERFECT_THRESHOLD: 0.82,  // steadiness above this = "perfect" zone
 
-  // Arrow drawing
-  ARROW_LENGTH: 40,
-  ARROW_HEAD_SIZE: 10,
+  // Horse
+  HORSE_SPEED: 0.22,        // px/ms world-space (fast gallop)
+  HORSE_SCREEN_X: 0.20,
+
+  // World
+  WORLD_WIDTH: 4000,
+  TARGETS_PER_LAP: 8,
+
+  // Arrow
+  ARROW_SPEED: 1.8,
+  ARROW_GRAVITY: 0.0003,
+  ARROW_LENGTH: 36,
+  ARROW_HEAD_SIZE: 8,
 
   // Target
-  TARGET_RADIUS: 35,
-  TARGET_HIT_RADIUS: 40,
-  TARGET_SPEED_MIN: 0.00015,
-  TARGET_SPEED_MAX: 0.0004,
+  TARGET_RADIUS: 28,
+  TARGET_HIT_RADIUS: 34,
 
-  // Layout
-  GROUND_RATIO: 0.15,
-  BOW_X_RATIO: 0.15,
-  BOW_RADIUS: 90,
-  BAND_COLOR: "#8B5E3C",
+  // Parallax
+  PARALLAX_MOUNTAINS: 0.15,
+  PARALLAX_MIDGROUND: 0.5,
+  PARALLAX_GROUND: 1.0,
 
   // Gameplay
   ROUND_TIME_MS: 20000,
-  ARROWS_PER_ROUND: 8,
-  RELOAD_TIME_MS: 800,
+  PERFECT_MULTIPLIER: 2,
 
-  // Wobble — "hold to focus" model
-  // Starts very shaky, calms down over FOCUS_TIME, holds steady for STEADY_WINDOW,
-  // then ramps back up. One chance per aim.
-  WOBBLE_MAX: 0.22,            // max wobble (radians) at start
-  WOBBLE_MIN: 0.01,            // near-perfect steadiness during window
-  FOCUS_TIME_MS: 3000,         // ms to ramp from max wobble to steady
-  STEADY_WINDOW_MS: 500,       // ms of steady aim before it deteriorates
-  DETERIORATE_TIME_MS: 1500,   // ms to ramp back to max wobble after window
-  WOBBLE_NOISE_SPEED: 0.005,   // high-freq jitter speed
+  // Layout
+  GROUND_RATIO: 0.18,
 
-  RING_COLORS: ["#FFD700", "#FF4444", "#4488FF", "#222222", "#FFFFFF"],
+  // Ring scoring
+  RING_COLORS: ["#FFD700", "#FF4444", "#4488FF", "#333333", "#EEEEEE"],
 };
 
 // ============= GLOBALS =============
@@ -110,6 +130,7 @@ const pauseBtn = document.getElementById("pauseBtn")!;
 const scoreDisplay = document.getElementById("scoreDisplay")!;
 const currentScoreEl = document.getElementById("currentScore")!;
 const finalScoreEl = document.getElementById("finalScore")!;
+const fireBtn = document.getElementById("fireBtn")!;
 
 // State
 let gameState: GameState = "START";
@@ -117,41 +138,38 @@ let w = window.innerWidth;
 let h = window.innerHeight;
 const isMobile = window.matchMedia("(pointer: coarse)").matches;
 
-// Score, timer, ammo
 let score = 0;
 let timeRemaining = CONFIG.ROUND_TIME_MS;
-let arrowsLeft = CONFIG.ARROWS_PER_ROUND;
 
-// Settings
 let settings: Settings = loadSettings();
 
-// Animation
 let animationFrameId: number;
 let lastTime = 0;
 
-// Scene objects
 let groundY = 0;
-let bowAnchor = { x: 0, y: 0 };
-let target: Target = {
-  x: 0, y: 0, radius: CONFIG.TARGET_RADIUS,
-  startX: 0, startY: 0, endX: 0, endY: 0,
-  pathT: 0, pathSpeed: 0.0003, pathDir: 1,
+
+// Derived bob velocity (updated each frame)
+let horseBobVelocity = 0;
+
+let world: World = {
+  cameraX: 0,
+  speed: CONFIG.HORSE_SPEED,
+  width: CONFIG.WORLD_WIDTH,
 };
+
+let horse: Horse = {
+  screenX: 0,
+  screenY: 0,
+  baseY: 0,
+  legPhase: 0,
+  bobPhase: 0,
+};
+
+let targets: WorldTarget[] = [];
 let arrows: Arrow[] = [];
 let particles: Particle[] = [];
 let clouds: Cloud[] = [];
-
-// Aiming state
-let isAiming = false;
-let pullPoint = { x: 0, y: 0 };
-let pullDist = 0;
-let reachedMaxPull = false;
-let aimHoldTime = 0;      // ms spent holding the pull
-let currentWobble = 0;    // current wobble magnitude (radians)
-let wobbleOffset = 0;     // actual angular offset applied this frame
-
-// Reload cooldown
-let reloadTimer = 0;      // ms remaining before next shot allowed
+let scorePopups: ScorePopup[] = [];
 
 // ============= CANVAS SETUP =============
 function resizeCanvas(): void {
@@ -159,12 +177,19 @@ function resizeCanvas(): void {
   h = window.innerHeight;
   canvas.width = w;
   canvas.height = h;
-
   groundY = h * (1 - CONFIG.GROUND_RATIO);
-  bowAnchor.x = w * CONFIG.BOW_X_RATIO;
-  bowAnchor.y = h * 0.5;
+  horse.screenX = w * CONFIG.HORSE_SCREEN_X;
+  horse.baseY = groundY - 5;
+  horse.screenY = horse.baseY;
+}
 
-  console.log("[resizeCanvas] Canvas resized to:", w, "x", h);
+// ============= COORDINATE TRANSFORMS =============
+function worldToScreen(worldX: number): number {
+  return worldX - world.cameraX + horse.screenX;
+}
+
+function screenToWorld(screenX: number): number {
+  return screenX + world.cameraX - horse.screenX;
 }
 
 // ============= HAPTICS =============
@@ -194,93 +219,99 @@ function saveSettings(): void {
   localStorage.setItem("archeryAttack_settings", JSON.stringify(settings));
 }
 
-// ============= TARGET =============
-function repositionTarget(): void {
-  const pad = CONFIG.TARGET_RADIUS + 10;
-  const minX = w * 0.4;
-  const maxX = w * 0.92;
-  const minY = h * 0.12;
-  const maxY = groundY - pad;
-
-  const x1 = minX + Math.random() * (maxX - minX);
-  const y1 = minY + Math.random() * (maxY - minY);
-  const x2 = minX + Math.random() * (maxX - minX);
-  const y2 = minY + Math.random() * (maxY - minY);
-
-  target.startX = x1;
-  target.startY = y1;
-  target.endX = x2;
-  target.endY = y2;
-  target.pathT = 0;
-  target.pathDir = 1;
-  target.pathSpeed =
-    CONFIG.TARGET_SPEED_MIN +
-    Math.random() * (CONFIG.TARGET_SPEED_MAX - CONFIG.TARGET_SPEED_MIN);
-  target.x = x1;
-  target.y = y1;
-}
-
-function updateTarget(dt: number): void {
-  target.pathT += target.pathSpeed * dt * target.pathDir;
-
-  if (target.pathT >= 1) {
-    target.pathT = 1;
-    target.pathDir = -1;
-  } else if (target.pathT <= 0) {
-    target.pathT = 0;
-    target.pathDir = 1;
-  }
-
-  const t = target.pathT;
-  const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-
-  target.x = target.startX + (target.endX - target.startX) * ease;
-  target.y = target.startY + (target.endY - target.startY) * ease;
-}
-
-// ============= WOBBLE =============
-function updateWobble(dt: number): void {
-  if (!isAiming) {
-    currentWobble = 0;
-    wobbleOffset = 0;
-    return;
-  }
-
-  aimHoldTime += dt;
-
-  const t = aimHoldTime;
-  const focusEnd = CONFIG.FOCUS_TIME_MS;
-  const steadyEnd = focusEnd + CONFIG.STEADY_WINDOW_MS;
-  const detEnd = steadyEnd + CONFIG.DETERIORATE_TIME_MS;
-
-  let wobbleFrac: number; // 0 = perfectly steady, 1 = max wobble
-  if (t < focusEnd) {
-    // Phase 1: focusing — ramp down from 1 to 0 with easeOutCubic
-    const p = t / focusEnd;
-    wobbleFrac = 1 - p * p * p;
-  } else if (t < steadyEnd) {
-    // Phase 2: steady window — near zero
-    wobbleFrac = 0;
-  } else if (t < detEnd) {
-    // Phase 3: deteriorating — ramp back up
-    const p = (t - steadyEnd) / CONFIG.DETERIORATE_TIME_MS;
-    wobbleFrac = p * p;
-  } else {
-    // Phase 4: fully shaky again
-    wobbleFrac = 1;
-  }
-
-  currentWobble = CONFIG.WOBBLE_MIN + (CONFIG.WOBBLE_MAX - CONFIG.WOBBLE_MIN) * wobbleFrac;
-
-  // High-frequency noise within the wobble magnitude
-  const noise = Math.sin(t * CONFIG.WOBBLE_NOISE_SPEED * 7.3)
-    * 0.6 + Math.sin(t * CONFIG.WOBBLE_NOISE_SPEED * 13.1) * 0.4;
-  wobbleOffset = noise * currentWobble;
-}
-
-/** Returns 0 = max wobble, 1 = perfectly steady */
+// ============= BOB STEADINESS =============
+/** 0 = max velocity (mid-wave), 1 = zero velocity (peak/trough) */
 function getSteadiness(): number {
-  return 1 - (currentWobble - CONFIG.WOBBLE_MIN) / (CONFIG.WOBBLE_MAX - CONFIG.WOBBLE_MIN);
+  const maxV = CONFIG.BOB_AMPLITUDE * CONFIG.BOB_FREQUENCY;
+  return 1 - Math.abs(horseBobVelocity) / maxV;
+}
+
+// ============= TARGET GENERATION =============
+function generateTargets(): void {
+  targets = [];
+  const spacing = world.width / (CONFIG.TARGETS_PER_LAP + 1);
+
+  for (let i = 0; i < CONFIG.TARGETS_PER_LAP; i++) {
+    const jitter = (Math.random() - 0.5) * spacing * 0.4;
+    const worldX = spacing * (i + 1) + jitter;
+    const postHeight = 80 + Math.random() * 120;
+    const screenY = groundY - postHeight;
+
+    targets.push({
+      worldX,
+      screenY,
+      postHeight,
+      radius: CONFIG.TARGET_RADIUS,
+      hit: false,
+    });
+  }
+}
+
+// ============= AUTO-AIM =============
+function getBowPosition(): { x: number; y: number } {
+  return {
+    x: horse.screenX + 20,
+    y: horse.screenY - 75,
+  };
+}
+
+function findNearestTarget(): WorldTarget | null {
+  const bowPos = getBowPosition();
+  const bowWorldX = screenToWorld(bowPos.x);
+  let best: WorldTarget | null = null;
+  let bestDist = Infinity;
+
+  for (const t of targets) {
+    if (t.hit) continue;
+    const dx = t.worldX - bowWorldX;
+    if (dx < -50) continue;
+    const screenX = worldToScreen(t.worldX);
+    if (screenX < 0 || screenX > w + 100) continue;
+    const dy = t.screenY - bowPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = t;
+    }
+  }
+  return best;
+}
+
+function getAutoAimAngle(target: WorldTarget): number {
+  const bowPos = getBowPosition();
+  const targetScreenX = worldToScreen(target.worldX);
+  const dx = targetScreenX - bowPos.x;
+  const dy = target.screenY - bowPos.y;
+  return Math.atan2(dy, dx);
+}
+
+// ============= FIRE =============
+function fireArrow(): void {
+  const nearestTarget = findNearestTarget();
+  if (!nearestTarget) return;
+
+  const bowPos = getBowPosition();
+  const baseAngle = getAutoAimAngle(nearestTarget);
+  const steadiness = getSteadiness();
+  const isPerfect = steadiness >= CONFIG.PERFECT_THRESHOLD;
+
+  // Arrow fires along auto-aim angle, but inherits horse bob velocity as vy offset
+  const baseVx = Math.cos(baseAngle) * CONFIG.ARROW_SPEED;
+  const baseVy = Math.sin(baseAngle) * CONFIG.ARROW_SPEED;
+  const addedVy = horseBobVelocity * CONFIG.VELOCITY_TRANSFER;
+
+  const arrow: Arrow = {
+    worldX: screenToWorld(bowPos.x),
+    screenY: bowPos.y,
+    vx: baseVx,
+    vy: baseVy + addedVy,
+    active: true,
+    angle: Math.atan2(baseVy + addedVy, baseVx),
+    perfect: isPerfect,
+  };
+
+  arrows.push(arrow);
+  triggerHaptic(isPerfect ? "success" : "medium");
 }
 
 // ============= PARTICLES =============
@@ -301,12 +332,29 @@ function spawnHitParticles(x: number, y: number): void {
   }
 }
 
+// ============= SCORE POPUPS =============
+function spawnScorePopup(
+  x: number,
+  y: number,
+  points: number,
+  perfect: boolean,
+): void {
+  const text = perfect ? `${points} PERFECT!` : `+${points}`;
+  const color = perfect ? "#FFD700" : "#FFFFFF";
+  scorePopups.push({
+    x,
+    y,
+    text,
+    color,
+    life: 1,
+    vy: -0.08,
+  });
+}
+
 // ============= GAME STATE =============
 function gameOver(): void {
   if (gameState !== "PLAYING") return;
-
   gameState = "GAME_OVER";
-  console.log("[gameOver] Final score:", score);
 
   if (typeof (window as any).submitScore === "function") {
     (window as any).submitScore(score);
@@ -318,25 +366,27 @@ function gameOver(): void {
   scoreDisplay.classList.add("hidden");
   pauseBtn.classList.add("hidden");
   settingsBtn.classList.add("hidden");
+  fireBtn.classList.add("hidden");
   gameOverScreen.classList.remove("hidden");
 }
 
 function startGame(): void {
-  console.log("[startGame] Starting game");
   gameState = "PLAYING";
 
   score = 0;
   timeRemaining = CONFIG.ROUND_TIME_MS;
-  arrowsLeft = CONFIG.ARROWS_PER_ROUND;
-  reloadTimer = 0;
   currentScoreEl.textContent = "0";
 
   arrows = [];
   particles = [];
-  isAiming = false;
-  aimHoldTime = 0;
+  scorePopups = [];
 
-  repositionTarget();
+  world.cameraX = 0;
+  horse.bobPhase = 0;
+  horse.screenY = horse.baseY;
+  horseBobVelocity = 0;
+
+  generateTargets();
 
   startScreen.classList.add("hidden");
   gameOverScreen.classList.add("hidden");
@@ -345,36 +395,36 @@ function startGame(): void {
   scoreDisplay.classList.remove("hidden");
   pauseBtn.classList.remove("hidden");
   settingsBtn.classList.remove("hidden");
+  fireBtn.classList.remove("hidden");
 
   triggerHaptic("light");
 }
 
 function pauseGame(): void {
   if (gameState !== "PLAYING") return;
-  console.log("[pauseGame] Game paused");
   gameState = "PAUSED";
   pauseScreen.classList.remove("hidden");
+  fireBtn.classList.add("hidden");
   triggerHaptic("light");
 }
 
 function resumeGame(): void {
   if (gameState !== "PAUSED") return;
-  console.log("[resumeGame] Game resumed");
   gameState = "PLAYING";
   pauseScreen.classList.add("hidden");
+  fireBtn.classList.remove("hidden");
   triggerHaptic("light");
 }
 
 function showStartScreen(): void {
-  console.log("[showStartScreen] Showing start screen");
   gameState = "START";
-
   startScreen.classList.remove("hidden");
   gameOverScreen.classList.add("hidden");
   pauseScreen.classList.add("hidden");
   scoreDisplay.classList.add("hidden");
   pauseBtn.classList.add("hidden");
   settingsBtn.classList.add("hidden");
+  fireBtn.classList.add("hidden");
 }
 
 // ============= CLOUDS =============
@@ -383,10 +433,10 @@ function initClouds(): void {
   for (let i = 0; i < 6; i++) {
     clouds.push({
       x: Math.random() * w * 1.5 - w * 0.25,
-      y: 30 + Math.random() * (groundY * 0.4),
+      y: 30 + Math.random() * (groundY * 0.35),
       speed: 0.008 + Math.random() * 0.015,
       scale: 0.6 + Math.random() * 0.8,
-      opacity: 0.4 + Math.random() * 0.4,
+      opacity: 0.25 + Math.random() * 0.25,
     });
   }
 }
@@ -396,14 +446,14 @@ function updateClouds(dt: number): void {
     c.x += c.speed * dt;
     if (c.x > w + 150) {
       c.x = -150;
-      c.y = 30 + Math.random() * (groundY * 0.4);
+      c.y = 30 + Math.random() * (groundY * 0.35);
     }
   }
 }
 
 function drawCloud(c: Cloud): void {
   ctx.globalAlpha = c.opacity;
-  ctx.fillStyle = "#FFFFFF";
+  ctx.fillStyle = "#FFEEDD";
   const s = c.scale;
   ctx.beginPath();
   ctx.ellipse(c.x, c.y, 50 * s, 25 * s, 0, 0, Math.PI * 2);
@@ -420,18 +470,50 @@ function drawCloud(c: Cloud): void {
   ctx.globalAlpha = 1;
 }
 
-function drawSun(): void {
-  const sunX = w * 0.82;
-  const sunY = h * 0.1;
-  const sunR = 50;
+// ============= WORLD UPDATE =============
+function updateWorld(dt: number): void {
+  world.cameraX += world.speed * dt;
+  horse.legPhase += dt * 0.015;
 
-  const glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.3, sunX, sunY, sunR * 2.5);
-  glow.addColorStop(0, "rgba(255, 240, 150, 0.5)");
-  glow.addColorStop(0.5, "rgba(255, 220, 100, 0.15)");
-  glow.addColorStop(1, "rgba(255, 200, 50, 0)");
+  // Sine wave bob
+  horse.bobPhase += CONFIG.BOB_FREQUENCY * dt;
+  horse.screenY = horse.baseY - Math.sin(horse.bobPhase) * CONFIG.BOB_AMPLITUDE;
+
+  // Derivative of -sin(phase)*A = -cos(phase)*A*freq
+  // But we want: positive bobVelocity = moving down on screen (increasing Y)
+  // d/dt of screenY = -cos(phase) * A * freq
+  horseBobVelocity = -Math.cos(horse.bobPhase) * CONFIG.BOB_AMPLITUDE * CONFIG.BOB_FREQUENCY;
+
+  // Wrap at world end
+  if (world.cameraX >= world.width) {
+    world.cameraX -= world.width;
+    generateTargets();
+  }
+}
+
+// ============= DRAWING =============
+function drawSteppeSky(): void {
+  const grad = ctx.createLinearGradient(0, 0, 0, groundY);
+  grad.addColorStop(0, "#2A1B3D");
+  grad.addColorStop(0.3, "#A0522D");
+  grad.addColorStop(0.6, "#D4883E");
+  grad.addColorStop(0.85, "#E8A84C");
+  grad.addColorStop(1, "#F0C060");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, groundY);
+
+  // Low sun
+  const sunX = w * 0.75;
+  const sunY = groundY * 0.82;
+  const sunR = 45;
+
+  const glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.3, sunX, sunY, sunR * 3);
+  glow.addColorStop(0, "rgba(255, 240, 180, 0.6)");
+  glow.addColorStop(0.4, "rgba(255, 200, 100, 0.2)");
+  glow.addColorStop(1, "rgba(255, 180, 50, 0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(sunX, sunY, sunR * 2.5, 0, Math.PI * 2);
+  ctx.arc(sunX, sunY, sunR * 3, 0, Math.PI * 2);
   ctx.fill();
 
   const body = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR);
@@ -444,231 +526,358 @@ function drawSun(): void {
   ctx.fill();
 }
 
-// ============= DRAWING =============
-function drawSky(): void {
-  const grad = ctx.createLinearGradient(0, 0, 0, groundY);
-  grad.addColorStop(0, "#3388CC");
-  grad.addColorStop(0.5, "#66BBEE");
-  grad.addColorStop(1, "#AADDFF");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, groundY);
+function drawMountains(): void {
+  const offset = -(world.cameraX * CONFIG.PARALLAX_MOUNTAINS) % w;
+  const mountainY = groundY * 0.65;
+
+  ctx.fillStyle = "#5A3A2A";
+
+  for (let pass = 0; pass < 2; pass++) {
+    const shiftX = offset + pass * w;
+    ctx.beginPath();
+    ctx.moveTo(shiftX - 100, groundY);
+
+    const peaks = [
+      { x: 0.1, y: 0.6, cx1: 0.05, cy1: 0.9, cx2: 0.08, cy2: 0.65 },
+      { x: 0.25, y: 0.35, cx1: 0.15, cy1: 0.55, cx2: 0.2, cy2: 0.38 },
+      { x: 0.4, y: 0.5, cx1: 0.3, cy1: 0.38, cx2: 0.35, cy2: 0.48 },
+      { x: 0.55, y: 0.3, cx1: 0.45, cy1: 0.45, cx2: 0.5, cy2: 0.32 },
+      { x: 0.7, y: 0.45, cx1: 0.6, cy1: 0.32, cx2: 0.65, cy2: 0.42 },
+      { x: 0.85, y: 0.55, cx1: 0.75, cy1: 0.42, cx2: 0.8, cy2: 0.52 },
+      { x: 1.0, y: 0.7, cx1: 0.9, cy1: 0.5, cx2: 0.95, cy2: 0.68 },
+    ];
+
+    for (const p of peaks) {
+      ctx.bezierCurveTo(
+        shiftX + p.cx1 * w,
+        mountainY + (1 - p.cy1) * (groundY - mountainY),
+        shiftX + p.cx2 * w,
+        mountainY + (1 - p.cy2) * (groundY - mountainY),
+        shiftX + p.x * w,
+        mountainY + (1 - p.y) * (groundY - mountainY),
+      );
+    }
+
+    ctx.lineTo(shiftX + w + 100, groundY);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawMidground(): void {
+  const offset = -(world.cameraX * CONFIG.PARALLAX_MIDGROUND) % w;
+  const midY = groundY - 30;
+
+  for (let pass = 0; pass < 2; pass++) {
+    const shiftX = offset + pass * w;
+    ctx.fillStyle = "#7A6830";
+    ctx.beginPath();
+    ctx.moveTo(shiftX - 50, groundY);
+
+    for (let x = 0; x <= w + 100; x += 50) {
+      const hillY =
+        midY +
+        Math.sin((x + pass * 200) * 0.008) * 15 +
+        Math.sin((x + pass * 300) * 0.003) * 25;
+      ctx.lineTo(shiftX + x, hillY);
+    }
+
+    ctx.lineTo(shiftX + w + 100, groundY);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 function drawGround(): void {
   const grad = ctx.createLinearGradient(0, groundY, 0, h);
-  grad.addColorStop(0, "#5A9E3F");
-  grad.addColorStop(0.3, "#4A8C34");
-  grad.addColorStop(1, "#3B7228");
+  grad.addColorStop(0, "#8B7340");
+  grad.addColorStop(0.3, "#7A6330");
+  grad.addColorStop(1, "#5A4820");
   ctx.fillStyle = grad;
   ctx.fillRect(0, groundY, w, h - groundY);
 
-  ctx.strokeStyle = "#6BBF4A";
+  ctx.strokeStyle = "#9A8350";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, groundY);
   ctx.lineTo(w, groundY);
   ctx.stroke();
-}
 
-function drawTower(): void {
-  const tx = bowAnchor.x;
-  const topY = bowAnchor.y + 20;
-  const towerW = 50;
-  const halfW = towerW / 2;
-
-  const grad = ctx.createLinearGradient(tx - halfW, topY, tx + halfW, topY);
-  grad.addColorStop(0, "#6B6B6B");
-  grad.addColorStop(0.3, "#8A8A8A");
-  grad.addColorStop(0.7, "#8A8A8A");
-  grad.addColorStop(1, "#5A5A5A");
-  ctx.fillStyle = grad;
-  ctx.fillRect(tx - halfW, topY, towerW, groundY - topY);
-
-  ctx.strokeStyle = "rgba(0,0,0,0.15)";
+  const lineOffset = -(world.cameraX * CONFIG.PARALLAX_GROUND) % 60;
+  ctx.strokeStyle = "rgba(100, 80, 40, 0.3)";
   ctx.lineWidth = 1;
-  const rowH = 18;
-  for (let y = topY + rowH; y < groundY; y += rowH) {
+  for (let x = lineOffset - 60; x < w + 60; x += 60) {
     ctx.beginPath();
-    ctx.moveTo(tx - halfW, y);
-    ctx.lineTo(tx + halfW, y);
+    ctx.moveTo(x, groundY + 5);
+    ctx.lineTo(x - 15, h);
     ctx.stroke();
-    const offset = (Math.floor((y - topY) / rowH) % 2 === 0) ? 0 : halfW;
-    ctx.beginPath();
-    ctx.moveTo(tx - halfW + offset, y);
-    ctx.lineTo(tx - halfW + offset, y + rowH);
-    ctx.stroke();
-  }
-
-  const bw = 12;
-  const bh = 14;
-  const platW = towerW + 20;
-  const platHalfW = platW / 2;
-
-  ctx.fillStyle = "#777";
-  ctx.fillRect(tx - platHalfW, topY - 4, platW, 8);
-
-  ctx.fillStyle = "#6B6B6B";
-  for (let bx = tx - platHalfW; bx < tx + platHalfW; bx += bw * 2) {
-    ctx.fillRect(bx, topY - 4 - bh, bw, bh);
   }
 }
 
-function drawArcher(): void {
-  const ax = bowAnchor.x - 8;
-  const feetY = bowAnchor.y + 18;
+function drawWorldTargets(): void {
+  for (const t of targets) {
+    if (t.hit) continue;
 
-  // Legs
-  ctx.strokeStyle = "#3A2518";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(ax - 5, feetY);
-  ctx.lineTo(ax, feetY - 18);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(ax + 5, feetY);
-  ctx.lineTo(ax, feetY - 18);
-  ctx.stroke();
+    const screenX = worldToScreen(t.worldX);
+    if (screenX < -60 || screenX > w + 60) continue;
+
+    // Post
+    ctx.strokeStyle = "#5A3A1E";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(screenX, groundY);
+    ctx.lineTo(screenX, t.screenY);
+    ctx.stroke();
+
+    // Post cap
+    ctx.fillStyle = "#3D2810";
+    ctx.fillRect(screenX - 5, t.screenY - 3, 10, 6);
+
+    // Target face (concentric rings)
+    const rings = CONFIG.RING_COLORS;
+    for (let i = 0; i < rings.length; i++) {
+      const r = t.radius * (1 - i / rings.length);
+      ctx.fillStyle = rings[i];
+      ctx.beginPath();
+      ctx.arc(screenX, t.screenY, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(screenX, t.screenY, t.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawHorseAndArcher(): void {
+  const hx = horse.screenX;
+  const hy = horse.screenY;
+  const phase = horse.legPhase;
+
+  const horseColor = "#3D2810";
+  const horseLightColor = "#5A3A1E";
 
   // Body
-  const bodyTop = feetY - 38;
-  ctx.strokeStyle = "#2E7D32";
-  ctx.lineWidth = 5;
+  ctx.fillStyle = horseColor;
   ctx.beginPath();
-  ctx.moveTo(ax, feetY - 18);
-  ctx.lineTo(ax, bodyTop);
+  ctx.ellipse(hx, hy - 40, 50, 22, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Underbelly highlight
+  ctx.fillStyle = horseLightColor;
+  ctx.beginPath();
+  ctx.ellipse(hx, hy - 35, 42, 14, 0, 0.2, Math.PI - 0.2);
+  ctx.fill();
+
+  // Legs
+  ctx.strokeStyle = horseColor;
+  ctx.lineWidth = 6;
+  ctx.lineCap = "round";
+
+  const legPositions = [
+    { base: -30, offset: 0 },
+    { base: -12, offset: Math.PI * 0.5 },
+    { base: 12, offset: Math.PI },
+    { base: 30, offset: Math.PI * 1.5 },
+  ];
+
+  for (const leg of legPositions) {
+    const swing = Math.sin(phase + leg.offset) * 18;
+    const lift = Math.max(0, -Math.sin(phase + leg.offset)) * 12;
+
+    const kneeX = hx + leg.base + swing * 0.3;
+    const kneeY = hy - 12;
+    const hoofX = hx + leg.base + swing;
+    const hoofY = hy + 8 - lift;
+
+    ctx.beginPath();
+    ctx.moveTo(hx + leg.base, hy - 22);
+    ctx.lineTo(kneeX, kneeY);
+    ctx.lineTo(hoofX, hoofY);
+    ctx.stroke();
+
+    ctx.fillStyle = "#1A0E05";
+    ctx.beginPath();
+    ctx.ellipse(hoofX, hoofY + 2, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Neck
+  ctx.fillStyle = horseColor;
+  ctx.beginPath();
+  ctx.moveTo(hx + 40, hy - 52);
+  ctx.quadraticCurveTo(hx + 55, hy - 70, hx + 50, hy - 82);
+  ctx.quadraticCurveTo(hx + 42, hy - 72, hx + 38, hy - 52);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = horseColor;
+  ctx.beginPath();
+  ctx.ellipse(hx + 56, hy - 84, 18, 10, 0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Muzzle
+  ctx.fillStyle = horseLightColor;
+  ctx.beginPath();
+  ctx.ellipse(hx + 70, hy - 80, 8, 6, 0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eye
+  ctx.fillStyle = "#111";
+  ctx.beginPath();
+  ctx.arc(hx + 58, hy - 88, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ear
+  ctx.fillStyle = horseColor;
+  ctx.beginPath();
+  ctx.moveTo(hx + 50, hy - 92);
+  ctx.lineTo(hx + 46, hy - 104);
+  ctx.lineTo(hx + 54, hy - 94);
+  ctx.closePath();
+  ctx.fill();
+
+  // Mane
+  ctx.strokeStyle = "#1A0E05";
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 5; i++) {
+    const mx = hx + 42 + i * 2;
+    const my = hy - 55 - i * 6;
+    const windOffset = Math.sin(phase * 0.7 + i * 0.8) * 5;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.quadraticCurveTo(mx - 10 + windOffset, my - 5, mx - 15 + windOffset, my + 3);
+    ctx.stroke();
+  }
+
+  // Tail
+  ctx.strokeStyle = "#1A0E05";
+  ctx.lineWidth = 4;
+  const tailSwing = Math.sin(phase * 0.5) * 12;
+  ctx.beginPath();
+  ctx.moveTo(hx - 48, hy - 42);
+  ctx.quadraticCurveTo(hx - 70 + tailSwing, hy - 35, hx - 80 + tailSwing * 1.5, hy - 20);
   ctx.stroke();
 
-  // Arms
-  ctx.strokeStyle = "#D2A679";
-  ctx.lineWidth = 3;
+  // ---- RIDER ----
+  const riderBaseX = hx + 5;
+  const riderBaseY = hy - 58;
+
+  // Legs on horse
+  ctx.fillStyle = "#8B2500";
   ctx.beginPath();
-  ctx.moveTo(ax, bodyTop + 6);
-  ctx.lineTo(ax + 18, bodyTop + 2);
-  ctx.stroke();
+  ctx.moveTo(riderBaseX - 12, riderBaseY + 10);
+  ctx.lineTo(riderBaseX - 18, riderBaseY + 25);
+  ctx.lineTo(riderBaseX - 8, riderBaseY + 25);
+  ctx.lineTo(riderBaseX - 5, riderBaseY + 10);
+  ctx.closePath();
+  ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(ax, bodyTop + 6);
-  ctx.lineTo(ax + 14, bodyTop + 10);
+  ctx.moveTo(riderBaseX + 5, riderBaseY + 10);
+  ctx.lineTo(riderBaseX + 12, riderBaseY + 25);
+  ctx.lineTo(riderBaseX + 20, riderBaseY + 25);
+  ctx.lineTo(riderBaseX + 10, riderBaseY + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // Torso
+  ctx.fillStyle = "#B22222";
+  ctx.beginPath();
+  ctx.moveTo(riderBaseX - 12, riderBaseY + 12);
+  ctx.lineTo(riderBaseX - 10, riderBaseY - 20);
+  ctx.lineTo(riderBaseX + 10, riderBaseY - 20);
+  ctx.lineTo(riderBaseX + 12, riderBaseY + 12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Sash
+  ctx.strokeStyle = "#FFD700";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(riderBaseX - 11, riderBaseY + 2);
+  ctx.lineTo(riderBaseX + 11, riderBaseY + 2);
   ctx.stroke();
 
   // Head
   ctx.fillStyle = "#D2A679";
   ctx.beginPath();
-  ctx.arc(ax, bodyTop - 6, 7, 0, Math.PI * 2);
+  ctx.arc(riderBaseX, riderBaseY - 28, 8, 0, Math.PI * 2);
   ctx.fill();
 
-  // Hood
-  ctx.fillStyle = "#2E7D32";
+  // Hat
+  ctx.fillStyle = "#8B4513";
   ctx.beginPath();
-  ctx.arc(ax, bodyTop - 8, 7.5, Math.PI, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(ax - 7, bodyTop - 8);
-  ctx.lineTo(ax - 2, bodyTop - 20);
-  ctx.lineTo(ax + 4, bodyTop - 10);
+  ctx.moveTo(riderBaseX - 10, riderBaseY - 30);
+  ctx.lineTo(riderBaseX, riderBaseY - 48);
+  ctx.lineTo(riderBaseX + 10, riderBaseY - 30);
   ctx.closePath();
   ctx.fill();
-}
 
-function drawBow(): void {
-  const ax = bowAnchor.x;
-  const ay = bowAnchor.y;
-  const r = CONFIG.BOW_RADIUS;
+  ctx.fillStyle = "#A0522D";
+  ctx.beginPath();
+  ctx.ellipse(riderBaseX, riderBaseY - 30, 12, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.strokeStyle = "#8B4513";
-  ctx.lineWidth = 5;
+  // ---- BOW (always drawn at rest — tap to fire, no draw animation) ----
+  const bowX = riderBaseX + 20;
+  const bowY = riderBaseY - 15;
+
+  // Bow arm
+  ctx.strokeStyle = "#D2A679";
+  ctx.lineWidth = 3;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.arc(ax, ay, r, -Math.PI * 0.45, Math.PI * 0.45, false);
+  ctx.moveTo(riderBaseX + 8, riderBaseY - 14);
+  ctx.lineTo(bowX, bowY);
   ctx.stroke();
 
-  const topX = ax + Math.cos(-Math.PI * 0.45) * r;
-  const topY = ay + Math.sin(-Math.PI * 0.45) * r;
-  const botX = ax + Math.cos(Math.PI * 0.45) * r;
-  const botY = ay + Math.sin(Math.PI * 0.45) * r;
-
-  if (isAiming) {
-    // Apply wobble offset to the pull point for visual jitter
-    const baseAngle = Math.atan2(
-      pullPoint.y - bowAnchor.y,
-      pullPoint.x - bowAnchor.x,
-    );
-    const wobbledAngle = baseAngle + wobbleOffset;
-    const displayX = bowAnchor.x + Math.cos(wobbledAngle) * pullDist;
-    const displayY = bowAnchor.y + Math.sin(wobbledAngle) * pullDist;
-
-    ctx.strokeStyle = CONFIG.BAND_COLOR;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(topX, topY);
-    ctx.lineTo(displayX, displayY);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(botX, botY);
-    ctx.lineTo(displayX, displayY);
-    ctx.stroke();
-
-    drawNockedArrow(displayX, displayY);
-  } else {
-    ctx.strokeStyle = CONFIG.BAND_COLOR;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(topX, topY);
-    ctx.lineTo(botX, botY);
-    ctx.stroke();
-  }
-}
-
-function drawNockedArrow(px: number, py: number): void {
-  const dx = bowAnchor.x - px;
-  const dy = bowAnchor.y - py;
-  const angle = Math.atan2(dy, dx);
-  const len = CONFIG.ARROW_LENGTH;
-
-  const tipX = px + Math.cos(angle) * len * 0.6;
-  const tipY = py + Math.sin(angle) * len * 0.6;
-  const tailX = px - Math.cos(angle) * len * 0.4;
-  const tailY = py - Math.sin(angle) * len * 0.4;
-
-  ctx.strokeStyle = "#5C3A1E";
+  // Bow arc
+  const bowR = 22;
+  ctx.strokeStyle = "#8B4513";
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(tailX, tailY);
-  ctx.lineTo(tipX, tipY);
+  ctx.arc(bowX, bowY, bowR, -Math.PI * 0.45, Math.PI * 0.45, false);
   ctx.stroke();
 
-  const hs = CONFIG.ARROW_HEAD_SIZE;
-  ctx.fillStyle = "#888";
-  ctx.beginPath();
-  ctx.moveTo(tipX, tipY);
-  ctx.lineTo(tipX - Math.cos(angle - 0.4) * hs, tipY - Math.sin(angle - 0.4) * hs);
-  ctx.lineTo(tipX - Math.cos(angle + 0.4) * hs, tipY - Math.sin(angle + 0.4) * hs);
-  ctx.closePath();
-  ctx.fill();
+  const topBowX = bowX + Math.cos(-Math.PI * 0.45) * bowR;
+  const topBowY = bowY + Math.sin(-Math.PI * 0.45) * bowR;
+  const botBowX = bowX + Math.cos(Math.PI * 0.45) * bowR;
+  const botBowY = bowY + Math.sin(Math.PI * 0.45) * bowR;
 
-  ctx.fillStyle = "#CC3333";
+  // Bowstring
+  ctx.strokeStyle = "#C4A058";
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(tailX, tailY);
-  ctx.lineTo(tailX + Math.cos(angle - 0.5) * 8, tailY + Math.sin(angle - 0.5) * 8);
-  ctx.lineTo(tailX + Math.cos(angle) * 6, tailY + Math.sin(angle) * 6);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(topBowX, topBowY);
+  ctx.lineTo(botBowX, botBowY);
+  ctx.stroke();
+
+  // Draw arm at rest
+  ctx.strokeStyle = "#D2A679";
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(tailX, tailY);
-  ctx.lineTo(tailX + Math.cos(angle + 0.5) * 8, tailY + Math.sin(angle + 0.5) * 8);
-  ctx.lineTo(tailX + Math.cos(angle) * 6, tailY + Math.sin(angle) * 6);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(riderBaseX + 5, riderBaseY - 14);
+  ctx.lineTo(riderBaseX, riderBaseY - 8);
+  ctx.stroke();
 }
 
 function drawArrow(arrow: Arrow): void {
+  const screenX = worldToScreen(arrow.worldX);
+  const screenY = arrow.screenY;
+
+  if (screenX < -60 || screenX > w + 60) return;
+
   const len = CONFIG.ARROW_LENGTH;
   const hs = CONFIG.ARROW_HEAD_SIZE;
   const a = arrow.angle;
 
-  const tipX = arrow.x + Math.cos(a) * len * 0.6;
-  const tipY = arrow.y + Math.sin(a) * len * 0.6;
-  const tailX = arrow.x - Math.cos(a) * len * 0.4;
-  const tailY = arrow.y - Math.sin(a) * len * 0.4;
+  const tipX = screenX + Math.cos(a) * len * 0.6;
+  const tipY = screenY + Math.sin(a) * len * 0.6;
+  const tailX = screenX - Math.cos(a) * len * 0.4;
+  const tailY = screenY - Math.sin(a) * len * 0.4;
 
   ctx.strokeStyle = "#5C3A1E";
   ctx.lineWidth = 3;
@@ -688,35 +897,16 @@ function drawArrow(arrow: Arrow): void {
   ctx.fillStyle = "#CC3333";
   ctx.beginPath();
   ctx.moveTo(tailX, tailY);
-  ctx.lineTo(tailX + Math.cos(a - 0.5) * 8, tailY + Math.sin(a - 0.5) * 8);
-  ctx.lineTo(tailX + Math.cos(a) * 6, tailY + Math.sin(a) * 6);
+  ctx.lineTo(tailX + Math.cos(a - 0.5) * 7, tailY + Math.sin(a - 0.5) * 7);
+  ctx.lineTo(tailX + Math.cos(a) * 5, tailY + Math.sin(a) * 5);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
   ctx.moveTo(tailX, tailY);
-  ctx.lineTo(tailX + Math.cos(a + 0.5) * 8, tailY + Math.sin(a + 0.5) * 8);
-  ctx.lineTo(tailX + Math.cos(a) * 6, tailY + Math.sin(a) * 6);
+  ctx.lineTo(tailX + Math.cos(a + 0.5) * 7, tailY + Math.sin(a + 0.5) * 7);
+  ctx.lineTo(tailX + Math.cos(a) * 5, tailY + Math.sin(a) * 5);
   ctx.closePath();
   ctx.fill();
-}
-
-function drawTarget(): void {
-  const rings = CONFIG.RING_COLORS;
-  const t = target;
-
-  for (let i = 0; i < rings.length; i++) {
-    const r = t.radius * (1 - i / rings.length);
-    ctx.fillStyle = rings[i];
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = "#333";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
-  ctx.stroke();
 }
 
 function drawParticles(): void {
@@ -730,61 +920,83 @@ function drawParticles(): void {
   ctx.globalAlpha = 1;
 }
 
-function drawFocusIndicator(): void {
-  if (!isAiming || pullDist < 15) return;
-
-  const steadiness = getSteadiness();
-
-  // Ring around the bow that shrinks/changes color with steadiness
-  const maxR = 30;
-  const minR = 8;
-  const r = maxR - (maxR - minR) * steadiness;
-
-  // Color: red (shaky) → yellow → green (steady)
-  let color: string;
-  if (steadiness > 0.7) {
-    color = `rgba(50, 220, 50, ${0.6 + steadiness * 0.4})`;
-  } else if (steadiness > 0.3) {
-    color = `rgba(220, 200, 50, 0.6)`;
-  } else {
-    color = `rgba(220, 80, 50, 0.5)`;
-  }
-
-  // Draw at bow anchor
-  ctx.strokeStyle = color;
-  ctx.lineWidth = steadiness > 0.7 ? 3 : 2;
-  ctx.setLineDash(steadiness > 0.7 ? [] : [4, 4]);
-  ctx.beginPath();
-  ctx.arc(bowAnchor.x, bowAnchor.y, CONFIG.BOW_RADIUS + 10 + r, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // "STEADY!" flash when very stable
-  if (steadiness > 0.85) {
-    ctx.fillStyle = "rgba(50, 255, 50, 0.8)";
-    ctx.font = "bold 14px 'Inter', sans-serif";
+function drawScorePopups(): void {
+  for (const sp of scorePopups) {
+    ctx.globalAlpha = sp.life;
+    ctx.fillStyle = sp.color;
+    ctx.font = "bold 22px 'Cinzel', serif";
     ctx.textAlign = "center";
-    ctx.fillText("STEADY", bowAnchor.x, bowAnchor.y - CONFIG.BOW_RADIUS - 20);
-    ctx.textAlign = "left";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+    ctx.shadowBlur = 4;
+    ctx.fillText(sp.text, sp.x, sp.y);
+    ctx.shadowBlur = 0;
   }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "left";
 }
 
-function drawArrowIcon(x: number, y: number, color: string): void {
-  const len = 18;
-  const headSize = 5;
-  ctx.strokeStyle = color;
+/** Rhythm meter — shows sine wave position and sweet spots at top/bottom */
+function drawBobIndicator(): void {
+  const meterX = 35;
+  const meterCenterY = h * 0.5;
+  const meterH = CONFIG.BOB_AMPLITUDE * 2.2;
+  const halfH = meterH / 2;
+
+  // Track background
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(meterX, meterCenterY - halfH);
+  ctx.lineTo(meterX, meterCenterY + halfH);
+  ctx.stroke();
+
+  // Sweet-spot zones at top and bottom
+  const zoneH = meterH * 0.15;
+  ctx.fillStyle = "rgba(50, 220, 50, 0.15)";
+  ctx.fillRect(meterX - 12, meterCenterY - halfH - 2, 24, zoneH);
+  ctx.fillRect(meterX - 12, meterCenterY + halfH - zoneH + 2, 24, zoneH);
+
+  // Green lines at top/bottom sweet spots
+  ctx.strokeStyle = "rgba(50, 220, 50, 0.5)";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + len, y);
+  ctx.moveTo(meterX - 10, meterCenterY - halfH);
+  ctx.lineTo(meterX + 10, meterCenterY - halfH);
   ctx.stroke();
-  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(x + len + headSize, y);
-  ctx.lineTo(x + len - 2, y - headSize);
-  ctx.lineTo(x + len - 2, y + headSize);
-  ctx.closePath();
+  ctx.moveTo(meterX - 10, meterCenterY + halfH);
+  ctx.lineTo(meterX + 10, meterCenterY + halfH);
+  ctx.stroke();
+
+  // Current position dot
+  const bobNorm = Math.sin(horse.bobPhase); // -1 to 1
+  const dotY = meterCenterY - bobNorm * halfH;
+  const steadiness = getSteadiness();
+
+  let dotColor: string;
+  if (steadiness >= CONFIG.PERFECT_THRESHOLD) {
+    dotColor = "#44FF44";
+  } else if (steadiness > 0.5) {
+    dotColor = "#FFDD44";
+  } else {
+    dotColor = "#FF5544";
+  }
+
+  // Glow
+  ctx.shadowColor = dotColor;
+  ctx.shadowBlur = steadiness >= CONFIG.PERFECT_THRESHOLD ? 12 : 6;
+  ctx.fillStyle = dotColor;
+  ctx.beginPath();
+  ctx.arc(meterX, dotY, 7, 0, Math.PI * 2);
   ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Dot outline
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(meterX, dotY, 7, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function drawHUD(): void {
@@ -802,32 +1014,24 @@ function drawHUD(): void {
   ctx.shadowBlur = 0;
   ctx.textAlign = "left";
 
-  // Arrow icons — bottom left
-  const margin = 20;
-  const baseY = isMobile ? 230 : 140;
-  const color = arrowsLeft <= 2 ? "#FF4444" : "#dd7733";
-  const cols = 4;
-  const spacingX = 32;
-  const spacingY = 14;
+  // Bob rhythm meter
+  drawBobIndicator();
+}
 
-  for (let i = 0; i < arrowsLeft; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    drawArrowIcon(margin + col * spacingX, baseY + row * spacingY, color);
-  }
+// ============= FIRE BUTTON DOM UPDATE =============
+function updateFireButton(): void {
+  if (gameState !== "PLAYING") return;
 
-  // Reload indicator
-  if (reloadTimer > 0) {
-    const pct = 1 - reloadTimer / CONFIG.RELOAD_TIME_MS;
-    const barW = 60;
-    const barH = 4;
-    const barX = bowAnchor.x - barW / 2;
-    const barY = bowAnchor.y + CONFIG.BOW_RADIUS + 30;
+  fireBtn.classList.remove("state-focusing", "state-steady", "state-flash");
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
-    ctx.fillRect(barX, barY, barW, barH);
-    ctx.fillStyle = "#dd7733";
-    ctx.fillRect(barX, barY, barW * pct, barH);
+  const steadiness = getSteadiness();
+
+  if (steadiness >= CONFIG.PERFECT_THRESHOLD) {
+    fireBtn.classList.add("state-flash");
+  } else if (steadiness > 0.5) {
+    fireBtn.classList.add("state-steady");
+  } else {
+    fireBtn.classList.add("state-focusing");
   }
 }
 
@@ -835,60 +1039,60 @@ function drawHUD(): void {
 function update(dt: number): void {
   if (gameState !== "PLAYING") return;
 
-  // Move clouds
   updateClouds(dt);
-
-  // Move target
-  updateTarget(dt);
-
-  // Reload cooldown
-  if (reloadTimer > 0) {
-    reloadTimer -= dt;
-    if (reloadTimer < 0) reloadTimer = 0;
-  }
-
-  // Update wobble
-  updateWobble(dt);
+  updateWorld(dt);
+  updateFireButton();
 
   // Update arrows
   for (const arrow of arrows) {
     if (!arrow.active) continue;
 
-    arrow.vy += CONFIG.GRAVITY * dt;
-    arrow.x += arrow.vx * dt;
-    arrow.y += arrow.vy * dt;
+    arrow.vy += CONFIG.ARROW_GRAVITY * dt;
+    arrow.worldX += arrow.vx * dt;
+    arrow.screenY += arrow.vy * dt;
     arrow.angle = Math.atan2(arrow.vy, arrow.vx);
 
-    if (arrow.y >= groundY) {
+    if (arrow.screenY >= groundY) {
       arrow.active = false;
       continue;
     }
 
-    if (arrow.x < -50 || arrow.x > w + 50 || arrow.y < -100) {
+    if (arrow.screenY < -100) {
       arrow.active = false;
       continue;
     }
 
-    const dx = arrow.x - target.x;
-    const dy = arrow.y - target.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < CONFIG.TARGET_HIT_RADIUS) {
-      arrow.active = false;
+    for (const t of targets) {
+      if (t.hit) continue;
 
-      const ringFrac = dist / target.radius;
-      let points = 2;
-      if (ringFrac < 0.2) points = 10;
-      else if (ringFrac < 0.4) points = 8;
-      else if (ringFrac < 0.6) points = 6;
-      else if (ringFrac < 0.8) points = 4;
+      const arrowScreenX = worldToScreen(arrow.worldX);
+      const targetScreenX = worldToScreen(t.worldX);
+      const dx = arrowScreenX - targetScreenX;
+      const dy = arrow.screenY - t.screenY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-      score += points;
-      currentScoreEl.textContent = score.toString();
+      if (dist < CONFIG.TARGET_HIT_RADIUS) {
+        arrow.active = false;
+        t.hit = true;
 
-      spawnHitParticles(target.x, target.y);
-      triggerHaptic("success");
-      repositionTarget();
-      continue;
+        const ringFrac = dist / t.radius;
+        let points = 2;
+        if (ringFrac < 0.2) points = 10;
+        else if (ringFrac < 0.4) points = 8;
+        else if (ringFrac < 0.6) points = 6;
+        else if (ringFrac < 0.8) points = 4;
+
+        if (arrow.perfect) points *= CONFIG.PERFECT_MULTIPLIER;
+
+        score += points;
+        currentScoreEl.textContent = score.toString();
+
+        const hitScreenX = worldToScreen(t.worldX);
+        spawnHitParticles(hitScreenX, t.screenY);
+        spawnScorePopup(hitScreenX, t.screenY - 30, points, arrow.perfect);
+        triggerHaptic("success");
+        break;
+      }
     }
   }
 
@@ -898,141 +1102,53 @@ function update(dt: number): void {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.life -= 0.002 * dt;
-    if (p.life <= 0) {
-      particles.splice(i, 1);
-    }
+    if (p.life <= 0) particles.splice(i, 1);
   }
 
-  // Clean up dead arrows
+  // Update score popups
+  for (let i = scorePopups.length - 1; i >= 0; i--) {
+    const sp = scorePopups[i];
+    sp.y += sp.vy * dt;
+    sp.life -= 0.0015 * dt;
+    if (sp.life <= 0) scorePopups.splice(i, 1);
+  }
+
   arrows = arrows.filter((a) => a.active);
 
-  // Countdown timer
   timeRemaining -= dt;
   if (timeRemaining <= 0) {
     timeRemaining = 0;
     gameOver();
   }
-
-  // Game over if out of arrows and none in flight
-  if (arrowsLeft <= 0 && arrows.length === 0 && !isAiming) {
-    gameOver();
-  }
 }
 
 // ============= INPUT =============
-function getPointerPos(e: MouseEvent | TouchEvent): { x: number; y: number } {
-  if ("touches" in e && e.touches.length > 0) {
-    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }
-  if ("changedTouches" in e && e.changedTouches.length > 0) {
-    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
-  }
-  return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
-}
-
-function handlePointerDown(e: MouseEvent | TouchEvent): void {
-  if (gameState !== "PLAYING") return;
-  if (arrowsLeft <= 0) return;
-  if (reloadTimer > 0) return;
-
-  const pos = getPointerPos(e);
-  const dx = pos.x - bowAnchor.x;
-  const dy = pos.y - bowAnchor.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist < CONFIG.PULL_ZONE_RADIUS) {
-    isAiming = true;
-    reachedMaxPull = false;
-    pullPoint.x = pos.x;
-    pullPoint.y = pos.y;
-    pullDist = 0;
-    aimHoldTime = 0;
-    triggerHaptic("light");
+function setupFireButton(): void {
+  const doFire = (e: Event) => {
     e.preventDefault();
-  }
-}
-
-function handlePointerMove(e: MouseEvent | TouchEvent): void {
-  if (!isAiming) return;
-
-  const pos = getPointerPos(e);
-  const dx = pos.x - bowAnchor.x;
-  const dy = pos.y - bowAnchor.y;
-  let dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist > CONFIG.MAX_PULL) {
-    const scale = CONFIG.MAX_PULL / dist;
-    pullPoint.x = bowAnchor.x + dx * scale;
-    pullPoint.y = bowAnchor.y + dy * scale;
-    dist = CONFIG.MAX_PULL;
-
-    if (!reachedMaxPull) {
-      reachedMaxPull = true;
-      triggerHaptic("medium");
-    }
-  } else {
-    pullPoint.x = pos.x;
-    pullPoint.y = pos.y;
-    reachedMaxPull = false;
-  }
-
-  pullDist = dist;
-  e.preventDefault();
-}
-
-function handlePointerUp(e: MouseEvent | TouchEvent): void {
-  if (!isAiming) return;
-
-  isAiming = false;
-
-  if (pullDist < 15) {
-    return;
-  }
-
-  // Fire arrow with wobble applied to direction
-  const baseAngle = Math.atan2(
-    bowAnchor.y - pullPoint.y,
-    bowAnchor.x - pullPoint.x,
-  );
-  const fireAngle = baseAngle + wobbleOffset;
-  const power = pullDist * CONFIG.POWER_SCALE;
-
-  const arrow: Arrow = {
-    x: bowAnchor.x,
-    y: bowAnchor.y,
-    vx: Math.cos(fireAngle) * power,
-    vy: Math.sin(fireAngle) * power,
-    active: true,
-    angle: fireAngle,
+    if (gameState !== "PLAYING") return;
+    fireArrow();
   };
 
-  arrows.push(arrow);
-  arrowsLeft--;
-  reloadTimer = CONFIG.RELOAD_TIME_MS;
-  triggerHaptic("medium");
-
-  e.preventDefault();
+  fireBtn.addEventListener("pointerdown", doFire);
+  fireBtn.addEventListener("contextmenu", (e) => e.preventDefault());
 }
 
 function setupInputHandlers(): void {
-  canvas.addEventListener("mousedown", handlePointerDown);
-  window.addEventListener("mousemove", handlePointerMove);
-  window.addEventListener("mouseup", handlePointerUp);
-  canvas.addEventListener("touchstart", handlePointerDown, { passive: false });
-  window.addEventListener("touchmove", handlePointerMove, { passive: false });
-  window.addEventListener("touchend", handlePointerUp, { passive: false });
+  setupFireButton();
 
   window.addEventListener("keydown", (e) => {
     if (gameState === "PLAYING") {
       if (e.key === "Escape") {
         pauseGame();
       }
+      if (e.key === " ") {
+        fireArrow();
+        e.preventDefault();
+      }
     } else if (gameState === "PAUSED" && e.key === "Escape") {
       resumeGame();
-    } else if (
-      gameState === "START" &&
-      (e.key === " " || e.key === "Enter")
-    ) {
+    } else if (gameState === "START" && (e.key === " " || e.key === "Enter")) {
       startGame();
     }
   });
@@ -1047,12 +1163,10 @@ function setupInputHandlers(): void {
     settingsModal.classList.remove("hidden");
   });
 
-  document
-    .getElementById("startSettingsBtn")
-    ?.addEventListener("click", () => {
-      triggerHaptic("light");
-      settingsModal.classList.remove("hidden");
-    });
+  document.getElementById("startSettingsBtn")?.addEventListener("click", () => {
+    triggerHaptic("light");
+    settingsModal.classList.remove("hidden");
+  });
 
   document.getElementById("settingsClose")!.addEventListener("click", () => {
     triggerHaptic("light");
@@ -1069,32 +1183,26 @@ function setupInputHandlers(): void {
     resumeGame();
   });
 
-  document
-    .getElementById("pauseRestartButton")!
-    .addEventListener("click", () => {
-      triggerHaptic("light");
-      pauseScreen.classList.add("hidden");
-      startGame();
-    });
+  document.getElementById("pauseRestartButton")!.addEventListener("click", () => {
+    triggerHaptic("light");
+    pauseScreen.classList.add("hidden");
+    startGame();
+  });
 
-  document
-    .getElementById("pauseMenuButton")!
-    .addEventListener("click", () => {
-      triggerHaptic("light");
-      showStartScreen();
-    });
+  document.getElementById("pauseMenuButton")!.addEventListener("click", () => {
+    triggerHaptic("light");
+    showStartScreen();
+  });
 
   document.getElementById("restartButton")!.addEventListener("click", () => {
     triggerHaptic("light");
     startGame();
   });
 
-  document
-    .getElementById("backToStartButton")!
-    .addEventListener("click", () => {
-      triggerHaptic("light");
-      showStartScreen();
-    });
+  document.getElementById("backToStartButton")!.addEventListener("click", () => {
+    triggerHaptic("light");
+    showStartScreen();
+  });
 
   setupSettingsToggles();
 }
@@ -1126,9 +1234,7 @@ function setupSettingsToggles(): void {
     settings.haptics = !settings.haptics;
     hapticToggle.classList.toggle("active", settings.haptics);
     saveSettings();
-    if (settings.haptics) {
-      triggerHaptic("light");
-    }
+    if (settings.haptics) triggerHaptic("light");
   });
 }
 
@@ -1140,31 +1246,30 @@ function gameLoop(timestamp: number): void {
   update(dt);
 
   ctx.clearRect(0, 0, w, h);
-  drawSky();
-  drawSun();
+
+  drawSteppeSky();
+  drawMountains();
   for (const c of clouds) drawCloud(c);
+  drawMidground();
   drawGround();
-  drawTower();
-  drawArcher();
-  drawTarget();
-  drawFocusIndicator();
-  drawBow();
+  drawWorldTargets();
+  drawHorseAndArcher();
 
   for (const arrow of arrows) {
     if (arrow.active) drawArrow(arrow);
   }
 
   drawParticles();
+  drawScorePopups();
 
   if (gameState === "PLAYING") {
     drawHUD();
   }
 
-  // Build number — always visible
   ctx.fillStyle = "rgba(255,255,255,0.3)";
   ctx.font = "11px monospace";
   ctx.textAlign = "right";
-  ctx.fillText("build 7", w - 10, h - 10);
+  ctx.fillText("build 9", w - 10, h - 10);
   ctx.textAlign = "left";
 
   animationFrameId = requestAnimationFrame(gameLoop);
@@ -1172,21 +1277,15 @@ function gameLoop(timestamp: number): void {
 
 // ============= INIT =============
 function init(): void {
-  console.log("[init] Initializing Archery Attack");
-
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
 
   setupInputHandlers();
   initClouds();
-
-  repositionTarget();
+  generateTargets();
 
   requestAnimationFrame(gameLoop);
-
   showStartScreen();
-
-  console.log("[init] Game initialized, isMobile:", isMobile);
 }
 
 init();
