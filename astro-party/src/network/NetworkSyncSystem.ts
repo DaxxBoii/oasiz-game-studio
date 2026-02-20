@@ -3,6 +3,7 @@ import { NetworkManager } from "./NetworkManager";
 import { PlayerManager } from "../managers/PlayerManager";
 import { SettingsManager } from "../SettingsManager";
 import { NETWORK_GAME_FEEL_TUNING } from "./gameFeel/NetworkGameFeelTuning";
+import { SHIP_DODGE_ANGLE_DEG } from "../../shared/sim/constants.js";
 import {
   ASTEROID_COLLIDER_VERTEX_SCALE,
   AsteroidColliderSync,
@@ -146,7 +147,8 @@ export class NetworkSyncSystem {
     const color =
       this.playerMgr.players.get(playerId)?.color.primary ?? "#ffffff";
     const dodgeAngle =
-      ship.angle + ((80 * Math.PI) / 180) * this.latestRotationDirection;
+      ship.angle +
+      ((SHIP_DODGE_ANGLE_DEG * Math.PI) / 180) * this.latestRotationDirection;
     this.renderer.spawnDashParticles(ship.x, ship.y, dodgeAngle, color, 10);
   }
 

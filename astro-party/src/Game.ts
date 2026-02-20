@@ -237,7 +237,11 @@ export class Game {
 
       onGameStateReceived: (state) => {
         if (!this.network.isSimulationAuthority()) {
-          if (this.flowMgr.phase !== "PLAYING") {
+          if (
+            this.flowMgr.phase !== "COUNTDOWN" &&
+            this.flowMgr.phase !== "PLAYING" &&
+            this.flowMgr.phase !== "ROUND_END"
+          ) {
             return;
           }
           this.networkSync.applyNetworkState(state);
@@ -999,7 +1003,8 @@ export class Game {
   private render(dt: number, renderState: RenderNetworkState): void {
     if (
       !this.network.isSimulationAuthority() &&
-      this.flowMgr.phase === "PLAYING" &&
+      this.flowMgr.phase !== "START" &&
+      this.flowMgr.phase !== "LOBBY" &&
       this.selectedMapId !== renderState.networkMapId
     ) {
       console.log(

@@ -38,25 +38,7 @@ export function updateShips(sim: SimState, dtSec: number): void {
     if (!player) continue;
     const ship = player.ship;
     if (!ship.alive) continue;
-
-    const rotating = player.input.buttonA;
-    // ROTATION_SPEED is tuned as radians/second.
-    // Matter angular velocity is radians per base-step (~1/60s),
-    // so convert to avoid exaggerated "beyblade" spin.
-    const targetAngularVelocity = rotating
-      ? (cfg.ROTATION_SPEED * sim.rotationDirection) /
-        MATTER_BASE_STEPS_PER_SECOND
-      : 0;
-    const angularResponse = rotating
-      ? cfg.SHIP_ROTATION_RESPONSE
-      : cfg.SHIP_ROTATION_RELEASE_RESPONSE;
-    const angularT = 1 - Math.exp(-angularResponse * dtSec);
-    player.angularVelocity +=
-      (targetAngularVelocity - player.angularVelocity) * angularT;
-    if (!rotating && Math.abs(player.angularVelocity) < 0.0001) {
-      player.angularVelocity = 0;
-    }
-    sim.setShipAngularVelocity(player.id, player.angularVelocity);
+    const rotatingInputHeld = player.input.buttonA;
 
     if (player.dashQueued) {
       player.dashQueued = false;
@@ -85,10 +67,35 @@ export function updateShips(sim: SimState, dtSec: number): void {
           playerId: player.id,
           x: ship.x,
           y: ship.y,
-          angle: ship.angle,
+          angle: dodgeAngle,
           color: PLAYER_COLORS[player.colorIndex].primary,
         });
       }
+    }
+
+    const dodgeActiveForRotation = player.dashTimerSec > 0;
+    const rotating = rotatingInputHeld && !dodgeActiveForRotation;
+    if (dodgeActiveForRotation) {
+      player.angularVelocity = 0;
+      sim.setShipAngularVelocity(player.id, 0);
+    } else {
+      // ROTATION_SPEED is tuned as radians/second.
+      // Matter angular velocity is radians per base-step (~1/60s),
+      // so convert to avoid exaggerated "beyblade" spin.
+      const targetAngularVelocity = rotating
+        ? (cfg.ROTATION_SPEED * sim.rotationDirection) /
+          MATTER_BASE_STEPS_PER_SECOND
+        : 0;
+      const angularResponse = rotating
+        ? cfg.SHIP_ROTATION_RESPONSE
+        : cfg.SHIP_ROTATION_RELEASE_RESPONSE;
+      const angularT = 1 - Math.exp(-angularResponse * dtSec);
+      player.angularVelocity +=
+        (targetAngularVelocity - player.angularVelocity) * angularT;
+      if (!rotating && Math.abs(player.angularVelocity) < 0.0001) {
+        player.angularVelocity = 0;
+      }
+      sim.setShipAngularVelocity(player.id, player.angularVelocity);
     }
 
     if (player.dashTimerSec > 0) {
