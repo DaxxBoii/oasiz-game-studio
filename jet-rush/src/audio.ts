@@ -1,5 +1,6 @@
 export class AudioManager {
   private ctx: AudioContext | null = null;
+  private cachedNoiseBuf: AudioBuffer | null = null;
 
   private ensure(): AudioContext {
     if (!this.ctx) this.ctx = new AudioContext();
@@ -25,20 +26,32 @@ export class AudioManager {
     osc.stop(ctx.currentTime + dur);
   }
 
-  private noise(dur: number, vol = 0.12): void {
+  private getNoiseBuffer(): AudioBuffer {
     const ctx = this.ensure();
-    const len = ctx.sampleRate * dur;
+    if (this.cachedNoiseBuf && this.cachedNoiseBuf.sampleRate === ctx.sampleRate) {
+      return this.cachedNoiseBuf;
+    }
+    const dur = 0.5;
+    const len = Math.ceil(ctx.sampleRate * dur);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < len; i++) {
       data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
     }
+    this.cachedNoiseBuf = buf;
+    return buf;
+  }
+
+  private noise(dur: number, vol = 0.12): void {
+    const ctx = this.ensure();
     const src = ctx.createBufferSource();
-    src.buffer = buf;
+    src.buffer = this.getNoiseBuffer();
     const gain = ctx.createGain();
     gain.gain.value = vol;
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + dur);
     src.connect(gain).connect(ctx.destination);
     src.start();
+    src.stop(ctx.currentTime + dur);
   }
 
   crash(): void {
@@ -57,27 +70,25 @@ export class AudioManager {
 
   /* ── Background music ── */
 
-  private playing = false;
-  private iv: ReturnType<typeof setInterval> | null = null;
+  private static readonly BGM_URL = "assets/sfx/Orbiting The Unknown.mp3";
+  private bgm: HTMLAudioElement | null = null;
 
   musicOn(): void {
-    if (this.playing) return;
-    this.playing = true;
-    const bassNotes = [55, 65.41, 73.42, 82.41];
-    let idx = 0;
-    const play = () => {
-      if (!this.playing) return;
-      this.tone(bassNotes[idx++ % bassNotes.length], 0.35, 0.05, "triangle");
-    };
-    play();
-    this.iv = setInterval(play, 480);
+    if (this.bgm) {
+      this.bgm.play().catch(() => {});
+      return;
+    }
+    const audio = new Audio(AudioManager.BGM_URL);
+    audio.loop = true;
+    audio.volume = 0.35;
+    audio.play().catch(() => {});
+    this.bgm = audio;
   }
 
   musicOff(): void {
-    this.playing = false;
-    if (this.iv) {
-      clearInterval(this.iv);
-      this.iv = null;
+    if (this.bgm) {
+      this.bgm.pause();
+      this.bgm.currentTime = 0;
     }
   }
 }

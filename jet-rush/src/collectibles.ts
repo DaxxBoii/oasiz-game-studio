@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { C, type Collectible } from "./config";
+import { ObjectPool } from "./pool";
 
-/* ── Shared geometry & materials (created once) ── */
+/* ── Shared geometry & materials (created once, never cloned) ── */
 
 const coreGeo = new THREE.IcosahedronGeometry(0.45, 1);
 const glowGeo = new THREE.IcosahedronGeometry(1.1, 2);
@@ -30,6 +31,24 @@ function ensureMats(): void {
   });
 }
 
+/* ── Collectible group pool ── */
+
+const _collectiblePool = new ObjectPool<THREE.Group>(
+  () => {
+    ensureMats();
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(coreGeo, coreMat));
+    group.add(new THREE.Mesh(glowGeo, glowMat));
+    return group;
+  },
+  (g) => {
+    g.position.set(0, 0, 0);
+    g.scale.setScalar(1);
+    g.visible = false;
+  },
+  15,
+);
+
 /* ── Spawn ── */
 
 export function spawnCollectible(
@@ -47,10 +66,10 @@ export function spawnCollectible(
   const x = corridorX + side * offset;
   const phase = rng() * Math.PI * 2;
 
-  const group = new THREE.Group();
-  group.add(new THREE.Mesh(coreGeo, coreMat.clone()));
-  group.add(new THREE.Mesh(glowGeo, glowMat.clone()));
+  const group = _collectiblePool.acquire();
   group.position.set(x, C.PLANE_Y, z);
+  group.scale.setScalar(1);
+  group.visible = true;
   scene.add(group);
 
   return {
@@ -128,12 +147,5 @@ export function tickCollectibles(
 
 export function destroyCollectible(scene: THREE.Scene, c: Collectible): void {
   scene.remove(c.mesh);
-  c.mesh.traverse((child) => {
-    const m = child as THREE.Mesh;
-    if (m.geometry) m.geometry.dispose();
-    if (m.material) {
-      if (Array.isArray(m.material)) m.material.forEach((mt) => mt.dispose());
-      else m.material.dispose();
-    }
-  });
+  _collectiblePool.release(c.mesh);
 }

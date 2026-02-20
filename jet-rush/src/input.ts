@@ -18,6 +18,7 @@ export function initInput(
   getState: () => GameState,
   onTap: TapCallback,
   haptic: (type: HapticType) => void,
+  isForcedLandscape: () => boolean,
 ): InputState {
   const input: InputState = {
     left: false,
@@ -28,7 +29,7 @@ export function initInput(
 
   const isUI = (e: Event) =>
     !!(e.target as HTMLElement).closest(
-      ".modal-card,.icon-btn,.setting-row,.settings-list,.ctrl-btn,.shop-btn,.shop-container,#shopModal",
+      ".modal-card,.icon-btn,.setting-row,.settings-list,.ctrl-btn,.shop-btn,.shop-container,#shopModal,#rotateBtn,.rotate-btn",
     );
 
   const handleTap = (e: Event) => {
@@ -53,9 +54,15 @@ export function initInput(
     }
   };
 
+  const isTouchOnLeft = (touch: Touch): boolean => {
+    if (isForcedLandscape()) {
+      return touch.clientY < window.innerHeight * 0.5;
+    }
+    return touch.clientX < window.innerWidth * 0.5;
+  };
+
   const assignTouchSteering = (touch: Touch): void => {
-    const touchOnLeft = touch.clientX < window.innerWidth * 0.5;
-    if (touchOnLeft) {
+    if (isTouchOnLeft(touch)) {
       if (input.touchLeftId === null) {
         input.touchLeftId = touch.identifier;
         input.left = true;
@@ -72,7 +79,7 @@ export function initInput(
   };
 
   const updateTouchSteeringSide = (touch: Touch): void => {
-    const touchOnLeft = touch.clientX < window.innerWidth * 0.5;
+    const touchOnLeft = isTouchOnLeft(touch);
 
     if (touchOnLeft && input.touchRightId === touch.identifier) {
       input.touchRightId = null;

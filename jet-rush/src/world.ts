@@ -12,20 +12,24 @@ let blockMats: THREE.MeshStandardMaterial[] = [];
 let blockEdgeMat: THREE.MeshBasicMaterial;
 let wireframeMats: LineMaterial[] = [];
 let groundMat: THREE.MeshStandardMaterial;
+let movingStripMat: THREE.MeshBasicMaterial;
 let matsReady = false;
 
 const OUTLINE_COLORS = [
   0x00aaff, 0x00ff88, 0xffdd00, 0xff6600, 0xff0066, 0xaa00ff, 0x0088ff, 0x88ff00,
 ];
 
+const _outlineBaseColors = OUTLINE_COLORS.map((c) => new THREE.Color(c));
+
 function ensureMats(): void {
   if (matsReady) return;
   matsReady = true;
 
   wireframeMats = OUTLINE_COLORS.map(
-    (c) =>
+    () =>
       new LineMaterial({
-        color: c,
+        color: 0xffffff,
+        vertexColors: true,
         linewidth: 2,
         resolution: new THREE.Vector2(1, 1),
       }),
@@ -53,7 +57,56 @@ function ensureMats(): void {
     roughness: 0.8,
     metalness: 0.2,
   });
+
+  movingStripMat = new THREE.MeshBasicMaterial({
+    color: 0xff2255,
+    transparent: true,
+    opacity: 0.6,
+  });
 }
+
+/* ── Geometry cache ── */
+
+const GEO_QUANT = 0.5;
+
+function quantize(v: number): number {
+  return Math.round(v / GEO_QUANT) * GEO_QUANT;
+}
+
+function geoKey(w: number, h: number, d: number): string {
+  return `${w}_${h}_${d}`;
+}
+
+const _boxGeoCache = new Map<string, THREE.BoxGeometry>();
+const _edgesGeoCache = new Map<string, THREE.EdgesGeometry>();
+
+function getCachedBoxGeo(w: number, h: number, d: number): THREE.BoxGeometry {
+  const qw = quantize(w);
+  const qh = quantize(h);
+  const qd = quantize(d);
+  const key = geoKey(qw, qh, qd);
+  let geo = _boxGeoCache.get(key);
+  if (!geo) {
+    geo = new THREE.BoxGeometry(qw, qh, qd);
+    _boxGeoCache.set(key, geo);
+  }
+  return geo;
+}
+
+function getCachedEdgesGeo(boxGeo: THREE.BoxGeometry, w: number, h: number, d: number): THREE.EdgesGeometry {
+  const qw = quantize(w);
+  const qh = quantize(h);
+  const qd = quantize(d);
+  const key = geoKey(qw, qh, qd);
+  let geo = _edgesGeoCache.get(key);
+  if (!geo) {
+    geo = new THREE.EdgesGeometry(boxGeo);
+    _edgesGeoCache.set(key, geo);
+  }
+  return geo;
+}
+
+const _reusableColArr = new Float32Array(256 * 6);
 
 /* ── Ground ── */
 
@@ -252,15 +305,45 @@ export function spawnRow(
       : 0;
     const movePhase = rng2() * Math.PI * 2;
 
-    const geo = new THREE.BoxGeometry(bw, bh, bd);
+    const geo = getCachedBoxGeo(bw, bh, bd);
     const mat = blockMats[Math.floor(rng2() * blockMats.length)];
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(bx, bh / 2, bz);
 
     const outlineTier = Math.floor(score / 100) % OUTLINE_COLORS.length;
-    const edgesGeo = new THREE.EdgesGeometry(geo);
+    const edgesGeo = getCachedEdgesGeo(geo, bw, bh, bd);
     const lineGeo = new LineSegmentsGeometry().fromEdgesGeometry(edgesGeo);
-    edgesGeo.dispose();
+
+    const baseCol = _outlineBaseColors[outlineTier];
+    const posBuffer = (lineGeo.attributes.instanceStart as THREE.InterleavedBufferAttribute)
+      .data.array as Float32Array;
+    const segCount = posBuffer.length / 6;
+    const needed = segCount * 6;
+    const colArr = needed <= _reusableColArr.length
+      ? _reusableColArr
+      : new Float32Array(needed);
+    const halfH = bh / 2;
+    for (let si = 0; si < segCount; si++) {
+      const off = si * 6;
+      const y0 = posBuffer[off + 1];
+      const y1 = posBuffer[off + 4];
+      const t0 = THREE.MathUtils.clamp((y0 + halfH) / bh, 0, 1);
+      const t1 = THREE.MathUtils.clamp((y1 + halfH) / bh, 0, 1);
+      const b0 = 0.15 + t0 * 0.85;
+      const b1 = 0.15 + t1 * 0.85;
+      colArr[off]     = baseCol.r * b0;
+      colArr[off + 1] = baseCol.g * b0;
+      colArr[off + 2] = baseCol.b * b0;
+      colArr[off + 3] = baseCol.r * b1;
+      colArr[off + 4] = baseCol.g * b1;
+      colArr[off + 5] = baseCol.b * b1;
+    }
+    if (colArr === _reusableColArr) {
+      lineGeo.setColors(Array.from(colArr.subarray(0, needed)));
+    } else {
+      lineGeo.setColors(colArr);
+    }
+
     const wireframe = new LineSegments2(lineGeo, wireframeMats[outlineTier]);
     wireframe.name = "wireframeOutline";
     mesh.add(wireframe);
@@ -268,29 +351,19 @@ export function spawnRow(
     scene.add(mesh);
 
     if (bh > 4.0) {
-      const edgeGeo = new THREE.BoxGeometry(bw + 0.06, 0.06, bd + 0.06);
+      const edgeGeo = getCachedBoxGeo(bw + 0.06, 0.06, bd + 0.06);
       const edge = new THREE.Mesh(edgeGeo, blockEdgeMat);
       edge.position.y = bh / 2;
       mesh.add(edge);
     }
 
     if (isMoving) {
-      const stripMat = new THREE.MeshBasicMaterial({
-        color: 0xff2255,
-        transparent: true,
-        opacity: 0.6,
-      });
-      const stripTop = new THREE.Mesh(
-        new THREE.BoxGeometry(bw + 0.08, 0.1, bd + 0.08),
-        stripMat,
-      );
+      const stripGeo = getCachedBoxGeo(bw + 0.08, 0.1, bd + 0.08);
+      const stripTop = new THREE.Mesh(stripGeo, movingStripMat);
       stripTop.position.y = bh / 2;
       mesh.add(stripTop);
 
-      const stripBot = new THREE.Mesh(
-        new THREE.BoxGeometry(bw + 0.08, 0.1, bd + 0.08),
-        stripMat,
-      );
+      const stripBot = new THREE.Mesh(stripGeo, movingStripMat);
       stripBot.position.y = -bh / 2 + 0.05;
       mesh.add(stripBot);
     }
@@ -313,34 +386,32 @@ export function spawnRow(
   return { z, blocks };
 }
 
-/** Removes a row from the scene and disposes geometry. */
+/** Removes a row from the scene and disposes only per-instance geometry (LineSegmentsGeometry). */
 export function destroyRow(scene: THREE.Scene, row: BlockRow): void {
   for (const b of row.blocks) {
     scene.remove(b.mesh);
     b.mesh.traverse((child) => {
-      const obj = child as THREE.Mesh & { geometry?: THREE.BufferGeometry };
-      if (obj.geometry) obj.geometry.dispose();
+      if (child instanceof LineSegments2) {
+        child.geometry.dispose();
+      }
     });
   }
 }
 
 /** Animates all moving blocks based on elapsed time. */
 export function updateBlockAnimations(rows: BlockRow[], elapsed: number): void {
-  for (const row of rows) {
-    for (const b of row.blocks) {
-      if (!b.moving) {
-        b.currentTop = b.baseHeight;
-        continue;
-      }
+  for (let ri = 0; ri < rows.length; ri++) {
+    const blocks = rows[ri].blocks;
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const b = blocks[bi];
+      if (!b.moving) continue;
 
       const yOffset = Math.sin(elapsed * b.moveSpeed + b.movePhase) * b.moveAmp;
       const newH = Math.max(0.3, b.baseHeight + yOffset);
       b.currentTop = newH;
 
-      const scale = newH / b.baseHeight;
-      b.mesh.scale.y = scale;
+      b.mesh.scale.y = newH / b.baseHeight;
       b.mesh.position.y = newH / 2;
     }
   }
 }
-

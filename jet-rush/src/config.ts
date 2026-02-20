@@ -6,7 +6,7 @@ import * as THREE from "three";
  * High-level game flow states used by UI, input handlers, and main update loop.
  * Use case: gate controls and rendering behavior (for example, no collision checks on START).
  */
-export type GameState = "START" | "PLAYING" | "GAME_OVER";
+export type GameState = "START" | "PLAYING" | "PAUSED" | "GAME_OVER";
 
 /**
  * Platform-supported haptic patterns.

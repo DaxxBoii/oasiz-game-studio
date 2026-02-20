@@ -79,6 +79,8 @@ export function bindSettingsUI(
   sfx: AudioManager,
   haptic: (type: HapticType) => void,
   playFX: (kind: "ui" | "crash") => void,
+  onSettingsOpen?: () => void,
+  onSettingsClose?: () => void,
 ): void {
   const modal = $("settingsModal");
   const setBtn = $("settingsBtn");
@@ -88,13 +90,17 @@ export function bindSettingsUI(
 
   setBtn.addEventListener("click", () => {
     if (getState() !== "PLAYING") return;
+    onSettingsOpen?.();
     modal.classList.remove("hidden");
     haptic("light");
     playFX("ui");
   });
 
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.add("hidden");
+    if (e.target === modal) {
+      modal.classList.add("hidden");
+      onSettingsClose?.();
+    }
   });
 
   let lastToggle = 0;
@@ -114,7 +120,7 @@ export function bindSettingsUI(
       saveSettings(settings);
       applySettingsUI(settings);
       playFX("ui");
-      if (settings.music && getState() === "PLAYING") sfx.musicOn();
+      if (settings.music && (getState() === "PLAYING" || getState() === "PAUSED")) sfx.musicOn();
       else sfx.musicOff();
     }),
   );

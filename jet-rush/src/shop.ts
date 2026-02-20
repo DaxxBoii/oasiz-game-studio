@@ -29,12 +29,16 @@ export class Shop {
   private loader = new FBXLoader();
   private baseTexture: THREE.Texture;
   private emissiveTexture: THREE.Texture;
+  private modelCache = new Map<string, THREE.Object3D>();
+  private shipMat: THREE.MeshStandardMaterial | null = null;
 
   private index = 0;
   private owned: Set<string>;
   private selected: string;
   private animId = 0;
   private open = false;
+  private lastPreviewW = 0;
+  private lastPreviewH = 0;
 
   private getOrbs: () => number;
   private setOrbs: (n: number) => void;
@@ -147,10 +151,12 @@ export class Shop {
       this.renderer.toneMappingExposure = 1.0;
     }
 
-    this.resizePreview();
-    this.loadShipModel(this.index);
     this.updateUI();
-    this.startLoop();
+    requestAnimationFrame(() => {
+      this.resizePreview();
+      this.loadShipModel(this.index);
+      this.startLoop();
+    });
   }
 
   hide(): void {
@@ -158,6 +164,12 @@ export class Shop {
     this.haptic("light");
     $("shopModal").classList.add("hidden");
     this.stopLoop();
+    if (this.currentModel) {
+      this.scene.remove(this.currentModel);
+      this.currentModel = null;
+    }
+    this.lastPreviewW = 0;
+    this.lastPreviewH = 0;
   }
 
   isOpen(): boolean {
@@ -235,51 +247,87 @@ export class Shop {
     }
 
     const dots = $("shopDots");
-    dots.innerHTML = "";
-    for (let i = 0; i < SHIPS.length; i++) {
-      const dot = document.createElement("span");
-      dot.className = "shop-dot" + (i === this.index ? " active" : "");
-      dots.appendChild(dot);
+    if (dots.children.length !== SHIPS.length) {
+      dots.innerHTML = "";
+      for (let i = 0; i < SHIPS.length; i++) {
+        const dot = document.createElement("span");
+        dot.className = "shop-dot";
+        dots.appendChild(dot);
+      }
     }
+    for (let i = 0; i < dots.children.length; i++) {
+      const dot = dots.children[i] as HTMLElement;
+      if (i === this.index) {
+        dot.classList.add("active");
+      } else {
+        dot.classList.remove("active");
+      }
+    }
+  }
+
+  private ensureShipMat(): THREE.MeshStandardMaterial {
+    if (!this.shipMat) {
+      this.shipMat = new THREE.MeshStandardMaterial({
+        map: this.baseTexture,
+        emissiveMap: this.emissiveTexture,
+        emissive: 0xffffff,
+        emissiveIntensity: 2.0,
+        roughness: 0.4,
+        metalness: 0.6,
+      });
+    }
+    return this.shipMat;
   }
 
   private loadShipModel(idx: number): void {
     if (this.currentModel) {
       this.scene.remove(this.currentModel);
-      this.currentModel.traverse((child) => {
-        const m = child as THREE.Mesh & { geometry?: THREE.BufferGeometry };
-        if (m.geometry) m.geometry.dispose();
-      });
       this.currentModel = null;
     }
 
+    if (this.renderer) {
+      this.renderer.clear();
+    }
+
     const ship = SHIPS[idx];
+    const cached = this.modelCache.get(ship.id);
+
+    if (cached) {
+      this.attachModel(cached);
+      return;
+    }
+
     this.loader.load(
       ship.model,
       (fbx) => {
-        const shipMat = new THREE.MeshStandardMaterial({
-          map: this.baseTexture,
-          emissiveMap: this.emissiveTexture,
-          emissive: 0xffffff,
-          emissiveIntensity: 2.0,
-          roughness: 0.4,
-          metalness: 0.6,
-        });
+        if (!this.open) return;
 
+        const mat = this.ensureShipMat();
         fbx.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
-            (child as THREE.Mesh).material = shipMat;
+            (child as THREE.Mesh).material = mat;
           }
         });
 
         fbx.scale.setScalar(C.PLANE_SCALE * 0.6);
         fbx.position.set(0, 0, 0);
-        this.scene.add(fbx);
-        this.currentModel = fbx;
+        fbx.rotation.y = 0;
+
+        this.modelCache.set(ship.id, fbx);
+        this.attachModel(fbx);
       },
       undefined,
       (err) => console.error("[Shop] FBX load error:", err),
     );
+  }
+
+  private attachModel(model: THREE.Object3D): void {
+    if (this.currentModel) {
+      this.scene.remove(this.currentModel);
+    }
+    model.rotation.y = 0;
+    this.scene.add(model);
+    this.currentModel = model;
   }
 
   private resizePreview(): void {
@@ -287,6 +335,10 @@ export class Shop {
     const container = $("shopPreviewWrap");
     const w = container.clientWidth;
     const h = container.clientHeight;
+    if (w < 1 || h < 1) return;
+    if (w === this.lastPreviewW && h === this.lastPreviewH) return;
+    this.lastPreviewW = w;
+    this.lastPreviewH = h;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();

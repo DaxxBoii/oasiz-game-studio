@@ -10,7 +10,7 @@ import { AudioManager } from "./audio";
 import { createJet, updateJetFX, loadShipFBX, type JetModel } from "./jet";
 import { Shop } from "./shop";
 import { buildGround, recycleGround, spawnRow, destroyRow, updateBlockAnimations } from "./world";
-import { spawnExplosion, tickExplosion, spawnCollectBurst } from "./particles";
+import { spawnExplosion, tickExplosion, spawnCollectBurst, releaseAllParticles } from "./particles";
 import { spawnCollectible, tickCollectibles, destroyCollectible } from "./collectibles";
 import { getCorridorCenter } from "./world";
 import { initInput, resetInput, type InputState } from "./input";
@@ -30,11 +30,16 @@ class JetRush {
   private groundTiles: THREE.Group[];
   private rows: BlockRow[] = [];
   private explParts: Particle[] = [];
-  private trailPositions: THREE.Vector3[] = [];
   private trailMesh: THREE.Mesh | null = null;
   private readonly PLAY_TRAIL_MAX = 30;
+  private trailRing: THREE.Vector3[] = [];
+  private trailHead = 0;
+  private trailCount = 0;
+  private trailGeo: THREE.BufferGeometry | null = null;
+  private trailMat: THREE.MeshBasicMaterial | null = null;
   private collectibles: Collectible[] = [];
   private nextCollectZ = 0;
+  private readonly _rng = (): number => Math.random();
 
   /* State */
   private state: GameState = "START";
@@ -43,7 +48,7 @@ class JetRush {
   private planeX = 0;
   private targetX = 0;
   private tilt = 0;
-  private speed = C.SPEED_INIT;
+  private speed: number = C.SPEED_INIT;
   private elapsed = 0;
   private lastT = 0;
   private nextRowZ = 0;
@@ -70,32 +75,40 @@ class JetRush {
     console.log("[JetRush]", "Init");
     this.mobile = window.matchMedia("(pointer: coarse)").matches;
 
-    /* Scene */
+    /* Scene — tighter fog on mobile to hide reduced draw distance */
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x020a18);
-    this.scene.fog = new THREE.Fog(0x020a18, 80, 320);
+    this.scene.fog = this.mobile
+      ? new THREE.Fog(0x020a18, 60, 200)
+      : new THREE.Fog(0x020a18, 80, 320);
 
     this.cam = new THREE.PerspectiveCamera(
       60,
       window.innerWidth / window.innerHeight,
       0.5,
-      500,
+      this.mobile ? 250 : 500,
     );
     this.cam.position.set(0, C.CAM_UP, C.CAM_BACK);
 
-    this.ren = new THREE.WebGLRenderer({ antialias: true });
-    this.ren.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
+    this.ren = new THREE.WebGLRenderer({
+      antialias: !this.mobile,
+      powerPreference: "high-performance",
+    });
+    this.ren.setPixelRatio(this.mobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2));
     this.ren.setSize(window.innerWidth, window.innerHeight);
     this.ren.toneMapping = THREE.ACESFilmicToneMapping;
     this.ren.toneMappingExposure = 1.0;
     document.getElementById("gameContainer")!.appendChild(this.ren.domElement);
 
-    /* Post-processing: Bloom */
+    /* Post-processing: Bloom (half-res on mobile to save GPU) */
     this.composer = new EffectComposer(this.ren);
     this.composer.addPass(new RenderPass(this.scene, this.cam));
 
+    const bloomRes = this.mobile
+      ? new THREE.Vector2(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2))
+      : new THREE.Vector2(window.innerWidth, window.innerHeight);
     this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      bloomRes,
       C.BLOOM_STRENGTH,
       C.BLOOM_RADIUS,
       C.BLOOM_THRESHOLD,
@@ -134,6 +147,7 @@ class JetRush {
       () => this.state,
       () => this.startGame(),
       (t) => this.hap(t),
+      () => this.forcedLandscape,
     );
     applySettingsUI(this.settings);
     bindSettingsUI(
@@ -142,10 +156,30 @@ class JetRush {
       this.sfx,
       (t) => this.hap(t),
       (k) => this.playFX(k),
+      () => {
+        this.state = "PAUSED";
+        console.log("[JetRush]", "Game paused (settings open)");
+      },
+      () => {
+        if (this.state === "PAUSED") {
+          this.state = "PLAYING";
+          console.log("[JetRush]", "Game resumed");
+        }
+      },
     );
+
+    this.initRotateButton();
+
+    /* Pre-allocate trail ring buffers */
+    for (let i = 0; i < this.PLAY_TRAIL_MAX; i++) this.trailRing.push(new THREE.Vector3());
+    for (let i = 0; i < this.IDLE_TRAIL_MAX_POINTS; i++) this.idleTrailRing.push(new THREE.Vector3());
 
     window.addEventListener("resize", () => this.resize());
     this.ren.setAnimationLoop((t) => this.loop(t));
+  }
+
+  private get rowAhead(): number {
+    return this.mobile ? 150 : C.ROW_AHEAD;
   }
 
   /* ═══ Lights ═══ */
@@ -166,16 +200,27 @@ class JetRush {
 
   /* ═══ Resize ═══ */
 
+  private getViewportSize(): { w: number; h: number } {
+    if (this.forcedLandscape) {
+      return { w: window.innerHeight, h: window.innerWidth };
+    }
+    return { w: window.innerWidth, h: window.innerHeight };
+  }
+
   private resize(): void {
-    this.cam.aspect = window.innerWidth / window.innerHeight;
+    const { w, h } = this.getViewportSize();
+    this.cam.aspect = w / h;
     this.cam.updateProjectionMatrix();
-    this.ren.setSize(window.innerWidth, window.innerHeight);
-    this.composer.setSize(window.innerWidth, window.innerHeight);
-    this.bloomPass.resolution.set(window.innerWidth, window.innerHeight);
+    this.ren.setSize(w, h);
+    this.composer.setSize(w, h);
+    this.bloomPass.resolution.set(
+      this.mobile ? Math.floor(w / 2) : w,
+      this.mobile ? Math.floor(h / 2) : h,
+    );
     const pixelRatio = this.ren.getPixelRatio();
     this.fxaaPass.uniforms["resolution"].value.set(
-      1 / (window.innerWidth * pixelRatio),
-      1 / (window.innerHeight * pixelRatio),
+      1 / (w * pixelRatio),
+      1 / (h * pixelRatio),
     );
     this.mobile = window.matchMedia("(pointer: coarse)").matches;
   }
@@ -223,7 +268,7 @@ class JetRush {
 
     /* Pre-spawn rows: safe zone near player, normal blocks ahead */
     this.nextRowZ = 15;
-    while (this.nextRowZ > -C.ROW_AHEAD) {
+    while (this.nextRowZ > -this.rowAhead) {
       const safe = this.nextRowZ > -40;
       this.rows.push(
         spawnRow(this.scene, this.nextRowZ, this.runSeed, safe, this.score),
@@ -244,10 +289,7 @@ class JetRush {
     this.rows = [];
     this.cleanupPlayTrail();
     this.deactivateShield();
-    for (const p of this.explParts) {
-      this.scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-    }
+    releaseAllParticles(this.scene, this.explParts);
     this.explParts = [];
     for (const c of this.collectibles) destroyCollectible(this.scene, c);
     this.collectibles = [];
@@ -297,7 +339,12 @@ class JetRush {
     this.explParts = tickExplosion(this.scene, this.explParts, dt);
 
     this.updateCamera(dt);
-    this.composer.render();
+
+    if (this.state === "PLAYING" || this.state === "PAUSED") {
+      this.composer.render();
+    } else {
+      this.ren.render(this.scene, this.cam);
+    }
   }
 
   /* ═══ Camera ═══ */
@@ -305,7 +352,7 @@ class JetRush {
   private updateCamera(dt: number): void {
     if (this.state === "START") return;
 
-    if (this.state === "PLAYING" || this.state === "GAME_OVER") {
+    if (this.state === "PLAYING" || this.state === "PAUSED" || this.state === "GAME_OVER") {
       const px = this.jet.group.position.x;
       const pz = this.jet.group.position.z;
 
@@ -341,8 +388,12 @@ class JetRush {
   private idleWanderTimer = 0;
   private idleTrailTimer = 0;
   private idleTrailStrip: THREE.Mesh | null = null;
-  private idleTrailPositions: THREE.Vector3[] = [];
+  private idleTrailRing: THREE.Vector3[] = [];
+  private idleTrailHead = 0;
+  private idleTrailCount = 0;
   private readonly IDLE_TRAIL_MAX_POINTS = 120;
+  private idleTrailGeo: THREE.BufferGeometry | null = null;
+  private idleTrailMat: THREE.MeshBasicMaterial | null = null;
 
   private idle(dt: number): void {
     this.jet.group.visible = true;
@@ -370,19 +421,21 @@ class JetRush {
 
     recycleGround(this.groundTiles, this.idleZ);
 
-    while (this.idleNextRowZ > this.idleZ - C.ROW_AHEAD) {
+    while (this.idleNextRowZ > this.idleZ - this.rowAhead) {
       this.rows.push(spawnRow(this.scene, this.idleNextRowZ, 42, false, 0, true));
       this.idleNextRowZ -= C.ROW_SPACING;
     }
 
     const behind = this.idleZ + C.ROW_BEHIND;
-    this.rows = this.rows.filter((row) => {
-      if (row.z > behind) {
-        destroyRow(this.scene, row);
-        return false;
+    let idleRwIdx = 0;
+    for (let i = 0; i < this.rows.length; i++) {
+      if (this.rows[i].z > behind) {
+        destroyRow(this.scene, this.rows[i]);
+      } else {
+        this.rows[idleRwIdx++] = this.rows[i];
       }
-      return true;
-    });
+    }
+    this.rows.length = idleRwIdx;
 
     const camHeight = 55;
     const camLookAhead = 25;
@@ -394,137 +447,165 @@ class JetRush {
     this.idleTrailTimer += dt;
     if (this.idleTrailTimer > 0.016) {
       this.idleTrailTimer = 0;
-      this.idleTrailPositions.push(this.jet.group.position.clone());
-      if (this.idleTrailPositions.length > this.IDLE_TRAIL_MAX_POINTS) {
-        this.idleTrailPositions.shift();
-      }
+      const pos = this.jet.group.position;
+      this.idleTrailRing[this.idleTrailHead].set(pos.x, pos.y, pos.z);
+      this.idleTrailHead = (this.idleTrailHead + 1) % this.IDLE_TRAIL_MAX_POINTS;
+      if (this.idleTrailCount < this.IDLE_TRAIL_MAX_POINTS) this.idleTrailCount++;
     }
 
-    if (this.idleTrailPositions.length < 2) return;
+    const count = this.idleTrailCount;
+    if (count < 2) return;
 
-    if (this.idleTrailStrip) {
-      this.scene.remove(this.idleTrailStrip);
-      this.idleTrailStrip.geometry.dispose();
+    const idxCount = (count - 1) * 6;
+
+    if (!this.idleTrailMat) {
+      this.idleTrailMat = new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
     }
 
-    const pts = this.idleTrailPositions;
-    const count = pts.length;
-    const verts: number[] = [];
-    const colors: number[] = [];
-    const indices: number[] = [];
+    if (!this.idleTrailGeo) {
+      this.idleTrailGeo = new THREE.BufferGeometry();
+      const maxVerts = this.IDLE_TRAIL_MAX_POINTS * 2;
+      const maxIdx = (this.IDLE_TRAIL_MAX_POINTS - 1) * 6;
+      this.idleTrailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(maxVerts * 3), 3));
+      this.idleTrailGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(maxVerts * 4), 4));
+      this.idleTrailGeo.setIndex(new THREE.BufferAttribute(new Uint16Array(maxIdx), 1));
+    }
 
+    const posArr = (this.idleTrailGeo.attributes.position as THREE.BufferAttribute).array as Float32Array;
+    const colArr = (this.idleTrailGeo.attributes.color as THREE.BufferAttribute).array as Float32Array;
+    const idxArr = this.idleTrailGeo.index!.array as Uint16Array;
+
+    const start = (this.idleTrailHead - count + this.IDLE_TRAIL_MAX_POINTS) % this.IDLE_TRAIL_MAX_POINTS;
     for (let i = 0; i < count; i++) {
       const t = i / (count - 1);
       const width = (0.3 + t * 1.8) * 0.3;
-      const p = pts[i];
-
-      verts.push(p.x - width, p.y, p.z);
-      verts.push(p.x + width, p.y, p.z);
+      const p = this.idleTrailRing[(start + i) % this.IDLE_TRAIL_MAX_POINTS];
+      const vi = i * 2 * 3;
+      posArr[vi] = p.x - width;     posArr[vi + 1] = p.y; posArr[vi + 2] = p.z;
+      posArr[vi + 3] = p.x + width; posArr[vi + 4] = p.y; posArr[vi + 5] = p.z;
 
       const alpha = t * t;
-      const r = 0.0 + t * 0.0;
       const g = 0.6 + t * 0.2;
-      const b = 1.0;
-      colors.push(r, g, b, alpha * 0.6);
-      colors.push(r, g, b, alpha * 0.6);
+      const ci = i * 2 * 4;
+      colArr[ci] = 0;     colArr[ci + 1] = g; colArr[ci + 2] = 1; colArr[ci + 3] = alpha * 0.6;
+      colArr[ci + 4] = 0; colArr[ci + 5] = g; colArr[ci + 6] = 1; colArr[ci + 7] = alpha * 0.6;
 
       if (i < count - 1) {
         const bi = i * 2;
-        indices.push(bi, bi + 1, bi + 2);
-        indices.push(bi + 1, bi + 3, bi + 2);
+        const ii = i * 6;
+        idxArr[ii] = bi;     idxArr[ii + 1] = bi + 1; idxArr[ii + 2] = bi + 2;
+        idxArr[ii + 3] = bi + 1; idxArr[ii + 4] = bi + 3; idxArr[ii + 5] = bi + 2;
       }
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
-    geo.setIndex(indices);
+    this.idleTrailGeo.setDrawRange(0, idxCount);
+    (this.idleTrailGeo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.idleTrailGeo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+    this.idleTrailGeo.index!.needsUpdate = true;
 
-    const mat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-
-    this.idleTrailStrip = new THREE.Mesh(geo, mat);
-    this.scene.add(this.idleTrailStrip);
+    if (!this.idleTrailStrip) {
+      this.idleTrailStrip = new THREE.Mesh(this.idleTrailGeo, this.idleTrailMat);
+      this.idleTrailStrip.frustumCulled = false;
+      this.scene.add(this.idleTrailStrip);
+    }
   }
 
   private cleanupIdleTrail(): void {
     if (this.idleTrailStrip) {
       this.scene.remove(this.idleTrailStrip);
-      this.idleTrailStrip.geometry.dispose();
       this.idleTrailStrip = null;
     }
-    this.idleTrailPositions = [];
+    if (this.idleTrailGeo) {
+      this.idleTrailGeo.setDrawRange(0, 0);
+    }
+    this.idleTrailHead = 0;
+    this.idleTrailCount = 0;
   }
 
   /* ═══ Gameplay Ribbon Trail ═══ */
 
   private updatePlayTrail(): void {
-    if (this.trailPositions.length < 2) return;
+    const count = this.trailCount;
+    if (count < 2) return;
 
-    if (this.trailMesh) {
-      this.scene.remove(this.trailMesh);
-      this.trailMesh.geometry.dispose();
+    const idxCount = (count - 1) * 6;
+
+    if (!this.trailMat) {
+      this.trailMat = new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
     }
 
-    const pts = this.trailPositions;
-    const count = pts.length;
-    const verts: number[] = [];
-    const colors: number[] = [];
-    const indices: number[] = [];
+    if (!this.trailGeo) {
+      this.trailGeo = new THREE.BufferGeometry();
+      const maxVerts = this.PLAY_TRAIL_MAX * 2;
+      const maxIdx = (this.PLAY_TRAIL_MAX - 1) * 6;
+      this.trailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(maxVerts * 3), 3));
+      this.trailGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(maxVerts * 4), 4));
+      this.trailGeo.setIndex(new THREE.BufferAttribute(new Uint16Array(maxIdx), 1));
+    }
 
+    const posArr = (this.trailGeo.attributes.position as THREE.BufferAttribute).array as Float32Array;
+    const colArr = (this.trailGeo.attributes.color as THREE.BufferAttribute).array as Float32Array;
+    const idxArr = this.trailGeo.index!.array as Uint16Array;
     const trailYOffset = -0.5;
+
+    const start = (this.trailHead - count + this.PLAY_TRAIL_MAX) % this.PLAY_TRAIL_MAX;
     for (let i = 0; i < count; i++) {
       const t = i / (count - 1);
       const width = t * 0.2;
-      const p = pts[i];
+      const p = this.trailRing[(start + i) % this.PLAY_TRAIL_MAX];
       const y = p.y + trailYOffset;
-
-      verts.push(p.x - width, y, p.z);
-      verts.push(p.x + width, y, p.z);
+      const vi = i * 2 * 3;
+      posArr[vi] = p.x - width;     posArr[vi + 1] = y; posArr[vi + 2] = p.z;
+      posArr[vi + 3] = p.x + width; posArr[vi + 4] = y; posArr[vi + 5] = p.z;
 
       const alpha = t * t;
-      const r = 0.0;
       const g = 0.55 + t * 0.25;
-      const b = 1.0;
-      colors.push(r, g, b, alpha * 0.55);
-      colors.push(r, g, b, alpha * 0.55);
+      const ci = i * 2 * 4;
+      colArr[ci] = 0;     colArr[ci + 1] = g; colArr[ci + 2] = 1; colArr[ci + 3] = alpha * 0.55;
+      colArr[ci + 4] = 0; colArr[ci + 5] = g; colArr[ci + 6] = 1; colArr[ci + 7] = alpha * 0.55;
 
       if (i < count - 1) {
         const bi = i * 2;
-        indices.push(bi, bi + 1, bi + 2);
-        indices.push(bi + 1, bi + 3, bi + 2);
+        const ii = i * 6;
+        idxArr[ii] = bi;     idxArr[ii + 1] = bi + 1; idxArr[ii + 2] = bi + 2;
+        idxArr[ii + 3] = bi + 1; idxArr[ii + 4] = bi + 3; idxArr[ii + 5] = bi + 2;
       }
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
-    geo.setIndex(indices);
+    this.trailGeo.setDrawRange(0, idxCount);
+    (this.trailGeo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.trailGeo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+    this.trailGeo.index!.needsUpdate = true;
 
-    const mat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-
-    this.trailMesh = new THREE.Mesh(geo, mat);
-    this.scene.add(this.trailMesh);
+    if (!this.trailMesh) {
+      this.trailMesh = new THREE.Mesh(this.trailGeo, this.trailMat);
+      this.trailMesh.frustumCulled = false;
+      this.scene.add(this.trailMesh);
+    }
   }
 
   private cleanupPlayTrail(): void {
     if (this.trailMesh) {
       this.scene.remove(this.trailMesh);
-      this.trailMesh.geometry.dispose();
       this.trailMesh = null;
     }
-    this.trailPositions = [];
+    if (this.trailGeo) {
+      this.trailGeo.setDrawRange(0, 0);
+    }
+    this.trailHead = 0;
+    this.trailCount = 0;
   }
 
   /* ═══ Game Tick ═══ */
@@ -569,10 +650,10 @@ class JetRush {
     this.trailTimer += dt;
     if (this.trailTimer > 0.016) {
       this.trailTimer = 0;
-      this.trailPositions.push(this.jet.group.position.clone());
-      if (this.trailPositions.length > this.PLAY_TRAIL_MAX) {
-        this.trailPositions.shift();
-      }
+      const pos = this.jet.group.position;
+      this.trailRing[this.trailHead].set(pos.x, pos.y, pos.z);
+      this.trailHead = (this.trailHead + 1) % this.PLAY_TRAIL_MAX;
+      if (this.trailCount < this.PLAY_TRAIL_MAX) this.trailCount++;
     }
     this.updatePlayTrail();
 
@@ -580,7 +661,7 @@ class JetRush {
     recycleGround(this.groundTiles, this.planeZ);
 
     /* Spawn rows ahead */
-    while (this.nextRowZ > this.planeZ - C.ROW_AHEAD) {
+    while (this.nextRowZ > this.planeZ - this.rowAhead) {
       this.rows.push(
         spawnRow(this.scene, this.nextRowZ, this.runSeed, false, this.score),
       );
@@ -589,21 +670,22 @@ class JetRush {
 
     /* Cleanup rows behind */
     const behind = this.planeZ + C.ROW_BEHIND;
-    this.rows = this.rows.filter((row) => {
-      if (row.z > behind) {
-        destroyRow(this.scene, row);
-        return false;
+    let rwIdx = 0;
+    for (let i = 0; i < this.rows.length; i++) {
+      if (this.rows[i].z > behind) {
+        destroyRow(this.scene, this.rows[i]);
+      } else {
+        this.rows[rwIdx++] = this.rows[i];
       }
-      return true;
-    });
+    }
+    this.rows.length = rwIdx;
 
     /* Spawn collectibles ahead */
-    while (this.nextCollectZ > this.planeZ - C.ROW_AHEAD) {
-      const rng = () => Math.random();
-      if (rng() < C.COLLECT_SPAWN_CHANCE) {
+    while (this.nextCollectZ > this.planeZ - this.rowAhead) {
+      if (this._rng() < C.COLLECT_SPAWN_CHANCE) {
         const cx = getCorridorCenter(this.nextCollectZ, this.runSeed);
         this.collectibles.push(
-          spawnCollectible(this.scene, this.nextCollectZ, cx, rng),
+          spawnCollectible(this.scene, this.nextCollectZ, cx, this._rng),
         );
       }
       this.nextCollectZ -= C.COLLECT_SPAWN_INTERVAL;
@@ -628,7 +710,9 @@ class JetRush {
 
     /* Remove collected & far-behind (only if not attracting) */
     const collectBehind = this.planeZ + C.ROW_BEHIND;
-    this.collectibles = this.collectibles.filter((c) => {
+    let cIdx = 0;
+    for (let i = 0; i < this.collectibles.length; i++) {
+      const c = this.collectibles[i];
       if (c.collected) {
         spawnCollectBurst(
           this.scene,
@@ -638,14 +722,13 @@ class JetRush {
           this.explParts,
         );
         destroyCollectible(this.scene, c);
-        return false;
-      }
-      if (!c.attracting && c.worldZ > collectBehind) {
+      } else if (!c.attracting && c.worldZ > collectBehind) {
         destroyCollectible(this.scene, c);
-        return false;
+      } else {
+        this.collectibles[cIdx++] = c;
       }
-      return true;
-    });
+    }
+    this.collectibles.length = cIdx;
 
     /* Invincibility countdown & shield animation */
     if (this.invincible) {
@@ -776,6 +859,46 @@ class JetRush {
     } catch {
       console.log("[saveTotalOrbs]", "localStorage unavailable");
     }
+  }
+
+  /* ═══ Rotate Button (orientation toggle) ═══ */
+
+  private forcedLandscape = false;
+
+  private initRotateButton(): void {
+    const btn = document.getElementById("rotateBtn");
+    const label = document.getElementById("rotateBtnLabel");
+    if (!btn || !label) return;
+
+    const updateLabel = (): void => {
+      const isLandscape = this.forcedLandscape || window.innerWidth > window.innerHeight;
+      label.textContent = isLandscape ? "Portrait" : "Landscape";
+    };
+    updateLabel();
+    window.addEventListener("resize", updateLabel);
+
+    btn.addEventListener("touchstart", (e: Event) => {
+      e.stopPropagation();
+    }, { passive: true });
+
+    btn.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      this.hap("light");
+      this.playFX("ui");
+
+      this.forcedLandscape = !this.forcedLandscape;
+      console.log("[initRotateButton]", "Force landscape:", this.forcedLandscape);
+
+      if (this.forcedLandscape) {
+        document.body.classList.add("force-landscape");
+      } else {
+        document.body.classList.remove("force-landscape");
+      }
+
+      updateLabel();
+
+      setTimeout(() => this.resize(), 50);
+    });
   }
 }
 
