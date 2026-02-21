@@ -136,6 +136,7 @@ export interface PlayerData {
   roundWins: number;
   score: number;
   state: PlayerState;
+  presence?: "CONNECTED" | "LEFT" | "KICKED";
 }
 
 export interface DashParticleEvent {

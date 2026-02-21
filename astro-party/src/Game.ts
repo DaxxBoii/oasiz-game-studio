@@ -179,6 +179,48 @@ export class Game {
   private _onMapChange: ((mapId: MapId) => void) | null = null;
   private lastTransportErrorCode: string | null = null;
   private lastTransportErrorMessage: string | null = null;
+  private stickyMatchPlayerOrder: string[] = [];
+  private stickyDepartedPlayers = new Map<string, PlayerData>();
+
+  private isStickyRosterPhase(phase: GamePhase = this.flowMgr.phase): boolean {
+    return (
+      phase === "COUNTDOWN" ||
+      phase === "PLAYING" ||
+      phase === "ROUND_END" ||
+      phase === "GAME_END"
+    );
+  }
+
+  private trackStickyConnectedPlayer(playerId: string): void {
+    if (!this.stickyMatchPlayerOrder.includes(playerId)) {
+      this.stickyMatchPlayerOrder.push(playerId);
+    }
+    this.stickyDepartedPlayers.delete(playerId);
+  }
+
+  private captureStickyDepartedPlayer(
+    playerId: string,
+    reason: "left" | "kicked",
+  ): void {
+    const current = this.playerMgr.players.get(playerId);
+    if (!current) return;
+    this.trackStickyConnectedPlayer(playerId);
+    this.stickyDepartedPlayers.set(playerId, {
+      ...current,
+      presence: reason === "kicked" ? "KICKED" : "LEFT",
+    });
+  }
+
+  private syncStickyRosterFromLivePlayers(): void {
+    for (const player of this.playerMgr.getPlayers()) {
+      this.trackStickyConnectedPlayer(player.id);
+    }
+  }
+
+  private clearStickyRoster(): void {
+    this.stickyMatchPlayerOrder = [];
+    this.stickyDepartedPlayers.clear();
+  }
 
   private emitPlayersUpdate(): void {
     this._onPlayersUpdate?.(this.getPlayers());
@@ -215,6 +257,9 @@ export class Game {
           () => this.emitPlayersUpdate(),
           () => this.flowMgr.startCountdown(),
         );
+        if (this.isStickyRosterPhase()) {
+          this.trackStickyConnectedPlayer(playerId);
+        }
         if (shouldToastJoin) {
           const joinedName =
             this.playerMgr.players.get(playerId)?.name ??
@@ -235,6 +280,9 @@ export class Game {
           this.playerMgr.players.get(playerId)?.name ??
           this.network.getPlayerName(playerId) ??
           "Player";
+        if (this.isStickyRosterPhase()) {
+          this.captureStickyDepartedPlayer(playerId, reason);
+        }
         this.playerPowerUps.delete(playerId);
         this.controlledInputSequenceByPlayer.delete(playerId);
         this.playerMgr.removePlayer(playerId, () => this.emitPlayersUpdate());
@@ -298,6 +346,7 @@ export class Game {
         const kickedByLeader = this.lastTransportErrorCode === "KICKED_BY_LEADER";
         const kickedMessage =
           this.lastTransportErrorMessage || "You were removed by the room leader";
+        this.submitCurrentScoreOnSessionExit();
         if (!kickedByLeader) {
           this._onSystemMessage?.("Disconnected from room", 2500);
         }
@@ -353,6 +402,12 @@ export class Game {
             this.networkSync.clearNetworkEntities();
             this.roundResult = null;
           }
+          if (phase === "COUNTDOWN") {
+            this.syncStickyRosterFromLivePlayers();
+          }
+          if (phase === "LOBBY" && oldPhase !== "LOBBY") {
+            this.clearStickyRoster();
+          }
 
           this.refreshLobbyScoreEligibilityFromRoster();
 
@@ -388,6 +443,9 @@ export class Game {
             this.emitPlayersUpdate(),
           );
           this.syncPlayersFromMeta(meta);
+          if (this.isStickyRosterPhase()) {
+            this.syncStickyRosterFromLivePlayers();
+          }
           this.refreshLobbyScoreEligibilityFromRoster();
           if (this.flowMgr.phase === "GAME_END") {
             this.submitFinalScoreFromAuthoritativeState();
@@ -535,6 +593,7 @@ export class Game {
     this.lastPredictedFireAtMs = 0;
     this.lastPredictedDashAtMs = 0;
     this.controlledInputSequenceByPlayer.clear();
+    this.clearStickyRoster();
 
     this.flowMgr.setPhase("LOBBY");
   }
@@ -601,6 +660,7 @@ export class Game {
     this.lastPredictedFireAtMs = 0;
     this.lastPredictedDashAtMs = 0;
     this.controlledInputSequenceByPlayer.clear();
+    this.clearStickyRoster();
   }
 
   private seedRngForRound(): void {
@@ -1076,7 +1136,36 @@ export class Game {
   }
 
   getPlayers(): PlayerData[] {
-    return this.playerMgr.getPlayers();
+    const livePlayers = this.playerMgr.getPlayers().map((player) => ({
+      ...player,
+      presence: "CONNECTED" as const,
+    }));
+    if (!this.isStickyRosterPhase()) {
+      return livePlayers;
+    }
+
+    if (this.stickyMatchPlayerOrder.length <= 0) {
+      return livePlayers;
+    }
+
+    const liveById = new Map<string, PlayerData>();
+    for (const player of livePlayers) {
+      liveById.set(player.id, player);
+    }
+
+    const merged: PlayerData[] = [];
+    for (const playerId of this.stickyMatchPlayerOrder) {
+      const live = liveById.get(playerId);
+      if (live) {
+        merged.push(live);
+        continue;
+      }
+      const departed = this.stickyDepartedPlayers.get(playerId);
+      if (departed) {
+        merged.push({ ...departed });
+      }
+    }
+    return merged;
   }
 
   getWinnerId(): string | null {
@@ -1286,6 +1375,7 @@ export class Game {
 
     this.isIntentionalDisconnect = true;
     try {
+      this.submitCurrentScoreOnSessionExit();
       await this.network.disconnect();
     } finally {
       this.isIntentionalDisconnect = false;
@@ -1571,6 +1661,42 @@ export class Game {
     }
 
     this.finalScoreSubmittedForMatch = true;
+  }
+
+  private submitCurrentScoreOnSessionExit(): void {
+    if (this.network.isSimulationAuthority()) return;
+    if (this.finalScoreSubmittedForMatch) return;
+    if (!this.isStickyRosterPhase()) return;
+
+    const myId = this.network.getMyPlayerId();
+    if (!myId) return;
+
+    const hasEligibleLobbyBot =
+      this.lobbyHasEligibleScoreBot ||
+      this.hasEligibleScoreBotInCurrentRoster();
+    if (
+      !shouldSubmitScoreToPlatform(
+        hasEligibleLobbyBot,
+        this.debugSessionTainted,
+      )
+    ) {
+      return;
+    }
+
+    const roundResultScore = this.roundResult?.scoresById?.[myId];
+    const liveScore = this.playerMgr.players.get(myId)?.score;
+    const rawScore = Number.isFinite(liveScore) ? liveScore : roundResultScore;
+    if (!Number.isFinite(rawScore)) return;
+    const score = Math.max(0, Math.floor(rawScore as number));
+
+    const submitScore = (
+      window as unknown as { submitScore?: (value: number) => void }
+    ).submitScore;
+    if (typeof submitScore !== "function") return;
+
+    submitScore(score);
+    this.finalScoreSubmittedForMatch = true;
+    console.log("[Game] Submitted exit score:", score);
   }
 
   updateTouchLayout(): void {

@@ -195,6 +195,14 @@ export function createScreenController(
     elements.scoreTrack.innerHTML = players
       .map((player) => {
         const isSelf = player.id === myPlayerId;
+        const isDeparted =
+          player.presence === "LEFT" || player.presence === "KICKED";
+        const statusLabel =
+          player.presence === "KICKED"
+            ? " (Kicked)"
+            : player.presence === "LEFT"
+              ? " (Left)"
+              : "";
         const dots = Array.from({ length: roundsToWin }, (_, i) => {
           const filled = i < player.roundWins;
           return (
@@ -209,11 +217,15 @@ export function createScreenController(
         return (
           '<div class="score-row' +
           (isSelf ? " self" : "") +
+          (isDeparted ? " departed" : "") +
           '" style="color: ' +
           player.color.primary +
           '">' +
           '<span class="score-player-name">' +
           escapeHtml(player.name) +
+          '<span class="score-player-status">' +
+          escapeHtml(statusLabel) +
+          "</span>" +
           "</span>" +
           '<div class="score-dots">' +
           dots +
@@ -244,14 +256,26 @@ export function createScreenController(
     const rows = sorted
       .map((player) => {
         const isSelf = player.id === myPlayerId;
+        const isDeparted =
+          player.presence === "LEFT" || player.presence === "KICKED";
+        const statusLabel =
+          player.presence === "KICKED"
+            ? " (Kicked)"
+            : player.presence === "LEFT"
+              ? " (Left)"
+              : "";
         return (
           '<div class="final-score-row' +
           (isSelf ? " self" : "") +
+          (isDeparted ? " departed" : "") +
           '" style="color: ' +
           player.color.primary +
           '">' +
           '<div class="final-score-name">' +
           escapeHtml(player.name) +
+          '<span class="final-score-status">' +
+          escapeHtml(statusLabel) +
+          "</span>" +
           "</div>" +
           '<div class="final-score-value stat">' +
           player.score.toString() +

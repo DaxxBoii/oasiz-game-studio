@@ -819,6 +819,14 @@
       gap: 0.5rem;
     }
 
+    .score-row.departed {
+      opacity: 0.55;
+    }
+
+    .score-row.departed .score-player-name {
+      text-decoration: line-through;
+    }
+
     .score-player-name {
       font-size: 0.7rem;
       color: inherit;
@@ -827,6 +835,11 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       opacity: 0.75;
+    }
+
+    .score-player-status {
+      opacity: 0.7;
+      font-size: 0.62rem;
     }
 
     .score-row.self {
@@ -1478,6 +1491,10 @@
       border-top: 1px solid rgba(255, 255, 255, 0.08);
     }
 
+    .final-score-row.departed {
+      opacity: 0.55;
+    }
+
     .final-score-row:nth-child(even) {
       background: rgba(255, 255, 255, 0.03);
       border-radius: 8px;
@@ -1488,6 +1505,15 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+
+    .final-score-row.departed .final-score-name {
+      text-decoration: line-through;
+    }
+
+    .final-score-status {
+      opacity: 0.75;
+      font-size: 0.74em;
     }
 
     .final-score-row.self {
