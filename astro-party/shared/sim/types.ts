@@ -300,6 +300,7 @@ export interface Hooks {
     y: number;
     angle: number;
     color: string;
+    kind: "ship" | "pilot";
   }) => void;
   onDevMode: (enabled: boolean) => void;
   onError: (sessionId: string, code: string, message: string) => void;

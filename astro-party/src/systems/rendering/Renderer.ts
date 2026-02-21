@@ -1347,6 +1347,55 @@ export class Renderer {
     }
   }
 
+  spawnPilotDashBurstParticles(
+    x: number,
+    y: number,
+    pilotAngle: number,
+    color: string,
+  ): void {
+    const burstColor = color || "#c8ecff";
+    const burstCount = 16;
+    for (let i = 0; i < burstCount; i++) {
+      const ringAngle = (i / burstCount) * Math.PI * 2;
+      const spawnRadius = 2 + this.random() * 2.2;
+      const speed = 70 + this.random() * 70;
+      const life = 0.08 + this.random() * 0.08;
+      const size = 1.2 + this.random() * 2.0;
+      const isCore = i % 4 === 0;
+
+      this.particles.push({
+        x: x + Math.cos(ringAngle) * spawnRadius,
+        y: y + Math.sin(ringAngle) * spawnRadius,
+        vx: Math.cos(ringAngle) * speed,
+        vy: Math.sin(ringAngle) * speed,
+        life,
+        maxLife: life,
+        size,
+        color: isCore ? "#ffffff" : burstColor,
+      });
+    }
+
+    const releaseAngle = pilotAngle + Math.PI;
+    const releaseSpread = Math.PI * 0.85;
+    for (let i = 0; i < 7; i++) {
+      const angle = releaseAngle + (this.random() - 0.5) * releaseSpread;
+      const speed = 55 + this.random() * 45;
+      const life = 0.11 + this.random() * 0.09;
+      const size = 1.6 + this.random() * 1.8;
+
+      this.particles.push({
+        x: x + (this.random() - 0.5) * 3,
+        y: y + (this.random() - 0.5) * 3,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life,
+        maxLife: life,
+        size,
+        color: "#d8f4ff",
+      });
+    }
+  }
+
   spawnBulletCasing(
     x: number,
     y: number,

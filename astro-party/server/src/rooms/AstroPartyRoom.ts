@@ -174,6 +174,7 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
           y: number;
           angle: number;
           color: string;
+          kind: "ship" | "pilot";
         }) => {
           this.broadcast("evt:dash_particles", payload);
         },

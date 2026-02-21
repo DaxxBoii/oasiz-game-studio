@@ -8,6 +8,7 @@ import {
   HOMING_MISSILE_LIFETIME_MS,
   MINE_POST_EXPIRY_MS,
   ROUND_RESULTS_DURATION_MS,
+  PLAYER_COLORS,
 } from "../constants.js";
 import { TURRET_TUNING } from "../mapFeatureTuning.js";
 import { normalizeAngle } from "../utils.js";
@@ -108,6 +109,14 @@ export function updatePilots(sim: SimState, dtSec: number): void {
         Math.cos(pilot.angle) * cfg.PILOT_DASH_FORCE,
         Math.sin(pilot.angle) * cfg.PILOT_DASH_FORCE,
       );
+      sim.hooks.onDashParticles({
+        playerId,
+        x: pilot.x,
+        y: pilot.y,
+        angle: pilot.angle,
+        color: PLAYER_COLORS[player.colorIndex].primary,
+        kind: "pilot",
+      });
     }
 
     if (sim.nowMs - pilot.spawnTime >= PILOT_SURVIVAL_MS) {

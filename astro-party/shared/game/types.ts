@@ -149,6 +149,7 @@ export interface DashParticleEvent {
   angle: number;
   timestamp: number;
   color: string;
+  kind: "ship" | "pilot";
 }
 
 export interface Settings {

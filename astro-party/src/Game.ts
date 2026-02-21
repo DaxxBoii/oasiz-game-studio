@@ -507,15 +507,27 @@ export class Game {
       },
 
       onDashParticlesReceived: (payload) => {
-        if (this.shouldSuppressLocalDashParticles(payload.playerId)) {
+        if (
+          payload.kind === "ship" &&
+          this.shouldSuppressLocalDashParticles(payload.playerId)
+        ) {
           return;
         }
-        this.renderer.spawnDashParticles(
-          payload.x,
-          payload.y,
-          payload.angle,
-          payload.color,
-        );
+        if (payload.kind === "pilot") {
+          this.renderer.spawnPilotDashBurstParticles(
+            payload.x,
+            payload.y,
+            payload.angle,
+            payload.color,
+          );
+        } else {
+          this.renderer.spawnDashParticles(
+            payload.x,
+            payload.y,
+            payload.angle,
+            payload.color,
+          );
+        }
       },
 
       onAsteroidCollidersReceived: (payload) => {
@@ -1172,22 +1184,6 @@ export class Game {
   }
 
   private render(dt: number, renderState: RenderNetworkState): void {
-    if (
-      !this.network.isSimulationAuthority() &&
-      this.flowMgr.phase !== "START" &&
-      this.flowMgr.phase !== "LOBBY" &&
-      this.selectedMapId !== renderState.networkMapId
-    ) {
-      console.log(
-        "[Game] Syncing map from gameplay snapshot. prev=" +
-          this.selectedMapId.toString() +
-          ", snapshot=" +
-          renderState.networkMapId.toString(),
-      );
-      this.selectedMapId = renderState.networkMapId;
-      this._onMapChange?.(this.selectedMapId);
-    }
-
     const adaptiveCameraState = this.adaptiveCamera.update({
       dt,
       nowMs: this.networkSync.hostSimTimeMs,

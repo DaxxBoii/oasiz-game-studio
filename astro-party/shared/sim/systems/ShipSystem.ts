@@ -87,6 +87,7 @@ export function updateShips(sim: SimState, dtSec: number): void {
           y: ship.y,
           angle: dodgeAngle,
           color: PLAYER_COLORS[player.colorIndex].primary,
+          kind: "ship",
         });
       }
     }

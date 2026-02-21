@@ -76,6 +76,7 @@ export interface NetworkCallbacks {
     y: number;
     angle: number;
     color: string;
+    kind: "ship" | "pilot";
   }) => void;
   onAsteroidCollidersReceived?: (payload: AsteroidColliderSync[]) => void;
 }

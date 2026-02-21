@@ -13,7 +13,6 @@ import {
   AsteroidColliderSync,
   GAME_CONFIG,
   GameStateSync,
-  MapId,
   PlayerInput,
   PlayerPowerUp,
   ShipState,
@@ -47,7 +46,6 @@ export interface RenderNetworkState {
   networkHomingMissiles: HomingMissileState[];
   networkTurret: TurretState | null;
   networkTurretBullets: TurretBulletState[];
-  networkMapId: MapId;
   networkRotationDirection: number;
   networkYellowBlockHp: number[];
   networkLaserBeamWidth: number;
@@ -101,7 +99,6 @@ export class NetworkSyncSystem {
   private networkHomingMissiles: HomingMissileState[] = [];
   private networkTurret: TurretState | null = null;
   private networkTurretBullets: TurretBulletState[] = [];
-  private networkMapId: MapId = 0;
   private networkRotationDirection = 1;
   private networkYellowBlockHp: number[] = [];
   private networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
@@ -314,7 +311,6 @@ export class NetworkSyncSystem {
     this.networkHomingMissiles = [];
     this.networkTurret = null;
     this.networkTurretBullets = [];
-    this.networkMapId = 0;
     this.networkRotationDirection = 1;
     this.networkYellowBlockHp = [];
     this.networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
@@ -352,7 +348,6 @@ export class NetworkSyncSystem {
     this.networkHomingMissiles = [];
     this.networkTurret = null;
     this.networkTurretBullets = [];
-    this.networkMapId = 0;
     this.networkRotationDirection = 1;
     this.networkYellowBlockHp = [];
     this.networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
@@ -418,7 +413,6 @@ export class NetworkSyncSystem {
       networkHomingMissiles: this.networkHomingMissiles,
       networkTurret: this.networkTurret,
       networkTurretBullets: this.networkTurretBullets,
-      networkMapId: this.networkMapId,
       networkRotationDirection: this.networkRotationDirection,
       networkYellowBlockHp: this.networkYellowBlockHp,
       networkLaserBeamWidth: this.networkLaserBeamWidth,
@@ -508,7 +502,6 @@ export class NetworkSyncSystem {
     this.networkHomingMissiles = state.homingMissiles || [];
     this.networkTurret = state.turret ?? null;
     this.networkTurretBullets = state.turretBullets || [];
-    this.networkMapId = (state.mapId ?? 0) as MapId;
     this.networkRotationDirection =
       state.rotationDirection === -1 ? -1 : 1;
     this.networkYellowBlockHp = state.yellowBlockHp || [];

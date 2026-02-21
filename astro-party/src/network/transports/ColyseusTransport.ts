@@ -574,6 +574,7 @@ export class ColyseusTransport implements NetworkTransport {
         y: number;
         angle: number;
         color: string;
+        kind: "ship" | "pilot";
       }) => {
         this.callbacks?.onDashParticlesReceived?.(payload);
       },
