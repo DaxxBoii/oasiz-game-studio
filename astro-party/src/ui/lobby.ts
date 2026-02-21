@@ -20,7 +20,9 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   const HOST_ONLY_ACTION_MESSAGE = "Only the room leader can do that";
   let addingBot = false;
   let addButtonGuardUntilMs = 0;
+  let startButtonGuardUntilMs = 0;
   const ADD_BUTTON_TAP_GUARD_MS = 450;
+  const START_BUTTON_TAP_GUARD_MS = 650;
   const MAP_PICKER_ORDER: MapId[] = [0, 5, 1, 2, 3, 4];
   const MODE_CYCLE_ORDER: BaseGameMode[] = ["STANDARD", "SANE", "CHAOTIC"];
   const mapPickerCards = new Map<MapId, HTMLButtonElement>();
@@ -514,6 +516,11 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.startGameBtn.addEventListener("click", () => {
+    const now = performance.now();
+    if (now < startButtonGuardUntilMs) {
+      return;
+    }
+    startButtonGuardUntilMs = now + START_BUTTON_TAP_GUARD_MS;
     const hasEnoughPlayers = game.getPlayerCount() >= 2;
     if (!game.isLeader()) {
       showHostOnlyActionToast();

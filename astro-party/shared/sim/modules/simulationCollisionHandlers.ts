@@ -17,6 +17,7 @@ import {
 } from "../constants.js";
 import { damageJoustSword } from "../systems/WeaponSystem.js";
 import { type Vec2, lineIntersectsRect } from "../physics/geometryMath.js";
+import { segmentIntersectsShipShield } from "../physics/shieldGeometry.js";
 
 interface RuntimeYellowBlockLike {
   block: {
@@ -343,6 +344,7 @@ export function checkSweptProjectileHitShipCollisions(
   if (ctx.projectileBodies.size <= 0 || shipBodies.size <= 0) return;
 
   const shipBodyList = [...shipBodies.values()];
+  const shipBodyEntries = [...shipBodies.entries()];
   const projectileEntries = [...ctx.projectileBodies.entries()];
 
   for (const [projectileId, projectileBody] of projectileEntries) {
@@ -364,21 +366,118 @@ export function checkSweptProjectileHitShipCollisions(
       [start, midpoint],
       [midpoint, end],
     ];
+    const projectileOwnerId =
+      ctx.getPluginString(projectileBody, "ownerId") ?? "";
+    const projectileRadius = getProjectileRadius(projectileBody, sweepWidth);
 
     for (const [segmentStart, segmentEnd] of sweepSegments) {
       if (!ctx.projectileBodies.has(projectileId)) break;
+      const orderedShieldHits = queryOrderedShieldHitsAlongSegment(
+        ctx,
+        shipBodyEntries,
+        projectileOwnerId,
+        segmentStart,
+        segmentEnd,
+        projectileRadius,
+      );
       const orderedShipBodies = queryOrderedShipBodiesAlongSegment(
         shipBodyList,
         segmentStart,
         segmentEnd,
         sweepWidth,
       );
-      for (const shipBody of orderedShipBodies) {
+      let shieldIndex = 0;
+      let shipIndex = 0;
+      while (
+        ctx.projectileBodies.has(projectileId) &&
+        (shieldIndex < orderedShieldHits.length ||
+          shipIndex < orderedShipBodies.length)
+      ) {
+        const nextShield = orderedShieldHits[shieldIndex];
+        const nextShip = orderedShipBodies[shipIndex];
+        const nextShieldT = nextShield?.t ?? Infinity;
+        const nextShipT = nextShip
+          ? projectPointOntoSegmentT(segmentStart, segmentEnd, nextShip.position)
+          : Infinity;
+
+        if (nextShieldT <= nextShipT) {
+          shieldIndex += 1;
+          const consumed = applySweptProjectileShieldHit(
+            ctx,
+            projectileBody,
+            nextShield.playerId,
+          );
+          if (consumed) break;
+          continue;
+        }
+
+        shipIndex += 1;
         if (!ctx.projectileBodies.has(projectileId)) break;
-        handleProjectileHitShipCollision(ctx, projectileBody, shipBody);
+        handleProjectileHitShipCollision(ctx, projectileBody, nextShip);
       }
     }
   }
+}
+
+function applySweptProjectileShieldHit(
+  ctx: SimulationCollisionHandlersContext,
+  projectileBody: Matter.Body,
+  shipPlayerId: string,
+): boolean {
+  const projectileId = ctx.getPluginString(projectileBody, "entityId");
+  if (!projectileId || !ctx.projectileBodies.has(projectileId)) return false;
+
+  const powerUp = ctx.playerPowerUps.get(shipPlayerId);
+  if (powerUp?.type !== "SHIELD") return false;
+
+  powerUp.shieldHits += 1;
+  ctx.removeProjectileEntity(projectileId);
+  ctx.triggerScreenShake(3, 0.1);
+  if (powerUp.shieldHits >= POWERUP_SHIELD_HITS) {
+    ctx.playerPowerUps.delete(shipPlayerId);
+  }
+  return true;
+}
+
+function queryOrderedShieldHitsAlongSegment(
+  ctx: SimulationCollisionHandlersContext,
+  shipBodyEntries: ReadonlyArray<readonly [string, Matter.Body]>,
+  projectileOwnerId: string,
+  start: Vec2,
+  end: Vec2,
+  projectileRadius: number,
+): Array<{ playerId: string; t: number }> {
+  const hits: Array<{ playerId: string; t: number }> = [];
+
+  for (const [shipPlayerId, shipBody] of shipBodyEntries) {
+    if (shipPlayerId === projectileOwnerId) continue;
+    const shipPlayer = ctx.players.get(shipPlayerId);
+    if (!shipPlayer || !shipPlayer.ship.alive) continue;
+    if (shipPlayer.ship.invulnerableUntil > ctx.nowMs) continue;
+    const powerUp = ctx.playerPowerUps.get(shipPlayerId);
+    if (powerUp?.type !== "SHIELD") continue;
+
+    if (
+      !segmentIntersectsShipShield(
+        shipPlayer.ship,
+        start.x,
+        start.y,
+        end.x,
+        end.y,
+        projectileRadius,
+      )
+    ) {
+      continue;
+    }
+
+    hits.push({
+      playerId: shipPlayerId,
+      t: projectPointOntoSegmentT(start, end, shipBody.position),
+    });
+  }
+
+  hits.sort((a, b) => a.t - b.t);
+  return hits;
 }
 
 function queryOrderedShipBodiesAlongSegment(
@@ -502,4 +601,13 @@ function getBodySweepWidth(body: Matter.Body): number {
   const height = Math.max(0, body.bounds.max.y - body.bounds.min.y);
   const diameter = Math.max(width, height);
   return Math.max(1e-4, diameter);
+}
+
+function getProjectileRadius(body: Matter.Body, sweepWidth: number): number {
+  const circleRadius =
+    typeof body.circleRadius === "number" ? body.circleRadius : undefined;
+  if (circleRadius && circleRadius > 0) {
+    return circleRadius;
+  }
+  return Math.max(0, sweepWidth * 0.5);
 }
