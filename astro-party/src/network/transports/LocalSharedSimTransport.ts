@@ -19,6 +19,7 @@ import type {
 import type {
   NetworkCallbacks,
   NetworkPlayerState,
+  PlayerRemovalReason,
   NetworkTransport,
   PlayerMeta,
   PlayerMetaMap,
@@ -76,6 +77,7 @@ export class LocalSharedSimTransport implements NetworkTransport {
   private playerOrder: string[] = [];
   private playerMetaById: PlayerMetaMap = new Map();
   private playerRefs = new Map<string, LocalPlayerState>();
+  private playerRemovalReasonById = new Map<string, PlayerRemovalReason>();
   private lastAdvancedSettingsSignature: string | null = null;
   private lastDevModeEnabled: boolean | null = null;
   private lastDebugToolsEnabled: boolean | null = null;
@@ -128,6 +130,9 @@ export class LocalSharedSimTransport implements NetworkTransport {
         onError: (sessionId, code, message) => {
           if (sessionId !== this.mySessionId) return;
           this.callbacks?.onTransportError?.(code, message);
+        },
+        onPlayerRemoved: (playerId, reason) => {
+          this.playerRemovalReasonById.set(playerId, reason);
         },
         onReseed: (seed) => {
           this.callbacks?.onRNGSeedReceived?.(seed);
@@ -565,7 +570,10 @@ export class LocalSharedSimTransport implements NetworkTransport {
       if (!nextSet.has(previousId)) {
         this.playerRefs.delete(previousId);
         if (emitJoinLeaveEvents) {
-          this.callbacks?.onPlayerLeft(previousId);
+          const reason =
+            this.playerRemovalReasonById.get(previousId) ?? "left";
+          this.playerRemovalReasonById.delete(previousId);
+          this.callbacks?.onPlayerLeft(previousId, reason);
         }
       }
     }
@@ -614,6 +622,7 @@ export class LocalSharedSimTransport implements NetworkTransport {
     this.playerOrder = [];
     this.playerMetaById.clear();
     this.playerRefs.clear();
+    this.playerRemovalReasonById.clear();
     this.lastAdvancedSettingsSignature = null;
     this.lastDevModeEnabled = null;
     this.lastDebugToolsEnabled = null;

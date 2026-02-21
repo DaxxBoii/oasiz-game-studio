@@ -15,6 +15,7 @@ import {
 import type {
   NetworkCallbacks,
   NetworkPlayerState,
+  PlayerRemovalReason,
   NetworkTransport,
   PlayerMeta,
   PlayerMetaMap,
@@ -130,6 +131,7 @@ export class ColyseusTransport implements NetworkTransport {
   private playerOrder: string[] = [];
   private playerMetaById: PlayerMetaMap = new Map();
   private playerRefs = new Map<string, ColyseusPlayerState>();
+  private playerRemovalReasonById = new Map<string, PlayerRemovalReason>();
   private playerListRevision = 0;
   private lastPlayerListSignature: string | null = null;
   private lastAdvancedSettingsSignature: string | null = null;
@@ -144,7 +146,6 @@ export class ColyseusTransport implements NetworkTransport {
   private lastMeasuredRttMs = 0;
   private stateUnsubscribers: Array<() => void> = [];
   private playerMetaDetachById = new Map<string, () => void>();
-  private schemaRosterCallbacksActive = false;
   private static readonly FETCH_TIMEOUT_MS = 15_000;
 
   private readonly wsUrl: string;
@@ -525,7 +526,13 @@ export class ColyseusTransport implements NetworkTransport {
   private bindRoomListeners(room: Room): void {
     this.bindStateListeners(room);
 
-    room.onLeave(() => {
+    room.onLeave((code) => {
+      if (code === 4001) {
+        this.callbacks?.onTransportError?.(
+          "KICKED_BY_LEADER",
+          "You were removed by the room leader",
+        );
+      }
       this.connected = false;
       this.stopSync();
       this.callbacks?.onDisconnected();
@@ -591,6 +598,18 @@ export class ColyseusTransport implements NetworkTransport {
       },
     );
 
+    room.onMessage(
+      "evt:player_removed",
+      (payload: { playerId?: string; reason?: PlayerRemovalReason }) => {
+        if (typeof payload?.playerId !== "string" || payload.playerId.length <= 0) {
+          return;
+        }
+        const reason: PlayerRemovalReason =
+          payload.reason === "kicked" ? "kicked" : "left";
+        this.playerRemovalReasonById.set(payload.playerId, reason);
+      },
+    );
+
     room.onMessage("evt:rng_seed", (payload: { seed: number }) => {
       this.callbacks?.onRNGSeedReceived?.(payload.seed);
     });
@@ -598,9 +617,7 @@ export class ColyseusTransport implements NetworkTransport {
 
   private bindStateListeners(room: Room): void {
     this.teardownStateBindings();
-    this.schemaRosterCallbacksActive = false;
     if (this.bindSchemaStateListeners(room)) {
-      this.schemaRosterCallbacksActive = true;
       return;
     }
 
@@ -717,25 +734,16 @@ export class ColyseusTransport implements NetworkTransport {
 
     if (root.playerOrder) {
       trackUnsubscriber(
-        root.playerOrder.onAdd?.((item, index) => {
-          const playerId = typeof item === "string" ? item : "";
+        root.playerOrder.onAdd?.(() => {
           triggerStateRefresh();
-          if (!playerId) return;
-          const joinedIndex = Number.isFinite(index as number)
-            ? (index as number)
-            : this.playerOrder.indexOf(playerId);
-          this.callbacks?.onPlayerJoined(playerId, joinedIndex);
         }),
       );
       trackUnsubscriber(
         root.playerOrder.onChange?.(() => triggerStateRefresh()),
       );
       trackUnsubscriber(
-        root.playerOrder.onRemove?.((item) => {
-          const playerId = typeof item === "string" ? item : "";
+        root.playerOrder.onRemove?.(() => {
           triggerStateRefresh();
-          if (!playerId) return;
-          this.callbacks?.onPlayerLeft(playerId);
         }),
       );
     }
@@ -832,7 +840,7 @@ export class ColyseusTransport implements NetworkTransport {
       hostId: this.hostId,
       revision: ++this.playerListRevision,
     };
-    this.handlePlayerList(payload, !this.schemaRosterCallbacksActive);
+    this.handlePlayerList(payload, true);
   }
 
   private applyAdvancedSettingsFromState(state: RoomStateView): void {
@@ -1071,7 +1079,10 @@ export class ColyseusTransport implements NetworkTransport {
       if (!nextSet.has(previousId)) {
         this.playerRefs.delete(previousId);
         if (emitJoinLeaveEvents) {
-          this.callbacks?.onPlayerLeft(previousId);
+          const reason =
+            this.playerRemovalReasonById.get(previousId) ?? "left";
+          this.playerRemovalReasonById.delete(previousId);
+          this.callbacks?.onPlayerLeft(previousId, reason);
         }
       }
     }
@@ -1118,9 +1129,22 @@ export class ColyseusTransport implements NetworkTransport {
 
   private async cleanupConnection(): Promise<void> {
     this.teardownStateBindings();
+    const room = this.room;
     try {
-      if (this.room) {
-        await this.room.leave(true);
+      if (room) {
+        const isOpen =
+          (room.connection as { isOpen?: boolean } | undefined)?.isOpen === true;
+        if (isOpen) {
+          const leavePromise = room.leave(false).then(() => undefined);
+          await Promise.race([
+            leavePromise,
+            new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 500);
+            }),
+          ]);
+        } else {
+          room.removeAllListeners();
+        }
       }
     } catch (error) {
       console.log("[ColyseusTransport] leave failed", error);
@@ -1146,6 +1170,7 @@ export class ColyseusTransport implements NetworkTransport {
     this.playerOrder = [];
     this.playerMetaById.clear();
     this.playerRefs.clear();
+    this.playerRemovalReasonById.clear();
   }
 
   private resolveWsUrl(): string {

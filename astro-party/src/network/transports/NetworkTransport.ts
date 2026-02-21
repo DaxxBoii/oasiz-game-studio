@@ -40,10 +40,11 @@ export interface PlayerMeta {
 }
 
 export type PlayerMetaMap = Map<string, PlayerMeta>;
+export type PlayerRemovalReason = "left" | "kicked";
 
 export interface NetworkCallbacks {
   onPlayerJoined: (playerId: string, playerIndex: number) => void;
-  onPlayerLeft: (playerId: string) => void;
+  onPlayerLeft: (playerId: string, reason: PlayerRemovalReason) => void;
   onGameStateReceived: (state: GameStateSync) => void;
   onInputReceived: (playerId: string, input: PlayerInput) => void;
   onRNGSeedReceived?: (baseSeed: number) => void;

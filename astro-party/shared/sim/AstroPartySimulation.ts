@@ -20,6 +20,7 @@ import type {
   RuntimeTurret,
   RuntimeTurretBullet,
   Hooks,
+  PlayerRemovalReason,
   SnapshotPayload,
   PlayerListPayload,
   PlayerListMeta,
@@ -334,20 +335,23 @@ export class AstroPartySimulation implements SimState {
     syncRoomMeta(this);
   }
 
-  removeSession(sessionId: string): void {
+  removeSession(
+    sessionId: string,
+    reason: PlayerRemovalReason = "left",
+  ): void {
     const localPlayerIds = [...this.players.values()]
       .filter(
         (player) => player.botType === "local" && player.sessionId === sessionId,
       )
       .map((player) => player.id);
     for (const localPlayerId of localPlayerIds) {
-      this.removePlayerById(localPlayerId);
+      this.removePlayerById(localPlayerId, reason);
     }
 
     const playerId = this.humanBySession.get(sessionId);
     if (!playerId) return;
     this.humanBySession.delete(sessionId);
-    this.removePlayerById(playerId);
+    this.removePlayerById(playerId, reason);
   }
 
   setName(sessionId: string, rawName: string): void {
@@ -703,7 +707,7 @@ export class AstroPartySimulation implements SimState {
       this.hooks.onError(sessionId, "NOT_FOUND", "Bot not found");
       return;
     }
-    this.removePlayerById(playerId);
+    this.removePlayerById(playerId, "left");
   }
 
   kickPlayer(sessionId: string, targetId: string): void {
@@ -713,7 +717,22 @@ export class AstroPartySimulation implements SimState {
       this.hooks.onError(sessionId, "NOT_FOUND", "Player not found");
       return;
     }
-    this.removePlayerById(targetId);
+    if (target.sessionId === sessionId) {
+      this.hooks.onError(sessionId, "INVALID_TARGET", "Cannot kick yourself");
+      return;
+    }
+    if (target.isBot || !target.sessionId) {
+      this.removePlayerById(targetId, "kicked");
+      return;
+    }
+
+    const targetSessionId = target.sessionId;
+    this.hooks.onKickSession?.(
+      targetSessionId,
+      "KICKED_BY_LEADER",
+      "You were removed by the room leader",
+    );
+    this.removeSession(targetSessionId, "kicked");
   }
 
   // ============= TICK =============
@@ -1238,7 +1257,10 @@ export class AstroPartySimulation implements SimState {
     return getMapDefinition(this.mapId);
   }
 
-  private removePlayerById(playerId: string): void {
+  private removePlayerById(
+    playerId: string,
+    reason: PlayerRemovalReason = "left",
+  ): void {
     this.identityAllocator.releasePlayer(playerId);
     this.shipTransformHistory.delete(playerId);
     this.players.delete(playerId);
@@ -1271,6 +1293,7 @@ export class AstroPartySimulation implements SimState {
       syncRoomMeta(this);
     }
 
+    this.hooks.onPlayerRemoved?.(playerId, reason);
     this.syncPlayers();
   }
 

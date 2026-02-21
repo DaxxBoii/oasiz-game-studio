@@ -205,6 +205,9 @@ export class Game {
   private registerNetworkCallbacks(): void {
     this.network.setCallbacks({
       onPlayerJoined: (playerId, playerIndex) => {
+        const myPlayerId = this.network.getMyPlayerId();
+        const shouldToastJoin =
+          this.flowMgr.phase !== "START" && playerId !== myPlayerId;
         this.playerMgr.addPlayer(
           playerId,
           playerIndex,
@@ -212,15 +215,37 @@ export class Game {
           () => this.emitPlayersUpdate(),
           () => this.flowMgr.startCountdown(),
         );
+        if (shouldToastJoin) {
+          const joinedName =
+            this.playerMgr.players.get(playerId)?.name ??
+            this.network.getPlayerName(playerId) ??
+            "Player";
+          this._onSystemMessage?.(joinedName + " joined the room", 2200);
+        }
         if (this.isLeader()) {
           this.broadcastModeState();
         }
       },
 
-      onPlayerLeft: (playerId) => {
+      onPlayerLeft: (playerId, reason) => {
+        const myPlayerId = this.network.getMyPlayerId();
+        const shouldToastLeave =
+          this.flowMgr.phase !== "START" && playerId !== myPlayerId;
+        const leftName =
+          this.playerMgr.players.get(playerId)?.name ??
+          this.network.getPlayerName(playerId) ??
+          "Player";
         this.playerPowerUps.delete(playerId);
         this.controlledInputSequenceByPlayer.delete(playerId);
         this.playerMgr.removePlayer(playerId, () => this.emitPlayersUpdate());
+        if (shouldToastLeave) {
+          this._onSystemMessage?.(
+            reason === "kicked"
+              ? leftName + " was kicked"
+              : leftName + " left the room",
+            2200,
+          );
+        }
 
         if (
           this.network.isSimulationAuthority() &&
@@ -270,7 +295,16 @@ export class Game {
           return;
         }
         console.log("[Game] Disconnected from room");
+        const kickedByLeader = this.lastTransportErrorCode === "KICKED_BY_LEADER";
+        const kickedMessage =
+          this.lastTransportErrorMessage || "You were removed by the room leader";
+        if (!kickedByLeader) {
+          this._onSystemMessage?.("Disconnected from room", 2500);
+        }
         this.handleDisconnected();
+        if (kickedByLeader) {
+          this._onSystemMessage?.(kickedMessage, 3500);
+        }
       },
 
       onGamePhaseReceived: (phase, winnerId, winnerName) => {
@@ -459,6 +493,11 @@ export class Game {
         }
         if (code === "LEADER_ONLY") {
           this._onSystemMessage?.("Only the room leader can do that", 2500);
+          return;
+        }
+        if (code === "KICKED_BY_LEADER") {
+          // Show kicked toast after disconnect transition so START screen change
+          // does not immediately clear the message.
           return;
         }
         this._onSystemMessage?.(message || "Network error", 3500);

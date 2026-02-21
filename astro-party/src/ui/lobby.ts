@@ -117,7 +117,10 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     kickButtons.forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!game.isLeader()) return;
+        if (!game.isLeader()) {
+          showHostOnlyActionToast();
+          return;
+        }
         const playerId = (btn as HTMLElement).dataset.playerId;
         if (!playerId) return;
         feedback.button();

@@ -186,6 +186,18 @@ export class AstroPartyRoom extends Room<AstroPartyRoomState> {
             target.send("evt:error", { code, message });
           }
         },
+        onPlayerRemoved: (playerId: string, reason: "left" | "kicked") => {
+          this.broadcast("evt:player_removed", { playerId, reason });
+        },
+        onKickSession: (sessionId: string, code?: string, message?: string) => {
+          const target = this.clients.find((client) => client.sessionId === sessionId);
+          if (!target) return;
+          target.send("evt:error", {
+            code: code ?? "KICKED_BY_LEADER",
+            message: message ?? "You were removed by the room leader",
+          });
+          target.leave(4001, "kicked");
+        },
         onReseed: (seed: number) => {
           this.broadcast("evt:rng_seed", { seed });
         },

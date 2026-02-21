@@ -2,7 +2,7 @@ cat >/root/deploy-astro-party.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-BRANCH="<<branch-name>>"
+BRANCH="astro-party-col"
 PM2_NAME="astro-party-colyseus"
 
 # Prefer /root/astro-party (new), fallback to old /root/astro-party-repo
@@ -47,7 +47,7 @@ for i in $(seq 1 30); do
 done
 
 curl -fsS http://127.0.0.1:2567/healthz
-curl -fsS https://<<mapped-domain>>/healthz
+curl -fsS https://api.aiisourdaddy.com/healthz
 echo "Deploy OK"
 EOF
 

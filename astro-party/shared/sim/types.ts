@@ -300,8 +300,19 @@ export interface Hooks {
   }) => void;
   onDevMode: (enabled: boolean) => void;
   onError: (sessionId: string, code: string, message: string) => void;
+  onPlayerRemoved?: (
+    playerId: string,
+    reason: PlayerRemovalReason,
+  ) => void;
+  onKickSession?: (
+    sessionId: string,
+    code?: string,
+    message?: string,
+  ) => void;
   onReseed?: (seed: number) => void;
 }
+
+export type PlayerRemovalReason = "left" | "kicked";
 
 // ============= RUNTIME TYPES (simulation-internal, not serialized) =============
 
