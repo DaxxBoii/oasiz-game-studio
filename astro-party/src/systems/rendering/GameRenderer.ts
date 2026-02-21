@@ -40,6 +40,7 @@ export interface RenderContext {
   mapId: MapId;
   rotationDirection: number;
   yellowBlockHp: number[];
+  networkLaserBeamWidth: number;
 }
 
 export class GameRenderer {
@@ -96,6 +97,13 @@ export class GameRenderer {
       const renderTurret = ctx.networkTurret;
       const renderTurretBullets = ctx.networkTurretBullets;
 
+      // Draw beams first so ship art can sit on top of the beam origin.
+      renderLaserBeams.forEach((state) => {
+        if (state.alive) {
+          this.renderer.drawLaserBeam(state, ctx.networkLaserBeamWidth);
+        }
+      });
+
       renderShips.forEach((state) => {
         if (state.alive) {
           const player = ctx.players.get(state.playerId);
@@ -110,6 +118,7 @@ export class GameRenderer {
               player.color,
               renderData.shieldHits,
               renderData.laserCharges,
+              renderData.laserMaxCharges,
               renderData.laserCooldownProgress,
               renderData.scatterCharges,
               renderData.scatterCooldownProgress,
@@ -148,12 +157,6 @@ export class GameRenderer {
         }
       });
 
-      renderLaserBeams.forEach((state) => {
-        if (state.alive) {
-          this.renderer.drawLaserBeam(state);
-        }
-      });
-
       renderMines.forEach((state) => {
         if (state.alive) {
           this.renderer.drawMineState(state);
@@ -177,6 +180,13 @@ export class GameRenderer {
       });
 
       if (ctx.isDevModeEnabled) {
+        renderShips.forEach((state) => {
+          if (state.alive) {
+            this.renderer.drawShipColliderDebug(state);
+          }
+        });
+        this.renderer.drawProjectileSweepDebug(renderProjectiles);
+
         renderHomingMissiles.forEach((state) => {
           if (state.alive) {
             this.renderer.drawHomingMissileDetectionRadius(
@@ -252,6 +262,7 @@ export class GameRenderer {
   ): {
     shieldHits?: number;
     laserCharges?: number;
+    laserMaxCharges?: number;
     laserCooldownProgress?: number;
     scatterCharges?: number;
     scatterCooldownProgress?: number;
@@ -263,9 +274,11 @@ export class GameRenderer {
       powerUp?.type === "SHIELD" ? powerUp.shieldHits : undefined;
     const laserCharges =
       powerUp?.type === "LASER" ? powerUp.charges : undefined;
+    const laserMaxCharges =
+      powerUp?.type === "LASER" ? Math.max(1, powerUp.maxCharges) : undefined;
     const laserCooldownProgress =
       powerUp?.type === "LASER" &&
-      powerUp.charges < GAME_CONFIG.POWERUP_LASER_CHARGES
+      powerUp.charges < Math.max(1, powerUp.maxCharges)
         ? Math.min(
             1,
             (nowMs - powerUp.lastFireTime) / GAME_CONFIG.POWERUP_LASER_COOLDOWN,
@@ -292,6 +305,7 @@ export class GameRenderer {
     return {
       shieldHits,
       laserCharges,
+      laserMaxCharges,
       laserCooldownProgress,
       scatterCharges,
       scatterCooldownProgress,

@@ -5,11 +5,10 @@ import type {
   DebugPhysicsGlobals,
 } from "../types.js";
 import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
   PLAYER_COLORS,
   JOUST_SPEED_MULTIPLIER,
-  LASER_COOLDOWN_MS,
-  LASER_BEAM_DURATION_MS,
-  LASER_BEAM_LENGTH,
   SCATTER_COOLDOWN_MS,
   SCATTER_ANGLE_DEG,
   SCATTER_PROJECTILE_SPEED,
@@ -21,7 +20,8 @@ import {
 import { normalizeAngle } from "../utils.js";
 import {
   getAsteroidWorldVertices,
-  lineIntersectsPolygon,
+  projectRayToArenaWall,
+  segmentIntersectsPolygonWithRadius,
 } from "../physics/geometryMath.js";
 import {
   SHIP_COLLIDER_VERTICES,
@@ -202,9 +202,8 @@ export function tryFire(
 ): boolean {
   const ship = player.ship;
   const projectileSizing = resolveProjectileSizing(globals);
-  // Spawn from ship center to avoid nose-side tunneling when ships are pressed together.
-  const spawnX = ship.x;
-  const spawnY = ship.y;
+  const shipCenterX = ship.x;
+  const shipCenterY = ship.y;
   const powerUp = sim.playerPowerUps.get(player.id);
 
   if (powerUp?.type === "JOUST") {
@@ -212,11 +211,13 @@ export function tryFire(
   }
 
   if (powerUp?.type === "LASER" && powerUp.charges > 0) {
-    if (sim.nowMs - powerUp.lastFireTime < LASER_COOLDOWN_MS) {
+    if (sim.nowMs - powerUp.lastFireTime < globals.LASER_COOLDOWN_MS) {
       return false;
     }
     powerUp.lastFireTime = sim.nowMs;
     powerUp.charges -= 1;
+    const spawnX = Math.max(0, Math.min(ARENA_WIDTH, shipCenterX));
+    const spawnY = Math.max(0, Math.min(ARENA_HEIGHT, shipCenterY));
     sim.laserBeams.push({
       id: sim.nextEntityId("beam"),
       ownerId: player.id,
@@ -225,10 +226,26 @@ export function tryFire(
       angle: ship.angle,
       spawnTime: sim.nowMs,
       alive: true,
-      durationMs: LASER_BEAM_DURATION_MS,
+      durationMs: globals.LASER_BEAM_DURATION_MS,
     });
     const rewindMs = sim.getLagCompensationRewindMs(player.id);
-    applyLaserDamage(sim, player.id, spawnX, spawnY, ship.angle, rewindMs);
+    applyLaserDamage(
+      sim,
+      player.id,
+      spawnX,
+      spawnY,
+      ship.angle,
+      rewindMs,
+      globals.LASER_BEAM_WIDTH,
+    );
+    applyWeaponRecoil(
+      sim,
+      player,
+      cfg,
+      isStandard,
+      ship.angle,
+      cfg.LASER_RECOIL_MULTIPLIER,
+    );
     sim.hooks.onSound("fire", player.id);
     if (powerUp.charges <= 0) {
       sim.playerPowerUps.delete(player.id);
@@ -248,8 +265,8 @@ export function tryFire(
       sim.projectiles.push({
         id: sim.nextEntityId("proj"),
         ownerId: player.id,
-        x: spawnX,
-        y: spawnY,
+        x: shipCenterX,
+        y: shipCenterY,
         vx: Math.cos(angle) * SCATTER_PROJECTILE_SPEED,
         vy: Math.sin(angle) * SCATTER_PROJECTILE_SPEED,
         spawnTime: sim.nowMs,
@@ -270,8 +287,8 @@ export function tryFire(
     sim.mines.push({
       id: sim.nextEntityId("mine"),
       ownerId: player.id,
-      x: spawnX - Math.cos(ship.angle) * MINE_DEPLOY_OFFSET,
-      y: spawnY - Math.sin(ship.angle) * MINE_DEPLOY_OFFSET,
+      x: shipCenterX - Math.cos(ship.angle) * MINE_DEPLOY_OFFSET,
+      y: shipCenterY - Math.sin(ship.angle) * MINE_DEPLOY_OFFSET,
       spawnTime: sim.nowMs,
       alive: true,
       exploded: false,
@@ -291,8 +308,8 @@ export function tryFire(
     sim.homingMissiles.push({
       id: sim.nextEntityId("missile"),
       ownerId: player.id,
-      x: spawnX,
-      y: spawnY,
+      x: shipCenterX,
+      y: shipCenterY,
       vx: Math.cos(ship.angle) * HOMING_MISSILE_SPEED,
       vy: Math.sin(ship.angle) * HOMING_MISSILE_SPEED,
       angle: ship.angle,
@@ -314,15 +331,7 @@ export function tryFire(
   ship.lastShotTime = sim.nowMs;
   ship.ammo -= 1;
 
-  if (isStandard) {
-    player.recoilTimerSec = cfg.SHIP_RECOIL_DURATION;
-  } else {
-    sim.applyShipForce(
-      player.id,
-      -Math.cos(ship.angle) * cfg.RECOIL_FORCE,
-      -Math.sin(ship.angle) * cfg.RECOIL_FORCE,
-    );
-  }
+  applyWeaponRecoil(sim, player, cfg, isStandard, ship.angle);
 
   if (!ship.isReloading) {
     ship.reloadStartTime = sim.nowMs;
@@ -332,8 +341,8 @@ export function tryFire(
   sim.projectiles.push({
     id: sim.nextEntityId("proj"),
     ownerId: player.id,
-    x: spawnX,
-    y: spawnY,
+    x: shipCenterX,
+    y: shipCenterY,
     vx: Math.cos(ship.angle) * cfg.PROJECTILE_SPEED,
     vy: Math.sin(ship.angle) * cfg.PROJECTILE_SPEED,
     spawnTime: sim.nowMs,
@@ -343,6 +352,34 @@ export function tryFire(
   });
   sim.hooks.onSound("fire", player.id);
   return true;
+}
+
+function applyWeaponRecoil(
+  sim: SimState,
+  player: RuntimePlayer,
+  cfg: ActiveConfig,
+  isStandard: boolean,
+  shipAngle: number,
+  recoilScale: number = 1,
+): void {
+  if (isStandard) {
+    player.recoilTimerSec = cfg.SHIP_RECOIL_DURATION * recoilScale;
+    const recoilKickSpeed = Math.min(
+      20,
+      (cfg.SHIP_RECOIL_SLOWDOWN + cfg.RECOIL_FORCE * 1500) * recoilScale,
+    );
+    if (recoilKickSpeed > 0) {
+      player.ship.vx -= Math.cos(shipAngle) * recoilKickSpeed;
+      player.ship.vy -= Math.sin(shipAngle) * recoilKickSpeed;
+      sim.setShipVelocity(player.id, player.ship.vx, player.ship.vy);
+    }
+    return;
+  }
+  sim.applyShipForce(
+    player.id,
+    -Math.cos(shipAngle) * cfg.RECOIL_FORCE * recoilScale,
+    -Math.sin(shipAngle) * cfg.RECOIL_FORCE * recoilScale,
+  );
 }
 
 function updateReload(
@@ -376,9 +413,17 @@ function applyLaserDamage(
   startY: number,
   angle: number,
   rewindMs: number,
+  beamWidth: number,
 ): void {
-  const endX = startX + Math.cos(angle) * LASER_BEAM_LENGTH;
-  const endY = startY + Math.sin(angle) * LASER_BEAM_LENGTH;
+  const beamRadius = Math.max(0, beamWidth * 0.5);
+  const beamEnd = projectRayToArenaWall(
+    { x: startX, y: startY },
+    angle,
+    ARENA_WIDTH,
+    ARENA_HEIGHT,
+  );
+  const endX = beamEnd.x;
+  const endY = beamEnd.y;
 
   for (const playerId of sim.playerOrder) {
     if (playerId === ownerId) continue;
@@ -395,13 +440,12 @@ function applyLaserDamage(
       targetY,
       targetAngle,
     );
-    if (
-      !lineIntersectsPolygon(
-        { x: startX, y: startY },
-        { x: endX, y: endY },
-        shipVertices,
-      )
-    ) {
+    if (!segmentIntersectsPolygonWithRadius(
+      { x: startX, y: startY },
+      { x: endX, y: endY },
+      beamRadius,
+      shipVertices,
+    )) {
       continue;
     }
     const shield = sim.playerPowerUps.get(playerId);
@@ -422,6 +466,7 @@ function applyLaserDamage(
     if (
       checkLinePilotCollision(
         startX, startY, endX, endY,
+        beamRadius,
         pilot.x, pilot.y, pilot.angle,
       )
     ) {
@@ -434,6 +479,7 @@ function applyLaserDamage(
     if (
       checkLineAsteroidCollision(
         startX, startY, endX, endY,
+        beamRadius,
         asteroid,
       )
     ) {
@@ -447,6 +493,7 @@ function checkLineAsteroidCollision(
   y1: number,
   x2: number,
   y2: number,
+  radius: number,
   asteroid: {
     x: number;
     y: number;
@@ -455,9 +502,10 @@ function checkLineAsteroidCollision(
   },
 ): boolean {
   const vertices = getAsteroidWorldVertices(asteroid);
-  return lineIntersectsPolygon(
+  return segmentIntersectsPolygonWithRadius(
     { x: x1, y: y1 },
     { x: x2, y: y2 },
+    radius,
     vertices,
   );
 }
@@ -467,14 +515,16 @@ function checkLinePilotCollision(
   y1: number,
   x2: number,
   y2: number,
+  radius: number,
   pilotX: number,
   pilotY: number,
   pilotAngle: number,
 ): boolean {
   const vertices = transformLocalVertices(PILOT_COLLIDER_VERTICES, pilotX, pilotY, pilotAngle);
-  return lineIntersectsPolygon(
+  return segmentIntersectsPolygonWithRadius(
     { x: x1, y: y1 },
     { x: x2, y: y2 },
+    radius,
     vertices,
   );
 }

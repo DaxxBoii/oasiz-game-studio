@@ -10,13 +10,18 @@ import type { Physics } from "../physics/Physics.js";
 import Matter from "matter-js";
 import { normalizeAngle } from "../utils.js";
 import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
   ASTEROID_DAMAGE_SHIPS,
   JOUST_SWORD_LENGTH,
-  LASER_BEAM_LENGTH,
   POWERUP_SHIELD_HITS,
 } from "../constants.js";
 import { damageJoustSword } from "../systems/WeaponSystem.js";
-import { type Vec2, lineIntersectsRect } from "../physics/geometryMath.js";
+import {
+  type Vec2,
+  lineIntersectsRect,
+  projectRayToArenaWall,
+} from "../physics/geometryMath.js";
 import { segmentIntersectsShipShield } from "../physics/shieldGeometry.js";
 
 interface RuntimeYellowBlockLike {
@@ -42,6 +47,7 @@ export interface SimulationCollisionHandlersContext {
   yellowBlockBodyIndex: Map<number, number>;
   yellowBlockSwordHitCooldown: Map<number, number>;
   laserBeams: RuntimeLaserBeam[];
+  laserBeamWidth: number;
   physics: Physics;
   getCurrentMapId: () => number;
   getPluginString: (body: Matter.Body, key: string) => string | null;
@@ -247,15 +253,18 @@ export function checkLaserBeamBlockCollisions(
     if (!beam.alive) continue;
 
     const start = { x: beam.x, y: beam.y };
-    const end = {
-      x: beam.x + Math.cos(beam.angle) * LASER_BEAM_LENGTH,
-      y: beam.y + Math.sin(beam.angle) * LASER_BEAM_LENGTH,
-    };
+    const beamHalfWidth = Math.max(0, ctx.laserBeamWidth * 0.5);
+    const end = projectRayToArenaWall(
+      start,
+      beam.angle,
+      ARENA_WIDTH,
+      ARENA_HEIGHT,
+    );
 
     for (let i = ctx.yellowBlocks.length - 1; i >= 0; i--) {
       const block = ctx.yellowBlocks[i];
       if (!block.body || block.hp <= 0) continue;
-      const half = block.block.width * 0.5;
+      const half = block.block.width * 0.5 + beamHalfWidth;
       if (
         lineIntersectsRect(start, end, block.body.position.x, block.body.position.y, half)
       ) {
@@ -339,7 +348,8 @@ export function checkSweptProjectileHitShipCollisions(
   ctx: SimulationCollisionHandlersContext,
   shipBodies: ReadonlyMap<string, Matter.Body>,
   previousProjectilePositions: ReadonlyMap<string, Vec2>,
-  previousProjectileVelocities: ReadonlyMap<string, Vec2>,
+  _previousProjectileVelocities: ReadonlyMap<string, Vec2>,
+  deferredProjectileWallHits?: ReadonlySet<string>,
 ): void {
   if (ctx.projectileBodies.size <= 0 || shipBodies.size <= 0) return;
 
@@ -355,20 +365,12 @@ export function checkSweptProjectileHitShipCollisions(
     const start = previous;
     const end = projectileBody.position;
     const sweepWidth = getBodySweepWidth(projectileBody);
-    const preVelocity = previousProjectileVelocities.get(projectileId) ?? null;
-    const midpoint = getCurvedSweepMidpoint(
-      start,
-      end,
-      preVelocity,
-      projectileBody.velocity,
-    );
-    const sweepSegments: [Vec2, Vec2][] = [
-      [start, midpoint],
-      [midpoint, end],
-    ];
+    const sweepSegments: [Vec2, Vec2][] = [[start, end]];
     const projectileOwnerId =
       ctx.getPluginString(projectileBody, "ownerId") ?? "";
     const projectileRadius = getProjectileRadius(projectileBody, sweepWidth);
+    const hasDeferredWallHit =
+      deferredProjectileWallHits?.has(projectileId) ?? false;
 
     for (const [segmentStart, segmentEnd] of sweepSegments) {
       if (!ctx.projectileBodies.has(projectileId)) break;
@@ -386,12 +388,23 @@ export function checkSweptProjectileHitShipCollisions(
         segmentEnd,
         sweepWidth,
       );
+      const wallHitT = hasDeferredWallHit
+        ? computeWallHitT(
+            segmentStart,
+            segmentEnd,
+            projectileRadius,
+            ARENA_WIDTH,
+            ARENA_HEIGHT,
+          )
+        : null;
+      let wallHandled = wallHitT === null;
       let shieldIndex = 0;
       let shipIndex = 0;
       while (
         ctx.projectileBodies.has(projectileId) &&
         (shieldIndex < orderedShieldHits.length ||
-          shipIndex < orderedShipBodies.length)
+          shipIndex < orderedShipBodies.length ||
+          !wallHandled)
       ) {
         const nextShield = orderedShieldHits[shieldIndex];
         const nextShip = orderedShipBodies[shipIndex];
@@ -399,6 +412,17 @@ export function checkSweptProjectileHitShipCollisions(
         const nextShipT = nextShip
           ? projectPointOntoSegmentT(segmentStart, segmentEnd, nextShip.position)
           : Infinity;
+        const nextWallT = wallHandled ? Infinity : wallHitT ?? Infinity;
+
+        if (nextWallT <= nextShieldT && nextWallT <= nextShipT) {
+          wallHandled = true;
+          const projectileIdAtWall = ctx.getPluginString(projectileBody, "entityId");
+          if (!projectileIdAtWall || !ctx.projectileBodies.has(projectileIdAtWall)) {
+            break;
+          }
+          ctx.removeProjectileEntity(projectileIdAtWall);
+          break;
+        }
 
         if (nextShieldT <= nextShipT) {
           shieldIndex += 1;
@@ -506,51 +530,6 @@ function queryOrderedShipBodiesAlongSegment(
   );
 }
 
-function getCurvedSweepMidpoint(
-  start: Vec2,
-  end: Vec2,
-  preVelocity: Vec2 | null,
-  postVelocity: Vec2,
-): Vec2 {
-  const midpoint = {
-    x: (start.x + end.x) * 0.5,
-    y: (start.y + end.y) * 0.5,
-  };
-
-  if (!preVelocity) return midpoint;
-
-  const preLen = Math.hypot(preVelocity.x, preVelocity.y);
-  const postLen = Math.hypot(postVelocity.x, postVelocity.y);
-  if (preLen <= 1e-6 || postLen <= 1e-6) return midpoint;
-
-  const chordX = end.x - start.x;
-  const chordY = end.y - start.y;
-  const chordLen = Math.hypot(chordX, chordY);
-  if (chordLen <= 1e-6) return midpoint;
-
-  const preNX = preVelocity.x / preLen;
-  const preNY = preVelocity.y / preLen;
-  const postNX = postVelocity.x / postLen;
-  const postNY = postVelocity.y / postLen;
-
-  const turnCross = preNX * postNY - preNY * postNX;
-  const turnMagnitude = Math.abs(turnCross);
-  if (turnMagnitude <= 1e-3) return midpoint;
-
-  const chordNX = chordX / chordLen;
-  const chordNY = chordY / chordLen;
-  const chordNormalX = -chordNY;
-  const chordNormalY = chordNX;
-  const maxOffset = chordLen * 0.35;
-  const signedOffset =
-    Math.max(-maxOffset, Math.min(maxOffset, turnCross * chordLen * 0.25));
-
-  return {
-    x: midpoint.x + chordNormalX * signedOffset,
-    y: midpoint.y + chordNormalY * signedOffset,
-  };
-}
-
 function tryDamageYellowBlockWithSword(
   ctx: SimulationCollisionHandlersContext,
   blockIndex: number,
@@ -610,4 +589,58 @@ function getProjectileRadius(body: Matter.Body, sweepWidth: number): number {
     return circleRadius;
   }
   return Math.max(0, sweepWidth * 0.5);
+}
+
+function computeWallHitT(
+  start: Vec2,
+  end: Vec2,
+  projectileRadius: number,
+  arenaWidth: number,
+  arenaHeight: number,
+): number | null {
+  const minX = projectileRadius;
+  const maxX = arenaWidth - projectileRadius;
+  const minY = projectileRadius;
+  const maxY = arenaHeight - projectileRadius;
+
+  if (
+    start.x < minX ||
+    start.x > maxX ||
+    start.y < minY ||
+    start.y > maxY
+  ) {
+    return 0;
+  }
+
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx * dx + dy * dy <= 1e-9) return null;
+
+  let bestT = Infinity;
+  const pushCandidate = (t: number): void => {
+    if (t < 0 || t > 1) return;
+    if (t < bestT) bestT = t;
+  };
+
+  if (dx > 1e-9) {
+    const t = (maxX - start.x) / dx;
+    const y = start.y + dy * t;
+    if (y >= minY && y <= maxY) pushCandidate(t);
+  } else if (dx < -1e-9) {
+    const t = (minX - start.x) / dx;
+    const y = start.y + dy * t;
+    if (y >= minY && y <= maxY) pushCandidate(t);
+  }
+
+  if (dy > 1e-9) {
+    const t = (maxY - start.y) / dy;
+    const x = start.x + dx * t;
+    if (x >= minX && x <= maxX) pushCandidate(t);
+  } else if (dy < -1e-9) {
+    const t = (minY - start.y) / dy;
+    const x = start.x + dx * t;
+    if (x >= minX && x <= maxX) pushCandidate(t);
+  }
+
+  return Number.isFinite(bestT) ? bestT : null;
 }

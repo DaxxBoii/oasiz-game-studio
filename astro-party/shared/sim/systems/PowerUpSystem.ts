@@ -4,8 +4,6 @@ import {
   POWERUP_MAGNETIC_RADIUS,
   POWERUP_MAGNETIC_SPEED,
   POWERUP_SPAWN_WEIGHTS,
-  LASER_CHARGES,
-  LASER_COOLDOWN_MS,
   SCATTER_CHARGES,
   SCATTER_COOLDOWN_MS,
   STARTING_POWERUP_TYPES,
@@ -51,11 +49,13 @@ export function updatePowerUps(sim: SimState, dtSec: number): void {
 
 export function grantPowerUp(sim: SimState, playerId: string, type: PowerUpType): void {
   if (type === "LASER") {
+    const globals = sim.getGlobalConfig();
+    const laserCharges = Math.max(1, Math.round(globals.LASER_CHARGES));
     sim.playerPowerUps.set(playerId, {
       type: "LASER",
-      charges: LASER_CHARGES,
-      maxCharges: LASER_CHARGES,
-      lastFireTime: sim.nowMs - LASER_COOLDOWN_MS - 1,
+      charges: laserCharges,
+      maxCharges: laserCharges,
+      lastFireTime: sim.nowMs - globals.LASER_COOLDOWN_MS - 1,
       shieldHits: 0,
     });
     return;

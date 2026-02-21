@@ -77,6 +77,7 @@ export interface BuildSimulationSnapshotInput {
   tickDurationMs: number;
   mapId: MapId;
   yellowBlockHp: number[];
+  laserBeamWidth: number;
 }
 
 export function buildSimulationSnapshot(
@@ -245,5 +246,6 @@ export function buildSimulationSnapshot(
     lastProcessedInputSequenceByPlayer,
     mapId: input.mapId,
     yellowBlockHp: input.yellowBlockHp,
+    laserBeamWidth: input.laserBeamWidth,
   };
 }

@@ -4,6 +4,11 @@ import type {
   DebugPhysicsTuningPayload,
   DebugPhysicsTuningSnapshot,
 } from "../types";
+import {
+  getActiveConfigFromSettings,
+  resolveGlobalValues,
+  resolveMaterialValuesFromSettings,
+} from "../../shared/sim/modules/simulationPhysicsTuning";
 
 interface SliderField<T extends string> {
   key: T;
@@ -92,6 +97,14 @@ const CONFIG_FIELDS: ReadonlyArray<SliderField<ConfigKey>> = [
     max: 0.001,
     step: 0.00001,
     hint: "Higher: firing pushes ship back harder (force modes). Lower: less shot kickback.",
+  },
+  {
+    key: "LASER_RECOIL_MULTIPLIER",
+    label: "Laser Recoil Mult",
+    min: 1,
+    max: 6,
+    step: 0.05,
+    hint: "Higher: laser kickback stronger than normal shots. 1 means same as bullet recoil.",
   },
   {
     key: "DASH_FORCE",
@@ -260,6 +273,38 @@ const GLOBAL_FIELDS: ReadonlyArray<SliderField<GlobalKey>> = [
     hint: "Higher: ammo refills slower. Lower: ammo refills faster.",
   },
   {
+    key: "LASER_CHARGES",
+    label: "Laser Charges",
+    min: 1,
+    max: 10,
+    step: 1,
+    hint: "Higher: laser can be fired more times per pickup. Lower: laser runs out faster.",
+  },
+  {
+    key: "LASER_COOLDOWN_MS",
+    label: "Laser Cooldown",
+    min: 50,
+    max: 5000,
+    step: 25,
+    hint: "Higher: longer delay between laser shots. Lower: laser can fire again sooner.",
+  },
+  {
+    key: "LASER_BEAM_DURATION_MS",
+    label: "Laser Beam Duration",
+    min: 30,
+    max: 1000,
+    step: 10,
+    hint: "Higher: beam stays visible longer. Lower: beam flashes quickly.",
+  },
+  {
+    key: "LASER_BEAM_WIDTH",
+    label: "Laser Beam Width",
+    min: 1,
+    max: 40,
+    step: 0.25,
+    hint: "Higher: wider laser visuals and hit thickness. Lower: narrower beam.",
+  },
+  {
     key: "PROJECTILE_LIFETIME_MS",
     label: "Projectile Lifetime",
     min: 100,
@@ -378,6 +423,16 @@ export function createPhysicsLabController(
     return snapshot;
   };
 
+  const buildModeDefaults = (baseMode: BaseGameMode): DebugPhysicsTuningSnapshot => {
+    const settings = game.getAdvancedSettings();
+    return {
+      config: getActiveConfigFromSettings(baseMode, settings, null),
+      materials: resolveMaterialValuesFromSettings(settings, null),
+      globals: resolveGlobalValues(null),
+      overrides: null,
+    };
+  };
+
   const queueApply = (): void => {
     if (suppressApply) return;
     if (applyTimeout) {
@@ -388,7 +443,7 @@ export function createPhysicsLabController(
       const payload = buildPayloadFromInputs();
       const ok = game.setDebugPhysicsTuning(payload);
       if (!ok) return;
-      setStatus("Applied local physics overrides");
+      setStatus("Applied local physics overrides (mode-relative)");
     }, 60);
   };
 
@@ -440,14 +495,21 @@ export function createPhysicsLabController(
     suppressApply = false;
   };
 
-  const buildPayloadFromInputs = (): DebugPhysicsTuningPayload => {
+  const buildPayloadFromInputs = (): DebugPhysicsTuningPayload | null => {
+    const baseMode = modeSelect
+      ? (modeSelect.value as BaseGameMode)
+      : game.getBaseMode();
+    const defaults = buildModeDefaults(baseMode);
     const configOverrides: DebugPhysicsTuningPayload["configOverrides"] = {};
     const materialOverrides: DebugPhysicsTuningPayload["materialOverrides"] = {};
     const globalOverrides: DebugPhysicsTuningPayload["globalOverrides"] = {};
     if (configInputs) {
       for (const field of CONFIG_FIELDS) {
         const value = Number(configInputs[field.key].value);
-        if (Number.isFinite(value)) {
+        if (
+          Number.isFinite(value) &&
+          Math.abs(value - defaults.config[field.key]) > 1e-9
+        ) {
           configOverrides[field.key] = value;
         }
       }
@@ -455,7 +517,10 @@ export function createPhysicsLabController(
     if (materialInputs) {
       for (const field of MATERIAL_FIELDS) {
         const value = Number(materialInputs[field.key].value);
-        if (Number.isFinite(value)) {
+        if (
+          Number.isFinite(value) &&
+          Math.abs(value - defaults.materials[field.key]) > 1e-9
+        ) {
           materialOverrides[field.key] = value;
         }
       }
@@ -463,12 +528,27 @@ export function createPhysicsLabController(
     if (globalInputs) {
       for (const field of GLOBAL_FIELDS) {
         const value = Number(globalInputs[field.key].value);
-        if (Number.isFinite(value)) {
+        if (
+          Number.isFinite(value) &&
+          Math.abs(value - defaults.globals[field.key]) > 1e-9
+        ) {
           globalOverrides[field.key] = value;
         }
       }
     }
-    return { configOverrides, materialOverrides, globalOverrides };
+
+    const hasConfig = Object.keys(configOverrides).length > 0;
+    const hasMaterials = Object.keys(materialOverrides).length > 0;
+    const hasGlobals = Object.keys(globalOverrides).length > 0;
+    if (!hasConfig && !hasMaterials && !hasGlobals) {
+      return null;
+    }
+
+    return {
+      configOverrides: hasConfig ? configOverrides : undefined,
+      materialOverrides: hasMaterials ? materialOverrides : undefined,
+      globalOverrides: hasGlobals ? globalOverrides : undefined,
+    };
   };
 
   const refreshFromSim = (): void => {

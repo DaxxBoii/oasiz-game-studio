@@ -19,6 +19,11 @@ import {
   SHIP_SHIELD_RADII,
   SHIP_VISUAL_REFERENCE_SIZE,
 } from "../../../shared/geometry/ShipRenderAnchors";
+import {
+  SHIP_COLLIDER_VERTICES,
+  transformLocalVertices,
+} from "../../../shared/geometry/EntityShapes";
+import { projectRayToArenaWall } from "../../../shared/sim/physics/geometryMath";
 import { EntitySpriteStore } from "./EntitySpriteStore";
 import { MapOverlayStore } from "./MapOverlayStore";
 import { PowerUpSpriteStore } from "./PowerUpSpriteStore";
@@ -72,6 +77,11 @@ export class Renderer {
   private entitySprites = new EntitySpriteStore();
   private mapOverlays = new MapOverlayStore();
   private powerUpSprites = new PowerUpSpriteStore();
+  private previousProjectilePositions = new Map<string, { x: number; y: number }>();
+  private projectileDebugHistory = new Map<
+    string,
+    Array<{ x: number; y: number; atMs: number }>
+  >();
   private centerHoleRotationState = new Map<
     string,
     {
@@ -178,6 +188,10 @@ export class Renderer {
   // Enable/disable dev mode visualization
   setDevMode(enabled: boolean): void {
     this.devModeEnabled = enabled;
+    if (!enabled) {
+      this.previousProjectilePositions.clear();
+      this.projectileDebugHistory.clear();
+    }
   }
 
   // Draw homing missile detection radius (dev mode only)
@@ -564,6 +578,8 @@ export class Renderer {
   clearEffects(): void {
     this.particles = [];
     this.bulletCasings = [];
+    this.previousProjectilePositions.clear();
+    this.projectileDebugHistory.clear();
     this.screenShake.intensity = 0;
     this.screenShake.duration = 0;
     this.screenShake.offsetX = 0;
@@ -637,6 +653,7 @@ export class Renderer {
     color: PlayerColor,
     shieldHits?: number,
     laserCharges?: number,
+    laserMaxCharges?: number,
     laserCooldownProgress?: number,
     scatterCharges?: number,
     scatterCooldownProgress?: number,
@@ -680,14 +697,18 @@ export class Renderer {
 
     // Draw laser charge indicators on ship tail - arranged in arc pattern
     if (laserCharges !== undefined && laserCharges > 0) {
-      const maxCharges = GAME_CONFIG.POWERUP_LASER_CHARGES;
+      const maxCharges = Math.max(
+        1,
+        laserMaxCharges ?? GAME_CONFIG.POWERUP_LASER_CHARGES,
+      );
       const dotSize = 3.5;
       const arcRadius = size * 1.3; // Distance from ship center
       const arcAngle = Math.PI * 0.6; // Total arc spread (108 degrees)
 
       for (let i = 0; i < maxCharges; i++) {
         // Calculate angle for this charge in the arc (spread around back of ship)
-        const angleOffset = (i / (maxCharges - 1) - 0.5) * arcAngle;
+        const lerpT = maxCharges <= 1 ? 0.5 : i / (maxCharges - 1);
+        const angleOffset = (lerpT - 0.5) * arcAngle;
         const dotX = Math.cos(Math.PI + angleOffset) * arcRadius;
         const dotY = Math.sin(Math.PI + angleOffset) * arcRadius;
 
@@ -751,7 +772,7 @@ export class Renderer {
     ) {
       const maxAmmo = state.maxAmmo;
       const currentAmmo = state.ammo;
-      const dotSize = 3.5;
+      const dotRadius = 2.4;
       const orbitRadius = size * 1.3; // Distance from ship center
       const rotation = nowMs * 0.0008; // Slow rotation like missile
 
@@ -762,15 +783,13 @@ export class Renderer {
         const dotX = Math.cos(Math.PI + totalAngle) * orbitRadius;
         const dotY = Math.sin(Math.PI + totalAngle) * orbitRadius;
 
-        // Yellow if available, dark gray if used
+        // Duller circular indicators for normal ammo.
         const isAvailable = i < currentAmmo;
-        ctx.fillStyle = isAvailable ? "#ffee00" : "#333333";
-        ctx.strokeStyle = isAvailable ? "#ffee88" : "#222222";
-        ctx.lineWidth = 1;
-
-        // Draw bullet-like shape
+        ctx.fillStyle = isAvailable ? "#b9ac68" : "#343434";
+        ctx.strokeStyle = isAvailable ? "#8f844f" : "#262626";
+        ctx.lineWidth = 0.9;
         ctx.beginPath();
-        ctx.ellipse(dotX, dotY, dotSize, dotSize * 1.5, 0, 0, Math.PI * 2);
+        ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
@@ -1039,7 +1058,161 @@ export class Renderer {
     ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
     ctx.fill();
 
+    if (this.devModeEnabled) {
+      // Exact projectile collider.
+      ctx.strokeStyle = "rgba(255, 120, 70, 0.95)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     ctx.restore();
+  }
+
+  drawShipColliderDebug(state: ShipState): void {
+    if (!this.devModeEnabled) return;
+    const { ctx } = this;
+    const vertices = transformLocalVertices(
+      SHIP_COLLIDER_VERTICES,
+      state.x,
+      state.y,
+      state.angle,
+    );
+    if (vertices.length < 3) return;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 170, 0, 0.95)";
+    ctx.fillStyle = "rgba(255, 170, 0, 0.12)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(vertices[0].x, vertices[0].y);
+    for (let i = 1; i < vertices.length; i += 1) {
+      ctx.lineTo(vertices[i].x, vertices[i].y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Ship center marker for quick visual sanity checks.
+    ctx.strokeStyle = "rgba(255, 220, 120, 0.95)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(state.x - 2.5, state.y);
+    ctx.lineTo(state.x + 2.5, state.y);
+    ctx.moveTo(state.x, state.y - 2.5);
+    ctx.lineTo(state.x, state.y + 2.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  drawProjectileSweepDebug(projectiles: ProjectileState[]): void {
+    if (!this.devModeEnabled) return;
+    const { ctx } = this;
+    const nowMs = this.getNowMs();
+    const activeProjectileIds = new Set<string>();
+
+    for (const projectile of projectiles) {
+      activeProjectileIds.add(projectile.id);
+      const radius = Math.max(
+        0.1,
+        projectile.radius ?? GAME_CONFIG.PROJECTILE_RADIUS,
+      );
+      const history = this.projectileDebugHistory.get(projectile.id) ?? [];
+      const last = history[history.length - 1];
+      if (!last || Math.hypot(projectile.x - last.x, projectile.y - last.y) > 0.01) {
+        history.push({ x: projectile.x, y: projectile.y, atMs: nowMs });
+      } else {
+        last.atMs = nowMs;
+      }
+      while (history.length > 14) {
+        history.shift();
+      }
+      while (history.length > 2 && nowMs - history[0].atMs > 380) {
+        history.shift();
+      }
+      this.projectileDebugHistory.set(projectile.id, history);
+
+      const previous = history.length > 1 ? history[history.length - 2] : null;
+
+      if (previous) {
+        const dx = projectile.x - previous.x;
+        const dy = projectile.y - previous.y;
+        const distSq = dx * dx + dy * dy;
+
+        ctx.save();
+        for (let i = 1; i < history.length; i += 1) {
+          const a = history[i - 1];
+          const b = history[i];
+          const t = i / history.length;
+          ctx.strokeStyle = `rgba(255, 170, 120, ${0.18 + t * 0.42})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+
+        if (distSq > 1e-6) {
+          // Capsule body matching swept-circle width (diameter = 2 * radius).
+          ctx.strokeStyle = "rgba(255, 90, 40, 0.45)";
+          ctx.lineWidth = radius * 2;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(previous.x, previous.y);
+          ctx.lineTo(projectile.x, projectile.y);
+          ctx.stroke();
+        }
+
+        // End circles and center line to make the sweep easier to read.
+        ctx.strokeStyle = "rgba(255, 120, 70, 0.95)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(previous.x, previous.y, radius, 0, Math.PI * 2);
+        ctx.arc(projectile.x, projectile.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(255, 220, 170, 0.95)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(previous.x, previous.y);
+        ctx.lineTo(projectile.x, projectile.y);
+        ctx.stroke();
+
+        // Explicit prev/curr markers.
+        ctx.fillStyle = "rgba(255, 210, 120, 0.95)";
+        ctx.beginPath();
+        ctx.arc(previous.x, previous.y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255, 120, 70, 0.95)";
+        ctx.beginPath();
+        ctx.arc(projectile.x, projectile.y, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Tiny P/C labels so you can tell direction at a glance.
+        ctx.font = "8px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(255, 230, 170, 0.95)";
+        ctx.fillText("P", previous.x, previous.y - Math.max(3, radius + 1));
+        ctx.fillStyle = "rgba(255, 150, 110, 0.95)";
+        ctx.fillText("C", projectile.x, projectile.y - Math.max(3, radius + 1));
+        ctx.restore();
+      }
+
+      this.previousProjectilePositions.set(projectile.id, {
+        x: projectile.x,
+        y: projectile.y,
+      });
+    }
+
+    for (const projectileId of [...this.previousProjectilePositions.keys()]) {
+      if (activeProjectileIds.has(projectileId)) continue;
+      this.previousProjectilePositions.delete(projectileId);
+    }
+    for (const projectileId of [...this.projectileDebugHistory.keys()]) {
+      if (activeProjectileIds.has(projectileId)) continue;
+      this.projectileDebugHistory.delete(projectileId);
+    }
   }
 
   // ============= PARTICLE SYSTEM =============
@@ -1430,11 +1603,19 @@ export class Renderer {
 
   // ============= LASER BEAM RENDERING =============
 
-  drawLaserBeam(state: LaserBeamState): void {
+  drawLaserBeam(state: LaserBeamState, beamWidthOverride?: number): void {
     const { ctx } = this;
     const { x, y, angle, id } = state;
-    const beamLength = GAME_CONFIG.POWERUP_BEAM_LENGTH;
-    const beamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
+    const beamEnd = projectRayToArenaWall(
+      { x, y },
+      angle,
+      GAME_CONFIG.ARENA_WIDTH,
+      GAME_CONFIG.ARENA_HEIGHT,
+    );
+    const beamLength = Math.hypot(beamEnd.x - x, beamEnd.y - y);
+    const beamWidth = Number.isFinite(beamWidthOverride)
+      ? Math.max(1, beamWidthOverride as number)
+      : GAME_CONFIG.POWERUP_BEAM_WIDTH;
     // Use deterministic offsets based on beam id to avoid flickering
     const baseOffset = (id.charCodeAt(id.length - 1) % 10) / 10;
 

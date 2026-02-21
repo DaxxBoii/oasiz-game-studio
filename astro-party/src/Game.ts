@@ -1222,6 +1222,7 @@ export class Game {
       mapId: this.selectedMapId,
       rotationDirection: renderState.networkRotationDirection,
       yellowBlockHp: renderState.networkYellowBlockHp,
+      networkLaserBeamWidth: renderState.networkLaserBeamWidth,
     });
   }
 

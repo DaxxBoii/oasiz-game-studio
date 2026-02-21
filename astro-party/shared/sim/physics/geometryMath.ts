@@ -202,3 +202,82 @@ export function circleIntersectsPolygon(
 
   return false;
 }
+
+export function segmentIntersectsPolygonWithRadius(
+  start: Vec2,
+  end: Vec2,
+  radius: number,
+  vertices: ReadonlyArray<Vec2>,
+): boolean {
+  if (vertices.length < 3) return false;
+  if (radius <= 1e-9) {
+    return lineIntersectsPolygon(start, end, vertices);
+  }
+
+  if (
+    lineIntersectsPolygon(start, end, vertices) ||
+    circleIntersectsPolygon(start.x, start.y, radius, vertices) ||
+    circleIntersectsPolygon(end.x, end.y, radius, vertices)
+  ) {
+    return true;
+  }
+
+  const radiusSq = radius * radius;
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    if (
+      distanceSqPointToSegment(a.x, a.y, start.x, start.y, end.x, end.y) <=
+        radiusSq ||
+      distanceSqPointToSegment(b.x, b.y, start.x, start.y, end.x, end.y) <=
+        radiusSq ||
+      distanceSqPointToSegment(start.x, start.y, a.x, a.y, b.x, b.y) <=
+        radiusSq ||
+      distanceSqPointToSegment(end.x, end.y, a.x, a.y, b.x, b.y) <= radiusSq
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function projectRayToArenaWall(
+  start: Vec2,
+  angle: number,
+  arenaWidth: number,
+  arenaHeight: number,
+): Vec2 {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const eps = 1e-9;
+  let bestT = Infinity;
+
+  const tryCandidate = (t: number): void => {
+    if (!Number.isFinite(t) || t < 0 || t >= bestT) return;
+    const x = start.x + dx * t;
+    const y = start.y + dy * t;
+    const withinX = x >= -eps && x <= arenaWidth + eps;
+    const withinY = y >= -eps && y <= arenaHeight + eps;
+    if (!withinX || !withinY) return;
+    bestT = t;
+  };
+
+  if (Math.abs(dx) > eps) {
+    tryCandidate((0 - start.x) / dx);
+    tryCandidate((arenaWidth - start.x) / dx);
+  }
+  if (Math.abs(dy) > eps) {
+    tryCandidate((0 - start.y) / dy);
+    tryCandidate((arenaHeight - start.y) / dy);
+  }
+
+  if (!Number.isFinite(bestT)) {
+    return { x: start.x, y: start.y };
+  }
+
+  return {
+    x: Math.max(0, Math.min(arenaWidth, start.x + dx * bestT)),
+    y: Math.max(0, Math.min(arenaHeight, start.y + dy * bestT)),
+  };
+}

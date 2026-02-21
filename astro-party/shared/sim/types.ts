@@ -280,6 +280,7 @@ export interface SnapshotPayload {
   lastProcessedInputSequenceByPlayer: Record<string, number>;
   mapId: MapId;
   yellowBlockHp: number[];
+  laserBeamWidth?: number;
 }
 
 // ============= HOOKS (simulation → host) =============
@@ -411,6 +412,7 @@ export interface ActiveConfig {
   SHIP_ROTATION_DRIFT_RESPONSE_FACTOR: number;
   ROTATION_THRUST_BONUS: number;
   RECOIL_FORCE: number;
+  LASER_RECOIL_MULTIPLIER: number;
   DASH_FORCE: number;
   SHIP_FRICTION_AIR: number;
   SHIP_RESTITUTION: number;
@@ -442,6 +444,10 @@ export interface DebugPhysicsGlobals {
   FIRE_COOLDOWN_MS: number;
   FIRE_HOLD_REPEAT_DELAY_MS: number;
   RELOAD_MS: number;
+  LASER_CHARGES: number;
+  LASER_COOLDOWN_MS: number;
+  LASER_BEAM_DURATION_MS: number;
+  LASER_BEAM_WIDTH: number;
   PROJECTILE_LIFETIME_MS: number;
   PROJECTILE_RADIUS: number;
   PROJECTILE_VISUAL_GLOW_RADIUS: number;

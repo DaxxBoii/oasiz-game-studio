@@ -50,6 +50,7 @@ export interface RenderNetworkState {
   networkMapId: MapId;
   networkRotationDirection: number;
   networkYellowBlockHp: number[];
+  networkLaserBeamWidth: number;
 }
 
 export interface NetworkPredictionDebugTelemetry {
@@ -103,6 +104,7 @@ export class NetworkSyncSystem {
   private networkMapId: MapId = 0;
   private networkRotationDirection = 1;
   private networkYellowBlockHp: number[] = [];
+  private networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
 
   hostSimTimeMs = 0;
 
@@ -315,6 +317,7 @@ export class NetworkSyncSystem {
     this.networkMapId = 0;
     this.networkRotationDirection = 1;
     this.networkYellowBlockHp = [];
+    this.networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
 
     this.clientArmingMines.clear();
     this.clientExplodedMines.clear();
@@ -352,6 +355,7 @@ export class NetworkSyncSystem {
     this.networkMapId = 0;
     this.networkRotationDirection = 1;
     this.networkYellowBlockHp = [];
+    this.networkLaserBeamWidth = GAME_CONFIG.POWERUP_BEAM_WIDTH;
 
     this.clientArmingMines.clear();
     this.clientExplodedMines.clear();
@@ -417,6 +421,7 @@ export class NetworkSyncSystem {
       networkMapId: this.networkMapId,
       networkRotationDirection: this.networkRotationDirection,
       networkYellowBlockHp: this.networkYellowBlockHp,
+      networkLaserBeamWidth: this.networkLaserBeamWidth,
     };
   }
 
@@ -507,6 +512,9 @@ export class NetworkSyncSystem {
     this.networkRotationDirection =
       state.rotationDirection === -1 ? -1 : 1;
     this.networkYellowBlockHp = state.yellowBlockHp || [];
+    this.networkLaserBeamWidth = Number.isFinite(state.laserBeamWidth)
+      ? Math.max(1, state.laserBeamWidth as number)
+      : GAME_CONFIG.POWERUP_BEAM_WIDTH;
   }
 
   private hydrateAsteroidVertices(state: GameStateSync): GameStateSync {

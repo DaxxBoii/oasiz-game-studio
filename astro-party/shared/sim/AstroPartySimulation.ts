@@ -857,6 +857,7 @@ export class AstroPartySimulation implements SimState {
       this.shipBodies,
       previousProjectilePositions,
       previousProjectileVelocities,
+      this.deferredProjectileWallHits,
     );
     this.flushDeferredProjectileWallHits(collisionHandlersContext);
     syncSimFromPhysicsState({
@@ -1264,6 +1265,7 @@ export class AstroPartySimulation implements SimState {
   // ============= PRIVATE HELPERS =============
 
   private createCollisionHandlersContext(): SimulationCollisionHandlersContext {
+    const globals = this.getGlobalConfig();
     return {
       nowMs: this.nowMs,
       players: this.players,
@@ -1276,6 +1278,7 @@ export class AstroPartySimulation implements SimState {
       yellowBlockBodyIndex: this.yellowBlockBodyIndex,
       yellowBlockSwordHitCooldown: this.yellowBlockSwordHitCooldown,
       laserBeams: this.laserBeams,
+      laserBeamWidth: globals.LASER_BEAM_WIDTH,
       physics: this.physics,
       getCurrentMapId: () => this.getCurrentMap().id,
       getPluginString: this.getPluginString.bind(this),
@@ -1503,6 +1506,7 @@ export class AstroPartySimulation implements SimState {
   }
 
   private buildSnapshot(): SnapshotPayload {
+    const globals = this.getGlobalConfig();
     return buildSimulationSnapshot({
       nowMs: this.nowMs,
       playerOrder: this.playerOrder,
@@ -1524,6 +1528,7 @@ export class AstroPartySimulation implements SimState {
       tickDurationMs: this.tickDurationMs,
       mapId: this.mapId,
       yellowBlockHp: this.yellowBlocks.map((block) => block.hp),
+      laserBeamWidth: globals.LASER_BEAM_WIDTH,
     });
   }
 }
