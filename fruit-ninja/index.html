@@ -239,7 +239,12 @@
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
             flex-shrink: 0;
-            transform: scale(0);
+            transform: scale(1);
+            opacity: 1;
+        }
+
+        /* Class-based animation: add .animate to trigger zoom-in without reflow */
+        .knife-icon-bottom.animate {
             animation: knifeIconZoomIn 0.3s ease-out forwards;
         }
 

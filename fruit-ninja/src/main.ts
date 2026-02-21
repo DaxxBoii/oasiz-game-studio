@@ -725,6 +725,9 @@ class KnifeHitGame {
   private knifeIconEls: HTMLImageElement[] = [];
   private lastKnifeIconsCount: number = -1;
   private lastKnifeIconsWeapon: WeaponType | null = null;
+  private cachedKnifePreviewWidth: number = 0;
+  private cachedKnifePreviewHeight: number = 0;
+  private cachedKnifePreviewWeapon: WeaponType | null = null;
   private debugPanel: HTMLElement;
   private debugContent: HTMLElement;
   private settingsIconBtn: HTMLElement;
@@ -2005,38 +2008,41 @@ class KnifeHitGame {
     if ((this.state === "PLAYING" || this.state === "PAUSED") && hasKnivesToShow) {
       this.bottomHud.classList.remove("hidden");
       
-      // Update knife preview image with proper aspect ratio (uses current weapon sprite)
+      // Update knife preview image - only recalculate size when weapon changes (cache layout reads)
       if (this.knifeImage && this.assetsLoaded) {
-        const imageWidth = this.knifeImage.naturalWidth || this.knifeImage.width;
-        const imageHeight = this.knifeImage.naturalHeight || this.knifeImage.height;
-        const aspectRatio = imageWidth / imageHeight;
+        if (this.cachedKnifePreviewWeapon !== this.currentWeapon) {
+          // Only read layout values when weapon changes, not on every throw
+          const imageWidth = this.knifeImage.naturalWidth || this.knifeImage.width;
+          const imageHeight = this.knifeImage.naturalHeight || this.knifeImage.height;
+          const aspectRatio = imageWidth / imageHeight;
 
-        // Auto-size based on available space in bottom HUD
-        const containerHeight = window.innerHeight;
-        const availableHeight = containerHeight * 0.25; // Bottom HUD area
-        const maxKnifeHeight = availableHeight * 0.42;
-        const maxKnifeWidth = window.innerWidth * 0.18;
+          const containerHeight = this.viewH || window.innerHeight;
+          const availableHeight = containerHeight * 0.25;
+          const maxKnifeHeight = availableHeight * 0.42;
+          const maxKnifeWidth = (this.viewW || window.innerWidth) * 0.18;
 
-        let width: number;
-        let height: number;
+          let width: number;
+          let height: number;
 
-        if (aspectRatio > 1) {
-          width = Math.min(maxKnifeWidth, maxKnifeHeight * aspectRatio);
-          height = width / aspectRatio;
-        } else {
-          height = Math.min(maxKnifeHeight, maxKnifeWidth / aspectRatio);
-          width = height * aspectRatio;
+          if (aspectRatio > 1) {
+            width = Math.min(maxKnifeWidth, maxKnifeHeight * aspectRatio);
+            height = width / aspectRatio;
+          } else {
+            height = Math.min(maxKnifeHeight, maxKnifeWidth / aspectRatio);
+            width = height * aspectRatio;
+          }
+
+          this.cachedKnifePreviewWidth = width;
+          this.cachedKnifePreviewHeight = height;
+          this.cachedKnifePreviewWeapon = this.currentWeapon;
+
+          this.knifePreviewImage.src = this.knifeImage.src;
+          this.knifePreviewImage.style.width = `${width}px`;
+          this.knifePreviewImage.style.height = `${height}px`;
+          const rotationDeg = aspectRatio > 1 ? 0 : 90;
+          this.knifePreviewImage.style.transform = `rotate(${rotationDeg}deg)`;
         }
-
-        this.knifePreviewImage.src = this.knifeImage.src;
-        this.knifePreviewImage.style.width = `${width}px`;
-        this.knifePreviewImage.style.height = `${height}px`;
         this.knifePreviewImage.style.display = "block";
-
-        // Rotate vertical sprites to lay horizontally
-        const isHorizontal = aspectRatio > 1;
-        const rotationDeg = isHorizontal ? 0 : 90;
-        this.knifePreviewImage.style.transform = `rotate(${rotationDeg}deg)`;
       } else {
         this.knifePreviewImage.style.display = "none";
       }
@@ -2073,19 +2079,28 @@ class KnifeHitGame {
           for (let i = 0; i < this.knifeIconEls.length; i++) {
             const el = this.knifeIconEls[i];
             const shouldShow = i < this.knivesToThrow;
-            el.style.display = shouldShow ? "block" : "none";
             if (shouldShow) {
-              // Re-trigger zoom-in animation without recreating DOM nodes
-              el.style.animation = "none";
-              void el.offsetHeight;
-              el.style.animation = "";
+              if (el.style.display === "none") {
+                // Show icon: use class-swap animation instead of forced reflow
+                // Remove animate class, then re-add on next frame to trigger animation
+                el.classList.remove("animate");
+                el.style.display = "block";
+                // Schedule animation class add on next frame - avoids layout reflow in game loop
+                requestAnimationFrame(() => { el.classList.add("animate"); });
+              }
+            } else {
+              el.style.display = "none";
+              el.classList.remove("animate");
             }
           }
           this.lastKnifeIconsCount = this.knivesToThrow;
         }
       } else {
         // Hide all if assets not ready
-        for (const el of this.knifeIconEls) el.style.display = "none";
+        for (const el of this.knifeIconEls) {
+          el.style.display = "none";
+          el.classList.remove("animate");
+        }
         this.lastKnifeIconsCount = -1;
         this.lastKnifeIconsWeapon = null;
       }
@@ -2409,8 +2424,6 @@ class KnifeHitGame {
             this.state = "GAME_OVER";
             // Coins are session-only; failing resets balance
             this.coinBank = 0;
-            this.updateLevelDisplay();
-            this.refreshWeaponShopUI();
             // Darken background smoothly
             this.backgroundOverlay.target = -0.5; // Darken to 50%
             this.triggerHaptic("error");
@@ -2420,6 +2433,12 @@ class KnifeHitGame {
             if (typeof (window as any).submitScore === "function") {
               (window as any).submitScore(this.currentLevel); // Submit level reached (0-indexed)
             }
+            
+            // Defer non-critical DOM updates to avoid blocking the impact frame
+            requestAnimationFrame(() => {
+              this.updateLevelDisplay();
+              this.refreshWeaponShopUI();
+            });
             
             // Break out of the loop since the knife is removed and game is over
             break;
@@ -2473,9 +2492,9 @@ class KnifeHitGame {
               this.screenShake.y = (Math.random() - 0.5) * 10;
             }
             
-            // Update preview if more knives
+            // Update preview if more knives - defer to next frame to avoid DOM work during impact
             if (this.knivesToThrow > 0) {
-              this.updateKnivesRemaining();
+              requestAnimationFrame(() => { this.updateKnivesRemaining(); });
             }
             
             this.triggerHaptic("medium");
