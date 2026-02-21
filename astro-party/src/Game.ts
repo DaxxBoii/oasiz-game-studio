@@ -1076,6 +1076,10 @@ export class Game {
     return this.isLeader() && this.network.getPlayerCount() >= 2;
   }
 
+  showSystemMessage(message: string, durationMs: number = 2500): void {
+    this._onSystemMessage?.(message, durationMs);
+  }
+
   getLatencyMs(): number {
     return this.latencyMs;
   }

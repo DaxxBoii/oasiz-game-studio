@@ -603,6 +603,30 @@
       cursor: default;
     }
 
+    .btn.host-locked,
+    .btn.host-locked:hover,
+    .mode-cycle-btn.host-locked,
+    .mode-cycle-btn.host-locked:hover,
+    .map-picker-card.host-locked,
+    .map-picker-card.host-locked:hover {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .mode-cycle-btn.host-locked,
+    .mode-cycle-btn.host-locked:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+
+    .map-picker-card.host-locked,
+    .map-picker-card.host-locked:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
     .map-picker-canvas {
       width: 120px;
       height: 84px;
@@ -1946,41 +1970,6 @@
 
     html[data-layout="narrow"] .lobby-actions {
       flex-direction: column;
-    }
-
-    #lobbyScreen:not(.is-host) #addBotSection {
-      display: none;
-    }
-
-    #lobbyScreen:not(.is-host) #advancedSettingsBtn {
-      display: none;
-    }
-
-    #lobbyScreen:not(.is-host) #startGameBtn {
-      display: none;
-    }
-
-    #lobbyScreen:not(.is-host) .lobby-body {
-      grid-template-columns: 1fr;
-    }
-
-    #lobbyScreen:not(.is-host) .lobby-actions {
-      background: transparent;
-      border: none;
-      padding: 0;
-      align-items: flex-start;
-    }
-
-    #lobbyScreen:not(.is-host) .game-mode-section {
-      display: flex;
-      opacity: 0.7;
-      pointer-events: none;
-      justify-content: flex-start;
-    }
-
-    #lobbyScreen:not(.is-host) .lobby-summary {
-      background: var(--bg-panel);
-      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     .end-actions {

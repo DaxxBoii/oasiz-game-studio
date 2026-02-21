@@ -17,6 +17,7 @@ export interface LobbyUI {
 
 export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   const feedback = createUIFeedback("lobby");
+  const HOST_ONLY_ACTION_MESSAGE = "Only the room leader can do that";
   let addingBot = false;
   let addButtonGuardUntilMs = 0;
   const ADD_BUTTON_TAP_GUARD_MS = 450;
@@ -36,6 +37,16 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
 
   function endAddButtonAction(): void {
     addingBot = false;
+  }
+
+  function showHostOnlyActionToast(): void {
+    feedback.error();
+    game.showSystemMessage(HOST_ONLY_ACTION_MESSAGE, 2500);
+  }
+
+  function setHostLocked(element: HTMLElement, locked: boolean): void {
+    element.classList.toggle("host-locked", locked);
+    element.setAttribute("aria-disabled", locked ? "true" : "false");
   }
 
   function updateRoomCodeVisibility(): void {
@@ -60,26 +71,31 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     playerCount: number,
     isLeader: boolean,
   ): void {
-    if (!isLeader) {
+    if (playerCount >= 4) {
       elements.addBotSection.classList.add("hidden");
       return;
     }
 
-    if (playerCount < 4) {
-      elements.addBotSection.classList.remove("hidden");
-      elements.addAIBotBtn.disabled = false;
+    elements.addBotSection.classList.remove("hidden");
+    elements.addAIBotBtn.disabled = false;
+    setHostLocked(elements.addAIBotBtn, !isLeader);
+    elements.addAIBotBtn.title = isLeader
+      ? "Add AI Bot"
+      : "Only the room leader can add AI bots";
 
-      const hasRemote = game.hasRemotePlayers();
-      const supportsLocalPlayers = game.supportsLocalPlayers();
-      const canShowLocal = supportsLocalPlayers && !hasRemote;
-      elements.addLocalPlayerBtn.style.display = canShowLocal ? "flex" : "none";
-      elements.addLocalPlayerBtn.disabled = !supportsLocalPlayers;
-      elements.addLocalPlayerBtn.title = supportsLocalPlayers
-        ? "Add Local Player (same keyboard)"
-        : "Local players are deferred in this version";
-    } else {
-      elements.addBotSection.classList.add("hidden");
+    const hasRemote = game.hasRemotePlayers();
+    const supportsLocalPlayers = game.supportsLocalPlayers();
+    const canShowLocal = supportsLocalPlayers && !hasRemote;
+    elements.addLocalPlayerBtn.style.display = canShowLocal ? "flex" : "none";
+    elements.addLocalPlayerBtn.disabled = !supportsLocalPlayers;
+    setHostLocked(elements.addLocalPlayerBtn, supportsLocalPlayers && !isLeader);
+    if (!supportsLocalPlayers) {
+      elements.addLocalPlayerBtn.title = "Local players are deferred in this version";
+      return;
     }
+    elements.addLocalPlayerBtn.title = isLeader
+      ? "Add Local Player (same keyboard)"
+      : "Only the room leader can add local players";
   }
 
   function attachRemoveBotHandlers(): void {
@@ -101,6 +117,7 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     kickButtons.forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (!game.isLeader()) return;
         const playerId = (btn as HTMLElement).dataset.playerId;
         if (!playerId) return;
         feedback.button();
@@ -119,7 +136,6 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     const myPlayerId = game.getMyPlayerId();
     const isLeader = game.isLeader();
     const leaderId = game.getLeaderId();
-    elements.lobbyScreen.classList.toggle("is-host", isLeader);
 
     const shipIcon = (color: string) =>
       '<svg viewBox="0 0 24 24" fill="' +
@@ -164,14 +180,13 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
           "</span>";
       }
 
-      const kickButton =
-        isLeader && !isSelf
-          ? '<button class="player-kick" data-player-id="' +
-            player.id +
-            '" aria-label="Kick player">' +
-            kickIcon +
-            "</button>"
-          : "";
+      const kickButton = isLeader && !isSelf
+        ? '<button class="player-kick" data-player-id="' +
+          player.id +
+          '" aria-label="Kick player">' +
+          kickIcon +
+          "</button>"
+        : "";
 
       return (
         '<div class="player-row">' +
@@ -208,19 +223,20 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     elements.playersList.innerHTML = rows.join("");
     updateRoomCodeVisibility();
 
-    const canStart = game.canStartGame();
+    const hasEnoughPlayers = players.length >= 2;
 
-    if (isLeader) {
-      elements.startGameBtn.style.display = "block";
-      elements.startGameBtn.disabled = !canStart;
-      if (canStart) {
-        elements.lobbyStatus.innerHTML = "Ready to start!";
-      } else {
-        elements.lobbyStatus.innerHTML =
-          'Need at least 2 players<span class="waiting-dots"><span class="waiting-dot"></span><span class="waiting-dot"></span><span class="waiting-dot"></span></span>';
-      }
+    elements.startGameBtn.style.display = "block";
+    elements.startGameBtn.disabled = !hasEnoughPlayers;
+    setHostLocked(elements.startGameBtn, isLeader ? false : hasEnoughPlayers);
+    elements.startGameBtn.title = isLeader
+      ? "Start match"
+      : "Only the room leader can start the match";
+    if (!hasEnoughPlayers) {
+      elements.lobbyStatus.innerHTML =
+        'Need at least 2 players<span class="waiting-dots"><span class="waiting-dot"></span><span class="waiting-dot"></span><span class="waiting-dot"></span></span>';
+    } else if (isLeader) {
+      elements.lobbyStatus.innerHTML = "Ready to start!";
     } else {
-      elements.startGameBtn.style.display = "none";
       elements.lobbyStatus.innerHTML =
         'Waiting for leader to start<span class="waiting-dots"><span class="waiting-dot"></span><span class="waiting-dot"></span><span class="waiting-dot"></span></span>';
     }
@@ -228,9 +244,13 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     updateBotControlsVisibility(players.length, isLeader);
     elements.gameModeSection.classList.toggle("hidden", false);
     elements.gameModeSection.classList.toggle("readonly", !isLeader);
-    elements.modeCycleBtn.disabled = !isLeader;
-    elements.advancedSettingsBtn.style.display = isLeader ? "block" : "none";
-    elements.advancedSettingsBtn.disabled = !isLeader;
+    elements.modeCycleBtn.disabled = false;
+    elements.advancedSettingsBtn.disabled = false;
+    setHostLocked(elements.modeCycleBtn, !isLeader);
+    setHostLocked(elements.advancedSettingsBtn, !isLeader);
+    elements.advancedSettingsBtn.title = isLeader
+      ? "Open advanced settings"
+      : "Only the room leader can edit advanced settings";
     const actionsBox = elements.gameModeSection.closest(".lobby-actions");
     if (actionsBox) {
       actionsBox.classList.toggle("readonly", !isLeader);
@@ -331,7 +351,10 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
       card.appendChild(meta);
 
       card.addEventListener("click", () => {
-        if (!game.isLeader()) return;
+        if (!game.isLeader()) {
+          showHostOnlyActionToast();
+          return;
+        }
         feedback.button();
         setMapUI(mapId, "local");
         closeMapPicker();
@@ -346,7 +369,8 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     const isLeader = game.isLeader();
     for (const [mapId, card] of mapPickerCards) {
       card.classList.toggle("active", mapId === selectedMapId);
-      card.disabled = !isLeader;
+      card.disabled = false;
+      setHostLocked(card, !isLeader);
     }
   }
 
@@ -372,9 +396,12 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
     const selectedMapId = game.getMapId();
     elements.mapSelectorSection.classList.toggle("hidden", false);
     elements.mapSelectorSection.classList.toggle("readonly", !lobbyIsLeader);
-    elements.openMapPickerBtn.textContent = lobbyIsLeader
-      ? "Change Map"
-      : "View Maps";
+    elements.openMapPickerBtn.textContent = "Change Map";
+    elements.openMapPickerBtn.disabled = false;
+    setHostLocked(elements.openMapPickerBtn, !lobbyIsLeader);
+    elements.openMapPickerBtn.title = lobbyIsLeader
+      ? "Change arena"
+      : "Only the room leader can change the arena";
     ensureMapPickerCards();
     setMapUI(selectedMapId, "remote");
   }
@@ -404,6 +431,10 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.addAIBotBtn.addEventListener("click", async () => {
+    if (!game.isLeader()) {
+      showHostOnlyActionToast();
+      return;
+    }
     if (!beginAddButtonAction()) return;
     feedback.button();
     elements.addAIBotBtn.disabled = true;
@@ -419,6 +450,10 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.addLocalPlayerBtn.addEventListener("click", async () => {
+    if (!game.isLeader()) {
+      showHostOnlyActionToast();
+      return;
+    }
     if (!game.supportsLocalPlayers()) {
       return;
     }
@@ -476,13 +511,21 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.startGameBtn.addEventListener("click", () => {
-    if (!game.canStartGame()) return;
+    const hasEnoughPlayers = game.getPlayerCount() >= 2;
+    if (!game.isLeader()) {
+      showHostOnlyActionToast();
+      return;
+    }
+    if (!hasEnoughPlayers) return;
     feedback.confirm();
     game.startGame();
   });
 
   elements.modeCycleBtn.addEventListener("click", () => {
-    if (!game.isLeader()) return;
+    if (!game.isLeader()) {
+      showHostOnlyActionToast();
+      return;
+    }
     feedback.button();
     const mode = game.getGameMode();
     const anchorMode: BaseGameMode =
@@ -494,6 +537,10 @@ export function createLobbyUI(game: Game, isMobile: boolean): LobbyUI {
   });
 
   elements.openMapPickerBtn.addEventListener("click", () => {
+    if (!game.isLeader()) {
+      showHostOnlyActionToast();
+      return;
+    }
     feedback.button();
     ensureMapPickerCards();
     updateMapPickerState(game.getMapId());

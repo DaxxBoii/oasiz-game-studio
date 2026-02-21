@@ -78,6 +78,7 @@ export interface AdvancedSettingsUI {
 
 export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   const feedback = createUIFeedback("advancedSettings");
+  const HOST_ONLY_ACTION_MESSAGE = "Only the room leader can do that";
   let activeTab: SettingsTab = "elements";
 
   function setActiveTab(tab: SettingsTab): void {
@@ -161,7 +162,11 @@ export function createAdvancedSettingsUI(game: Game): AdvancedSettingsUI {
   }
 
   elements.advancedSettingsBtn.addEventListener("click", () => {
-    if (!game.isLeader()) return;
+    if (!game.isLeader()) {
+      feedback.error();
+      game.showSystemMessage(HOST_ONLY_ACTION_MESSAGE, 2500);
+      return;
+    }
     feedback.button();
     openModal();
   });
