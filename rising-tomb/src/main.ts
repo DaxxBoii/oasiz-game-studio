@@ -157,11 +157,12 @@ function waterWaveY(baseY: number, worldX: number, timeS: number): number {
 }
 
 function sandDuneY(baseY: number, worldX: number, timeS: number): number {
-  // Create dune-like waves - larger, slower, more organic
-  const dune1 = Math.sin(timeS * 0.3 + worldX * 0.008) * 25.0; // Large primary dunes
-  const dune2 = Math.sin(timeS * 0.5 + worldX * 0.015) * 12.0; // Medium secondary dunes
-  const dune3 = Math.sin(timeS * 0.8 + worldX * 0.025) * 6.0;  // Small surface ripples
-  const dune4 = Math.sin(timeS * 0.15 + worldX * 0.004) * 35.0; // Very large slow dunes
+  // Leftward scroll offset — shifts the wave pattern left over time (~120 world-px/s)
+  const wx = worldX + timeS * 120;
+  const dune1 = Math.sin(timeS * 0.3 + wx * 0.008) * 25.0; // Large primary dunes
+  const dune2 = Math.sin(timeS * 0.5 + wx * 0.015) * 12.0; // Medium secondary dunes
+  const dune3 = Math.sin(timeS * 0.8 + wx * 0.025) * 6.0;  // Small surface ripples
+  const dune4 = Math.sin(timeS * 0.15 + wx * 0.004) * 35.0; // Very large slow dunes
   return baseY + dune1 + dune2 + dune3 + dune4;
 }
 
@@ -194,6 +195,9 @@ const CONFIG = {
   MAX_WIDTH_COLS: 17, // Maximum playable width (wide sections)
   ZOOM: 1.5,
   WATER_RISE_PX_PER_S: 4, // Slow rising sand dunes
+  WATER_RISE_BASE_MULTIPLIER: 50,
+  WATER_RISE_CATCHUP_CHUNK_GAP: 2,
+  WATER_RISE_CATCHUP_MULTIPLIER: 3,
   PLAYER_BODY: 30,
   PLAYER_SPEED: 20,
   TRAIL_DURATION: 0.4, // Shorter-lived trail
@@ -212,6 +216,8 @@ const CONFIG = {
   WATER_COLOR: "rgba(194, 178, 128, 1.0)", // Sandy beige
   WATER_GLOW: "rgba(194, 178, 128, 0.55)",
   WATER_SURFACE_PADDING_PX: 2,
+  WATER_COLLISION_RADIUS_MUL: 0.38,
+  WATER_COLLISION_PADDING_PX: 0,
   GRID_COLOR: "rgba(255, 200, 100, 0.12)", // Golden grid
   // Player bandage palette
   PLAYER_COLOR: "#D8CBB0", // Mid-tone bandage
@@ -223,6 +229,8 @@ const CONFIG = {
   BLOOM_BLUR_PX: 12,
   BLOOM_STRENGTH: 0.22,
   MAX_ACTIVE_CHUNKS: 4,
+  CHUNK_PRELOAD_AHEAD: 3,
+  ENABLE_CHASER: false,
   CHASER_SPAWN_DISTANCE_TILES: 10,
   CHASER_SPAWN_DELAY_S: 2.0,
 };
@@ -604,6 +612,8 @@ class DashBroGame {
   private renderCanvas: HTMLCanvasElement | null = null;
   private renderCtx: CanvasRenderingContext2D | null = null;
   private dpr = 1;
+  private cachedVignetteGradient: CanvasGradient | null = null;
+  private cachedVignetteSize = { w: 0, h: 0 };
   private noisePattern: CanvasPattern | null = null;
   private wallPattern: CanvasPattern | null = null;
   private bgImage: HTMLImageElement | null = null;
@@ -682,6 +692,10 @@ class DashBroGame {
   private activeTraps: Map<string, number> = new Map();
   private speedMultiplier = 1.0;
   private speedEffectTimer = 0;
+  private sandSlowPhaseStartS = performance.now() * 0.001;
+  private firstPlayerMoveAtS: number | null = null;
+  private frameTimeEmaMs = 16.7;
+  private lowPerfMode = false;
   private audio = new AudioFx();
 
   // Endless maze
@@ -806,6 +820,10 @@ class DashBroGame {
     this.perfWrapContext(this.displayCtx);
 
     this.loadSettings();
+    if (this.isMobile) {
+      CONFIG.BLOOM_ENABLED = false;
+      CONFIG.SMOOTH_RENDER = false;
+    }
     this.applySettingsToUI();
     this.onResize();
     window.addEventListener("resize", () => this.onResize());
@@ -1027,7 +1045,7 @@ CanvasOps/frame:
   private onResize(): void {
     this._viewW = window.innerWidth;
     this._viewH = window.innerHeight;
-    this.dpr = window.devicePixelRatio || 1;
+    this.dpr = Math.min(window.devicePixelRatio || 1, this.isMobile ? 2 : 3);
 
     this.canvas.width = this._viewW * this.dpr;
     this.canvas.height = this._viewH * this.dpr;
@@ -1035,7 +1053,11 @@ CanvasOps/frame:
     this.canvas.style.height = `${this._viewH}px`;
 
     if (this.displayCtx) {
-      this.displayCtx.setTransform(1, 0, 0, 1, 0, 0);
+      if (CONFIG.SMOOTH_RENDER) {
+        this.displayCtx.setTransform(1, 0, 0, 1, 0, 0);
+      } else {
+        this.displayCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      }
     }
 
     if (CONFIG.SMOOTH_RENDER) {
@@ -3120,6 +3142,13 @@ CanvasOps/frame:
     const row0 = Math.floor(viewY0 / tileSize) - 5;
     const row1 = Math.floor(viewY1 / tileSize) + 5;
 
+    // Pre-generate chunks above the visible window so fast upward movement
+    // does not trigger synchronous chunk generation on the same frame.
+    const topChunkId = this.getChunkIdForRow(row0);
+    for (let i = 0; i <= CONFIG.CHUNK_PRELOAD_AHEAD; i++) {
+      this.activateChunk(topChunkId - i);
+    }
+
     for (let ry = row0; ry <= row1; ry++) {
       this.ensureRow(ry);
     }
@@ -3134,10 +3163,12 @@ CanvasOps/frame:
       this.currentPlayerChunkId = playerChunkId;
       this.activateChunk(playerChunkId - 1);
     }
-    this.activateChunk(playerChunkId);
-    this.activateChunk(playerChunkId - 1);
-    this.activateChunk(playerChunkId - 2);
+    for (let i = 0; i <= CONFIG.CHUNK_PRELOAD_AHEAD; i++) {
+      this.activateChunk(playerChunkId - i);
+    }
 
+    // Never delete chunks before the fireball has spawned.
+    // Also clear any stale timers so they don't fire the moment the fireball appears.
     if (!this.doppelgangerActive) {
       this.currentChaserChunkId = null;
       this.occupiedChaserChunkIds.clear();
@@ -3156,6 +3187,11 @@ CanvasOps/frame:
     }
     // Also protect the logic tile while interpolation is catching up.
     nextOccupied.add(this.getChunkIdForRow(this.doppelgangerTileY));
+    // Also protect the player's current chunk and a buffer around it —
+    // these must never be pruned regardless of fireball position.
+    for (let i = -1; i <= 3; i++) {
+      nextOccupied.add(playerChunkId + i);
+    }
 
     for (const prevChunkId of this.occupiedChaserChunkIds) {
       if (!nextOccupied.has(prevChunkId)) {
@@ -3163,7 +3199,7 @@ CanvasOps/frame:
         this.chaserChunkReleaseTimers.set(prevChunkId, 1.0);
       }
     }
-    // If fireball re-enters a chunk, cancel its pending removal.
+    // If fireball re-enters a chunk (or it's near player), cancel its pending removal.
     for (const occupiedId of nextOccupied) {
       this.chaserChunkReleaseTimers.delete(occupiedId);
     }
@@ -3176,7 +3212,9 @@ CanvasOps/frame:
       const next = timeLeft - dt;
       if (next <= 0) {
         this.chaserChunkReleaseTimers.delete(chunkId);
-        if (!this.occupiedChaserChunkIds.has(chunkId)) {
+        // Final safety: never prune a chunk that is within 3 chunks of the player.
+        const isSafelyBehindPlayer = chunkId > playerChunkId + 3;
+        if (!this.occupiedChaserChunkIds.has(chunkId) && isSafelyBehindPlayer) {
           this.pruneSingleChunk(chunkId);
         }
       } else {
@@ -3206,7 +3244,8 @@ CanvasOps/frame:
     // During a dash, skip the follow delay entirely so the camera immediately
     // targets the current player position. Without this, the 50ms delay causes
     // the camera to freeze for ~3 frames at the start of every dash.
-    const followDelay = this.dashFlash ? 0 : CONFIG.CAMERA_FOLLOW_DELAY_S;
+    const followDelay = this.dashFlash ? 0
+      : (this.isMobile ? 0 : CONFIG.CAMERA_FOLLOW_DELAY_S);
     const delayedTime = nowS - followDelay;
     let delayedTargetX = targetCameraX;
     let delayedTargetY = targetCameraY;
@@ -3237,7 +3276,7 @@ CanvasOps/frame:
 
     // Smoothly transition followHz instead of an abrupt binary switch.
     // Abrupt 5.5→12 jumps caused a visible camera snap/fling at dash start/end.
-    const targetHz = this.dashFlash ? 14 : 5.5;
+    const targetHz = this.dashFlash ? 14 : 9;
     const hzLerpSpeed = this.dashFlash ? 30 : 12; // fast ramp-up, gentle ramp-down
     this.cameraFollowHz += (targetHz - this.cameraFollowHz) * Math.min(1, hzLerpSpeed * dt);
 
@@ -3246,14 +3285,35 @@ CanvasOps/frame:
     // Update camera to center player
     this.cameraX += (delayedTargetX - this.cameraX) * cameraLerp;
     this.cameraY += (delayedTargetY - this.cameraY) * cameraLerp;
+
+    // Snap to 0.5px grid to prevent sub-pixel jitter
+    this.cameraX = Math.round(this.cameraX * 2) / 2;
+    this.cameraY = Math.round(this.cameraY * 2) / 2;
   }
 
   private updateWater(dt: number): void {
-    this.waterSurfaceY -= CONFIG.WATER_RISE_PX_PER_S * dt;
-
     const timeS = performance.now() * 0.001;
+    if (this.firstPlayerMoveAtS === null) return;
+
+    const sandSpawnDelayS = 5;
+    if (timeS < this.firstPlayerMoveAtS + sandSpawnDelayS) return;
+
+    const preMoveSurfaceY = sandDuneY(this.waterSurfaceY, this.playerX, timeS);
+    const playerChunkId = this.getChunkIdForRow(this.playerTileY);
+    const waterRow = Math.floor(preMoveSurfaceY / CONFIG.TILE_SIZE);
+    const waterChunkId = this.getChunkIdForRow(waterRow);
+    const chunkGap = waterChunkId - playerChunkId;
+
+    let riseMultiplier = CONFIG.WATER_RISE_BASE_MULTIPLIER;
+    if (chunkGap >= CONFIG.WATER_RISE_CATCHUP_CHUNK_GAP) {
+      riseMultiplier *= CONFIG.WATER_RISE_CATCHUP_MULTIPLIER;
+    }
+
+    const riseSlowdownFactor = 1.3;
+    this.waterSurfaceY -= (CONFIG.WATER_RISE_PX_PER_S * riseMultiplier * dt) / riseSlowdownFactor;
     const localSurfaceY = sandDuneY(this.waterSurfaceY, this.playerX, timeS);
-    const r = CONFIG.PLAYER_BODY * 0.55 + CONFIG.WATER_SURFACE_PADDING_PX;
+
+    const r = CONFIG.PLAYER_BODY * CONFIG.WATER_COLLISION_RADIUS_MUL + CONFIG.WATER_COLLISION_PADDING_PX;
     if (this.playerY + r >= localSurfaceY && this.state === "PLAYING") {
       // Start death animation
       this.state = "DYING";
@@ -3358,8 +3418,9 @@ CanvasOps/frame:
         }
       }
 
-      // Linear progress: constant dash speed from start to end.
-      const easedProgress = this.dashFlash.progress;
+      // Smoothstep easing: slow start and end, fast middle.
+      const t = this.dashFlash.progress;
+      const easedProgress = t * t * (3 - 2 * t);
 
       this.playerX = this.dashFlash.startX + (targetX - this.dashFlash.startX) * easedProgress;
       this.playerY = this.dashFlash.startY + (targetY - this.dashFlash.startY) * easedProgress;
@@ -3376,7 +3437,8 @@ CanvasOps/frame:
         this.isMoving = false;
       } else {
         // Spawn dash particles during dash
-        if (Math.random() < 0.3) { // 30% chance per frame
+        const dashParticleChance = this.isMobile ? 0.08 : 0.3;
+        if (Math.random() < dashParticleChance) {
           this.spawnDashParticles(this.playerX, this.playerY, this.playerDirection);
         }
       }
@@ -3428,6 +3490,9 @@ CanvasOps/frame:
         this.playerTileX = dashEnd.tileX;
         this.playerTileY = dashEnd.tileY;
         this.isMoving = true;
+        if (this.firstPlayerMoveAtS === null) {
+          this.firstPlayerMoveAtS = performance.now() * 0.001;
+        }
 
         // Spawn initial dash particles
         this.spawnDashParticles(this.playerX, this.playerY, this.nextDirection);
@@ -3445,6 +3510,8 @@ CanvasOps/frame:
 
         const endX = dashEnd.tileX;
         const endY = dashEnd.tileY;
+        let collectedDots = 0;
+        let collectedPowerLikeItems = 0;
 
         while (currentX !== endX || currentY !== endY) {
           const t = this.getTileType(currentX, currentY);
@@ -3466,13 +3533,11 @@ CanvasOps/frame:
           if (t === "dot") {
             this.score += 10;
             this.setTileType(currentX, currentY, "empty");
-            this.audio.click("dot");
-            this.triggerHaptic("light");
+            collectedDots++;
           } else if (t === "power") {
             this.score += 50;
             this.setTileType(currentX, currentY, "empty");
-            this.audio.click("power");
-            this.triggerHaptic("medium");
+            collectedPowerLikeItems++;
           } else if (t === "speed_boost") {
             this.score += 20;
             this.setTileType(currentX, currentY, "empty");
@@ -3480,8 +3545,7 @@ CanvasOps/frame:
               this.speedMultiplier = 2.0;
               this.speedEffectTimer = 5.0;
             }
-            this.audio.click("power");
-            this.triggerHaptic("medium");
+            collectedPowerLikeItems++;
           } else if (t === "slow_down") {
             this.score += 20;
             this.setTileType(currentX, currentY, "empty");
@@ -3489,8 +3553,7 @@ CanvasOps/frame:
               this.speedMultiplier = 0.75;
               this.speedEffectTimer = 5.0;
             }
-            this.audio.click("power");
-            this.triggerHaptic("medium");
+            collectedPowerLikeItems++;
           }
 
           if (dir === "up") currentY--;
@@ -3501,6 +3564,17 @@ CanvasOps/frame:
           } else if (dir === "right") {
             currentX++;
             if (currentX >= CONFIG.MAZE_COLS) currentX = 0;
+          }
+        }
+
+        // Batch pickup feedback to avoid dozens of audio/haptic calls in one frame.
+        if (this.state === "PLAYING") {
+          if (collectedPowerLikeItems > 0) {
+            this.audio.click("power");
+            this.triggerHaptic("medium");
+          } else if (collectedDots > 0) {
+            this.audio.click("dot");
+            this.triggerHaptic("light");
           }
         }
       }
@@ -3601,6 +3675,10 @@ CanvasOps/frame:
     this.perfMeasure("update.updateTraps", () => this.updateTraps(performance.now() * 0.001));
 
     this.perfMeasure("update.doppelganger", () => {
+      if (!CONFIG.ENABLE_CHASER) {
+        this.doppelgangerActive = false;
+        return;
+      }
       // Doppelganger logic
       // Activate with delay after player reaches minimum distance.
       if (!this.doppelgangerActive) {
@@ -3632,8 +3710,10 @@ CanvasOps/frame:
         const chunkSpeedBoost = chunksBehindPlayer > 1 ? 5 : 1;
 
         // 5x catch-up until chaser reaches within 1 chunk behind the player.
-        this.doppelgangerX += (targetX - this.doppelgangerX) * (15 * chunkSpeedBoost) * dt;
-        this.doppelgangerY += (targetY - this.doppelgangerY) * (15 * chunkSpeedBoost) * dt;
+        // Use exponential smoothing (never exceeds factor 1, no overshoot at low FPS).
+        const dopLerp = 1 - Math.exp(-15 * chunkSpeedBoost * dt);
+        this.doppelgangerX += (targetX - this.doppelgangerX) * dopLerp;
+        this.doppelgangerY += (targetY - this.doppelgangerY) * dopLerp;
         this.doppelgangerTrail.push({
           x: this.doppelgangerX + CONFIG.TILE_SIZE / 2,
           y: this.doppelgangerY + CONFIG.TILE_SIZE / 2,
@@ -3765,6 +3845,8 @@ CanvasOps/frame:
   }
 
   private resetGame(): void {
+    this.sandSlowPhaseStartS = performance.now() * 0.001;
+    this.firstPlayerMoveAtS = null;
     this.rows.clear();
     this.activeTraps.clear();
     this.spineXByRow.clear();
@@ -4052,20 +4134,34 @@ CanvasOps/frame:
     // Mobile Swipe Controls
     let touchStartX = 0;
     let touchStartY = 0;
+    let touchFired = false;
 
     this.canvas.addEventListener("touchstart", (e) => {
       if (this.state !== "PLAYING") return;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
+      touchFired = false;
     }, { passive: false });
 
     this.canvas.addEventListener("touchmove", (e) => {
       if (this.state !== "PLAYING") return;
-      if (e.cancelable) e.preventDefault(); // Prevent scrolling
+      if (e.cancelable) e.preventDefault();
+      if (touchFired) return;
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
+        touchFired = true;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          this.nextDirection = dx > 0 ? "right" : "left";
+        } else {
+          this.nextDirection = dy > 0 ? "down" : "up";
+        }
+      }
     }, { passive: false });
 
     this.canvas.addEventListener("touchend", (e) => {
       if (this.state !== "PLAYING") return;
+      if (touchFired) return;
 
       const touchEndX = e.changedTouches[0].clientX;
       const touchEndY = e.changedTouches[0].clientY;
@@ -4073,13 +4169,11 @@ CanvasOps/frame:
       const dx = touchEndX - touchStartX;
       const dy = touchEndY - touchStartY;
 
-      // Threshold check (30px)
+      // Fallback for short taps that didn't cross 30px threshold during move
       if (Math.abs(dx) > 30 || Math.abs(dy) > 30) {
         if (Math.abs(dx) > Math.abs(dy)) {
-          // Horizontal
           this.nextDirection = dx > 0 ? "right" : "left";
         } else {
-          // Vertical
           this.nextDirection = dy > 0 ? "down" : "up";
         }
       }
@@ -4087,6 +4181,7 @@ CanvasOps/frame:
   }
 
   private start(): void {
+    this.sandSlowPhaseStartS = performance.now() * 0.001;
     this.state = "PLAYING";
     this.audio.startMusic();
     if (this.startOverlay) {
@@ -4667,30 +4762,21 @@ CanvasOps/frame:
               ctx.drawImage(this.tileImage, drawX - overlapOffset, drawY - overlapOffset, visualTileSize, visualTileSize);
             }
 
-            // Draw borders on exposed edges
-            // Border thickness is proportional to tile size
-            const borderThickness = Math.max(3, visualTileSize * 0.08);
-
-            // Top border (horizontal)
-            if (!up) {
-              this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, visualTileSize, borderThickness, "horizontal");
-            }
-
-            // Bottom border (horizontal)
-            if (!down) {
-              this.drawBorder(ctx, drawX - overlapOffset, drawY + tileSize - overlapOffset, visualTileSize, borderThickness, "horizontal");
-            }
-
-            // Left border (vertical)
-            // Draw if no left neighbor OR if at playable area left edge (facing margin)
-            if (!left || isAtPlayableLeftEdge) {
-              this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
-            }
-
-            // Right border (vertical)
-            // Draw if no right neighbor OR if at playable area right edge (facing margin)
-            if (!right || isAtPlayableRightEdge) {
-              this.drawBorder(ctx, drawX + tileSize - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+            // Draw borders on exposed edges (skip on mobile for performance).
+            if (!this.isMobile) {
+              const borderThickness = Math.max(3, visualTileSize * 0.08);
+              if (!up) {
+                this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, visualTileSize, borderThickness, "horizontal");
+              }
+              if (!down) {
+                this.drawBorder(ctx, drawX - overlapOffset, drawY + tileSize - overlapOffset, visualTileSize, borderThickness, "horizontal");
+              }
+              if (!left || isAtPlayableLeftEdge) {
+                this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+              }
+              if (!right || isAtPlayableRightEdge) {
+                this.drawBorder(ctx, drawX + tileSize - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+              }
             }
           }
         }
@@ -4707,8 +4793,11 @@ CanvasOps/frame:
       const visualTileSize = tileSize + CONFIG.TILE_OVERLAP;
       const overlapOffset = CONFIG.TILE_OVERLAP / 2;
       const borderThickness = Math.max(3, visualTileSize * 0.08);
+      const sparseSideWalls = this.isMobile || this.lowPerfMode;
+      const drawSideWallBorders = !this.isMobile && !this.lowPerfMode;
 
       for (let ry = row0; ry <= row1; ry++) {
+        if (sparseSideWalls && (ry & 1) !== 0) continue;
         this.ensureRow(ry);
         const spawns = this.ensureSideWallSpawnsForRow(ry);
         if (spawns.length === 0) continue;
@@ -4729,10 +4818,12 @@ CanvasOps/frame:
             ctx.drawImage(sprite, drawX - overlapOffset, drawY - overlapOffset, visualTileSize, visualTileSize);
           }
 
-          if (spawn.border === "left") {
-            this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
-          } else if (spawn.border === "right") {
-            this.drawBorder(ctx, drawX + tileSize - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+          if (drawSideWallBorders) {
+            if (spawn.border === "left") {
+              this.drawBorder(ctx, drawX - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+            } else if (spawn.border === "right") {
+              this.drawBorder(ctx, drawX + tileSize - overlapOffset, drawY - overlapOffset, borderThickness, visualTileSize, "vertical");
+            }
           }
         }
       }
@@ -5004,7 +5095,7 @@ CanvasOps/frame:
     });
 
     // Draw shadow overlay on distant tiles (Fog of War)
-    this.perfMeasure("render.drawMaze.fog", () => {
+    if (!this.isMobile) this.perfMeasure("render.drawMaze.fog", () => {
       ctx.save();
       const shadowStartDist = 4; // Tiles within this radius are fully bright
       const shadowEndDist = 9;   // Tiles beyond this radius are maximally darkened
@@ -5042,15 +5133,16 @@ CanvasOps/frame:
     const bottomY = viewY0 + viewH; // Bottom of viewport
 
     this.perfMeasure("render.drawMaze.sand", () => {
-      if (surfaceY < bottomY) {
+      const DUNE_MAX_AMP = 80; // max dune oscillation amplitude in px
+      if (surfaceY < bottomY + DUNE_MAX_AMP) {
 
         // Always draw sand from bottom, even if surface is above
         const x0 = viewX0 - 200;
         const x1 = viewX1 + 200;
-        const y1 = bottomY; // Always draw to bottom of screen
+        const y1 = bottomY + DUNE_MAX_AMP; // extend below viewport so fill never collapses
 
         ctx.save();
-        const step = 12; // Smaller step for smoother dunes
+        const step = this.isMobile ? 20 : 12; // Coarser sampling on mobile
         const sandPath = new Path2D();
         sandPath.moveTo(x0, y1);
 
@@ -5424,7 +5516,9 @@ CanvasOps/frame:
   }
 
   private spawnDashParticles(x: number, y: number, direction: Direction): void {
-    const count = 3 + Math.floor(Math.random() * 3); // 3-5 particles
+    const count = this.isMobile
+      ? 1 + Math.floor(Math.random() * 2) // 1-2 particles on mobile
+      : 3 + Math.floor(Math.random() * 3); // 3-5 particles
 
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -5543,8 +5637,9 @@ CanvasOps/frame:
     const h = this.viewH();
 
     // Spawn golden dust particles (increased frequency for richer atmosphere)
-    const maxParticles = this.isMobile ? 20 : 40;
-    if (Math.random() < 0.03 && this.bgParticles.length < maxParticles) {
+    const maxParticles = this.isMobile ? 8 : 40;
+    const spawnChance = this.isMobile ? 0.012 : 0.03;
+    if (Math.random() < spawnChance && this.bgParticles.length < maxParticles) {
       this.bgParticles.push({
         x: Math.random() * w,
         y: -20,
@@ -5620,7 +5715,7 @@ CanvasOps/frame:
       ctx.fill();
 
       // Add glow for landing particles
-      if (p.type === "landing" && alpha > 0.5) {
+      if (!this.isMobile && p.type === "landing" && alpha > 0.5) {
         ctx.shadowBlur = size * 2;
         ctx.shadowColor = p.color;
         ctx.beginPath();
@@ -5643,7 +5738,7 @@ CanvasOps/frame:
       ctx.fill();
 
       // Add glow for death particles
-      if (alpha > 0.5) {
+      if (!this.isMobile && alpha > 0.5) {
         ctx.shadowBlur = size * 1.5;
         ctx.shadowColor = p.color;
         ctx.beginPath();
@@ -5672,6 +5767,13 @@ CanvasOps/frame:
       const p = this.doppelgangerTrail[i];
       const flicker = 0.85 + Math.sin(t * 16 + i * 0.7) * 0.15;
       const r = p.size * flicker;
+      if (this.isMobile) {
+        ctx.fillStyle = `rgba(255, 120, 30, ${p.alpha * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r * 0.65, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
       const trailGlow = ctx.createRadialGradient(p.x, p.y, r * 0.2, p.x, p.y, r);
       trailGlow.addColorStop(0, `rgba(255, 255, 180, ${p.alpha * 0.95})`);
       trailGlow.addColorStop(0.35, `rgba(255, 190, 40, ${p.alpha * 0.8})`);
@@ -5958,6 +6060,7 @@ CanvasOps/frame:
 
   // 1. Light Rays / God Rays — golden shafts of light from above
   private drawLightRays(): void {
+    if (this.isMobile) return;
     const ctx = this.ctx;
     const w = this.viewW();
     const h = this.viewH();
@@ -6008,15 +6111,22 @@ CanvasOps/frame:
     const w = this.viewW();
     const h = this.viewH();
 
+    if (!this.cachedVignetteGradient
+        || this.cachedVignetteSize.w !== w
+        || this.cachedVignetteSize.h !== h) {
+      const vg = ctx.createRadialGradient(
+        w * 0.5, h * 0.5, Math.min(w, h) * 0.3,
+        w * 0.5, h * 0.5, Math.max(w, h) * 0.75
+      );
+      vg.addColorStop(0, "rgba(0, 0, 0, 0)");
+      vg.addColorStop(0.6, "rgba(0, 0, 0, 0)");
+      vg.addColorStop(1, "rgba(0, 0, 0, 0.4)");
+      this.cachedVignetteGradient = vg;
+      this.cachedVignetteSize = { w, h };
+    }
+
     ctx.save();
-    const vg = ctx.createRadialGradient(
-      w * 0.5, h * 0.5, Math.min(w, h) * 0.3,
-      w * 0.5, h * 0.5, Math.max(w, h) * 0.75
-    );
-    vg.addColorStop(0, "rgba(0, 0, 0, 0)");
-    vg.addColorStop(0.6, "rgba(0, 0, 0, 0)");
-    vg.addColorStop(1, "rgba(0, 0, 0, 0.4)");
-    ctx.fillStyle = vg;
+    ctx.fillStyle = this.cachedVignetteGradient;
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
   }
@@ -6031,7 +6141,8 @@ CanvasOps/frame:
       const w = this.viewW();
       const h = this.viewH();
 
-      for (let i = 0; i < 3; i++) {
+      const spawnCount = this.isMobile ? 1 : 3;
+      for (let i = 0; i < spawnCount; i++) {
         this.dashSpeedLines.push({
           x: px + (Math.random() - 0.5) * w * 0.6,
           y: py + (Math.random() - 0.5) * h * 0.4,
@@ -6040,6 +6151,10 @@ CanvasOps/frame:
           life: 0.15 + Math.random() * 0.1,
           maxLife: 0.15 + Math.random() * 0.1,
         });
+      }
+      const maxLines = this.isMobile ? 10 : 32;
+      if (this.dashSpeedLines.length > maxLines) {
+        this.dashSpeedLines.splice(0, this.dashSpeedLines.length - maxLines);
       }
     }
 
@@ -6098,7 +6213,18 @@ CanvasOps/frame:
     const cy = this.doppelgangerY + CONFIG.TILE_SIZE / 2;
     const size = CONFIG.PLAYER_BODY;
 
-    // Pulsing outer heat glow
+    if (this.isMobile) {
+      // Mobile: simple solid circle — no gradient, no embers
+      const pulseAlpha = 0.2 + 0.1 * Math.sin(t * 4);
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 80, 0, ${pulseAlpha})`;
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    // Desktop: full gradient aura + orbiting embers
     const pulseSize = size * (1.5 + 0.3 * Math.sin(t * 4));
     const pulseAlpha = 0.15 + 0.1 * Math.sin(t * 3);
 
@@ -6134,13 +6260,21 @@ CanvasOps/frame:
     const ctx = this.ctx;
     const zoom = CONFIG.ZOOM;
     const t = performance.now() * 0.001;
+    const animSpeedMul = 50;
+    const slowDurationS = 5;
+    const slowFactor = 0.2; // 5x slower for the first 5 seconds
+    const elapsedS = Math.max(0, t - this.sandSlowPhaseStartS);
+    const slowedElapsedS = Math.min(elapsedS, slowDurationS) * slowFactor + Math.max(0, elapsedS - slowDurationS);
+    const tAnim = (this.sandSlowPhaseStartS + slowedElapsedS) * animSpeedMul;
     const w = this.viewW();
+    const h = this.viewH();
+    const climbPx = Math.max(0, this.playerSpawnY * CONFIG.TILE_SIZE - this.playerY);
+    const flowPhase = tAnim * 1.2 + climbPx * 0.08;
+    const flowShiftPx = (tAnim * 18 + climbPx * 0.4) % Math.max(1, w);
 
-    // Convert sand surface Y to screen coordinates
-    const surfaceScreenY = (this.waterSurfaceY - this.cameraY) * zoom;
-
-    // Only draw if surface is visible
-    if (surfaceScreenY < 0 || surfaceScreenY > this.viewH() + 20) return;
+    const playerSurfaceScreenY = (sandDuneY(this.waterSurfaceY, this.playerX, t) - this.cameraY) * zoom;
+    const edgeAnchorY = clamp(playerSurfaceScreenY, 14, h - 14);
+    const useEdgeAnchor = playerSurfaceScreenY < 14 || playerSurfaceScreenY > h - 14;
 
     ctx.save();
 
@@ -6149,7 +6283,13 @@ CanvasOps/frame:
     const segments = 40;
     for (let i = 0; i <= segments; i++) {
       const sx = (i / segments) * w;
-      const waveY = surfaceScreenY + Math.sin(t * 2 + i * 0.5) * 3 + Math.sin(t * 1.3 + i * 0.3) * 2;
+      const worldX = sx / zoom + this.cameraX;
+      const duneY = sandDuneY(this.waterSurfaceY, worldX, t);
+      const baseScreenY = (duneY - this.cameraY) * zoom;
+      const anchorY = useEdgeAnchor ? edgeAnchorY : baseScreenY;
+      const waveY = anchorY
+        + Math.sin(tAnim * 2 + i * 0.5 - flowPhase) * 3
+        + Math.sin(tAnim * 1.3 + i * 0.3 - flowPhase * 0.7) * 2;
       if (i === 0) ctx.moveTo(sx, waveY);
       else ctx.lineTo(sx, waveY);
     }
@@ -6159,10 +6299,15 @@ CanvasOps/frame:
 
     // Sand dust rising from the surface
     for (let i = 0; i < 15; i++) {
-      const px = (Math.sin(t * 0.7 + i * 3.7) * 0.5 + 0.5) * w;
-      const py = surfaceScreenY - Math.abs(Math.sin(t * 1.5 + i * 2.3)) * 25;
-      const alpha = 0.1 + 0.15 * Math.sin(t * 2 + i * 1.5);
-      const size = 1.5 + Math.sin(t + i) * 0.5;
+      const pxRaw = (Math.sin(tAnim * 0.7 + i * 3.7 - flowPhase * 0.6) * 0.5 + 0.5) * w + flowShiftPx;
+      const px = ((pxRaw % w) + w) % w;
+      const worldX = px / zoom + this.cameraX;
+      const duneY = sandDuneY(this.waterSurfaceY, worldX, t);
+      const baseScreenY = useEdgeAnchor ? edgeAnchorY : (duneY - this.cameraY) * zoom;
+      const pyRaw = baseScreenY - Math.abs(Math.sin(tAnim * 1.5 + i * 2.3)) * 25;
+      const py = clamp(pyRaw, 4, h - 4);
+      const alpha = clamp(0.1 + 0.15 * Math.sin(tAnim * 2 + i * 1.5), 0.08, 0.28);
+      const size = 1.5 + Math.sin(tAnim + i) * 0.5;
 
       ctx.beginPath();
       ctx.arc(px, py, size, 0, Math.PI * 2);
@@ -6171,12 +6316,13 @@ CanvasOps/frame:
     }
 
     // Shimmer highlight on surface  
-    const shimmerGrad = ctx.createLinearGradient(0, surfaceScreenY - 5, 0, surfaceScreenY + 5);
+    const shimmerY = useEdgeAnchor ? edgeAnchorY : playerSurfaceScreenY;
+    const shimmerGrad = ctx.createLinearGradient(0, shimmerY - 5, 0, shimmerY + 5);
     shimmerGrad.addColorStop(0, "rgba(255, 240, 180, 0)");
-    shimmerGrad.addColorStop(0.5, `rgba(255, 240, 180, ${0.1 + 0.05 * Math.sin(t * 3)})`);
+    shimmerGrad.addColorStop(0.5, `rgba(255, 240, 180, ${0.1 + 0.05 * Math.sin(tAnim * 3)})`);
     shimmerGrad.addColorStop(1, "rgba(255, 240, 180, 0)");
     ctx.fillStyle = shimmerGrad;
-    ctx.fillRect(0, surfaceScreenY - 5, w, 10);
+    ctx.fillRect(0, shimmerY - 5, w, 10);
 
     ctx.restore();
   }
@@ -6194,18 +6340,24 @@ CanvasOps/frame:
       const flicker = 0.7 + 0.3 * Math.sin(t * p.phase + p.wobble);
       const alpha = p.alpha * flicker;
 
-      // Golden dust motes
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 210, 120, ${alpha})`;
-      ctx.fill();
-
-      // Tiny glow around larger particles
-      if (p.size > 1.5) {
+      if (p.size < 1.5) {
+        // Small particles: fillRect is faster than arc
+        ctx.fillStyle = `rgba(255, 210, 120, ${alpha})`;
+        ctx.fillRect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+      } else {
+        // Larger particles: arc circle
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 190, 80, ${alpha * 0.2})`;
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 210, 120, ${alpha})`;
         ctx.fill();
+
+        // Tiny glow — skip on mobile
+        if (!this.isMobile) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 190, 80, ${alpha * 0.2})`;
+          ctx.fill();
+        }
       }
     }
 
@@ -6223,16 +6375,18 @@ CanvasOps/frame:
       this.perfMeasure("render.drawTrail", () => this.drawTrail());
       this.perfMeasure("render.drawParticles", () => this.drawParticles());
       if (this.state === "PLAYING" || this.state === "CAUGHT") {
-        this.perfMeasure("render.drawDoppelgangerAura", () => this.drawDoppelgangerAura()); // Aura BEFORE body
-        this.perfMeasure("render.drawDoppelganger", () => this.drawDoppelganger());
+        if (CONFIG.ENABLE_CHASER) {
+          if (!this.isMobile) this.perfMeasure("render.drawDoppelgangerAura", () => this.drawDoppelgangerAura()); // Aura BEFORE body
+          this.perfMeasure("render.drawDoppelganger", () => this.drawDoppelganger());
+        }
         this.perfMeasure("render.drawPlayer", () => this.drawPlayer());
         this.perfMeasure("render.drawDashSpeedLines", () => this.drawDashSpeedLines()); // Speed lines on top of player
       }
-      this.perfMeasure("render.drawAmbientDust", () => this.drawAmbientDust()); // Golden dust motes
-      this.perfMeasure("render.drawSandSurfaceEffects", () => this.drawSandSurfaceEffects()); // Sand surface wave/foam
+      if (!this.isMobile && !this.lowPerfMode) this.perfMeasure("render.drawAmbientDust", () => this.drawAmbientDust()); // Golden dust motes
+      if (!this.isMobile && !this.lowPerfMode) this.perfMeasure("render.drawSandSurfaceEffects", () => this.drawSandSurfaceEffects()); // Sand surface wave/foam
 
       // Draw dramatic red flash overlay when caught
-      if (this.state === "CAUGHT") {
+      if (CONFIG.ENABLE_CHASER && this.state === "CAUGHT") {
         const progress = Math.min(this.caughtTimer / this.caughtDuration, 1.0);
         const w = this.viewW();
         const h = this.viewH();
@@ -6262,7 +6416,7 @@ CanvasOps/frame:
     }
 
     // Vignette overlay (always visible, cinematic dark edges)
-    this.perfMeasure("render.drawVignette", () => this.drawVignette());
+    if (!this.isMobile && !this.lowPerfMode) this.perfMeasure("render.drawVignette", () => this.drawVignette());
     if (this.renderCanvas) {
       this.perfMeasure("render.compositeToDisplay", () => {
         const dctx = this.displayCtx;
@@ -6272,7 +6426,7 @@ CanvasOps/frame:
         dctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         dctx.drawImage(this.renderCanvas!, 0, 0, this.canvas.width, this.canvas.height);
 
-        if (CONFIG.BLOOM_ENABLED) {
+        if (CONFIG.BLOOM_ENABLED && !this.lowPerfMode) {
           this.perfMeasure("render.bloom", () => {
             dctx.globalCompositeOperation = "screen";
             dctx.globalAlpha = CONFIG.BLOOM_STRENGTH;
@@ -6302,6 +6456,14 @@ CanvasOps/frame:
     // Keep a safety cap against tab-switch / long-freeze jumps.
     const dt = Math.min(0.1, (now - this.lastT) / 1000);
     this.lastT = now;
+    const frameMs = dt * 1000;
+    this.frameTimeEmaMs = this.frameTimeEmaMs * 0.9 + frameMs * 0.1;
+    // Adaptive quality with hysteresis: reduce expensive post effects only under sustained load.
+    if (this.lowPerfMode) {
+      if (this.frameTimeEmaMs < 17.5) this.lowPerfMode = false;
+    } else if (this.frameTimeEmaMs > 20) {
+      this.lowPerfMode = true;
+    }
     const frameStartedAt = performance.now();
 
     this.perfMeasure("loop.update", () => this.update(dt));
