@@ -27,6 +27,27 @@ function awardPlayerScore(
   player.score += getScoreAwardForEvent(event);
 }
 
+function isLocalHumanParticipant(player: RuntimePlayer | undefined): boolean {
+  if (!player) return false;
+  return !player.isBot || player.botType === "local";
+}
+
+function shouldAwardCombatScore(
+  attacker: RuntimePlayer | undefined,
+  victim: RuntimePlayer | undefined,
+): boolean {
+  if (!attacker || !victim) return false;
+  // In local multiplayer, do not award score for local-human-vs-local-human eliminations.
+  if (
+    (attacker.botType === "local" || victim.botType === "local") &&
+    isLocalHumanParticipant(attacker) &&
+    isLocalHumanParticipant(victim)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function updatePilots(sim: SimState, dtSec: number): void {
   const cfg = sim.getActiveConfig();
   const globals = sim.getGlobalConfig();
@@ -128,7 +149,11 @@ export function onShipHit(sim: SimState, owner: RuntimePlayer | undefined, targe
 
   sim.hooks.onSound("explosion", target.id);
   sim.triggerScreenShake(15, 0.4);
-  if (owner && owner.id !== target.id) {
+  if (
+    owner &&
+    owner.id !== target.id &&
+    shouldAwardCombatScore(owner, target)
+  ) {
     awardPlayerScore(owner, "SHIP_DESTROY");
   }
   sim.syncPlayers();
@@ -149,7 +174,9 @@ export function killPilot(sim: SimState, pilotPlayerId: string, killerId: string
     const killer = sim.players.get(killerId);
     if (killer && killer.id !== pilotPlayerId) {
       killer.kills += 1;
-      awardPlayerScore(killer, "PILOT_KILL");
+      if (shouldAwardCombatScore(killer, player)) {
+        awardPlayerScore(killer, "PILOT_KILL");
+      }
     }
   }
 

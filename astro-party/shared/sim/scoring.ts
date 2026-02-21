@@ -46,6 +46,7 @@ export function isScoreSubmissionEligibleBotType(
 export function shouldSubmitScoreToPlatform(
   hasEligibleBotInLobby: boolean,
   debugSessionTainted: boolean = false,
+  sessionMode: "online" | "local" = "online",
 ): boolean {
   if (
     SCORE_RULES.submission.blockWhenDebugSessionTainted &&
@@ -53,6 +54,8 @@ export function shouldSubmitScoreToPlatform(
   ) {
     return false;
   }
+  // Online sessions always submit once debug policy allows it.
+  if (sessionMode === "online") return true;
   if (!SCORE_RULES.submission.requireEligibleBotInLobby) return true;
   return hasEligibleBotInLobby;
 }

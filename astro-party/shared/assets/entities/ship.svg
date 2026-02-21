@@ -8,14 +8,14 @@
     </style>
 
     <linearGradient id="hullGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" class="stop-primary" stop-opacity="0.95"/>
-      <stop offset="0.60" class="stop-primary" stop-opacity="0.60"/>
-      <stop offset="1" class="stop-dark" stop-opacity="0.95"/>
+      <stop offset="0" class="stop-primary" stop-opacity="1"/>
+      <stop offset="0.60" class="stop-primary" stop-opacity="1"/>
+      <stop offset="1" class="stop-dark" stop-opacity="1"/>
     </linearGradient>
 
     <linearGradient id="wingGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" class="stop-primary" stop-opacity="0.85"/>
-      <stop offset="1" class="stop-dark" stop-opacity="0.95"/>
+      <stop offset="0" class="stop-primary" stop-opacity="1"/>
+      <stop offset="1" class="stop-dark" stop-opacity="1"/>
     </linearGradient>
 
     <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
@@ -24,13 +24,6 @@
       <stop offset="100%" class="stop-primary" stop-opacity="0"/>
     </radialGradient>
 
-    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="1.25" result="b"/>
-      <feMerge>
-        <feMergeNode in="b"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
   <metadata id="render-meta">
@@ -54,8 +47,8 @@
       id="hardpoint-shield"
       cx="0"
       cy="0"
-      rx="24.948"
-      ry="17.974"
+      rx="19.2"
+      ry="16.1"
       fill="none"
       stroke="#00ff99"
       stroke-width="0.45"
@@ -63,7 +56,7 @@
     />
     <circle
       id="hardpoint-muzzle"
-      cx="17.973"
+      cx="13.2"
       cy="0"
       r="0.95"
       fill="#ff3366"
@@ -72,7 +65,7 @@
     />
     <circle
       id="hardpoint-trail"
-      cx="-17.978"
+      cx="-12.8"
       cy="0"
       r="0.95"
       fill="#33ddff"
@@ -81,8 +74,8 @@
     />
     <circle
       id="hardpoint-joust-left"
-      cx="-18.41"
-      cy="-8.987"
+      cx="-9.8"
+      cy="-13.2"
       r="0.95"
       fill="#ffd966"
       stroke="#ffffff"
@@ -90,8 +83,8 @@
     />
     <circle
       id="hardpoint-joust-right"
-      cx="-18.41"
-      cy="8.987"
+      cx="-9.8"
+      cy="13.2"
       r="0.95"
       fill="#ffd966"
       stroke="#ffffff"
@@ -100,7 +93,7 @@
   </g>
 
   <!-- scale(1 0.8) is applied AFTER rotate => squashes screen-vertical -->
-  <g id="visual" filter="url(#softGlow)" transform="scale(1 0.8) rotate(90) scale(0.35) translate(-0.25 -4.5)">
+  <g id="visual" transform="scale(1 0.8) rotate(90) scale(0.35) translate(-0.25 -4.5)">
     <circle cx="0" cy="30" r="28" fill="url(#coreGlow)"/>
 
     <polygon
@@ -130,13 +123,13 @@
     <polygon points="0,-22 -26,4 0,16" fill="#000" opacity="0.10"/>
     <polygon points="-16,18 0,16 16,18 0,10" fill="#000" opacity="0.12"/>
 
-    <polygon points="0,-24 15,-11 0,-7 -15,-11" fill="#07121a" opacity="0.85"/>
-    <path class="slot-secondary" d="M -16 -14 L 0 -28 L 16 -14 L 12 -10 L 0 -20 L -12 -10 Z" opacity="0.95"/>
+    <polygon points="0,-24 15,-11 0,-7 -15,-11" fill="#07121a" opacity="0.95"/>
+    <path class="slot-secondary" d="M -16 -14 L 0 -28 L 16 -14 L 12 -10 L 0 -20 L -12 -10 Z" opacity="1"/>
 
     <polygon
       points="0,34 13,24 0,14 -13,24"
       fill="var(--slot-primary, #00f0ff)"
-      opacity="0.35"
+      opacity="0.78"
       class="slot-stroke"
       stroke-width="3"
       stroke-linejoin="round"
@@ -144,7 +137,7 @@
     <polygon
       points="0,31 9,24 0,17 -9,24"
       fill="var(--slot-primary, #00f0ff)"
-      opacity="0.55"
+      opacity="0.92"
     />
   </g>
 

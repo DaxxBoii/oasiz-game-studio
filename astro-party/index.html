@@ -53,6 +53,7 @@
       --hud-side-gap: 20px;
       --hud-bottom-gap: 0px;
       --hud-top-pad: 6px;
+      --back-btn-shift-x: 14px;
     }
 
     #game-wrapper {
@@ -939,7 +940,7 @@
     .leave-btn {
       position: absolute;
       top: var(--hud-top-pad);
-      left: var(--hud-side-gap);
+      left: calc(var(--hud-side-gap) + var(--back-btn-shift-x));
       width: 44px;
       height: 44px;
       border-radius: 12px;
@@ -1663,6 +1664,7 @@
       justify-content: center;
       cursor: pointer;
       color: #fff;
+      margin-left: var(--back-btn-shift-x);
     }
 
     .back-btn svg {
@@ -2452,6 +2454,7 @@
       :root {
         --hud-side-gap: 24px;
         --hud-top-pad: 12px;
+        --back-btn-shift-x: 16px;
       }
     }
 
@@ -2520,6 +2523,10 @@
     }
 
     @media (pointer: coarse) and (orientation: portrait) {
+      :root {
+        --back-btn-shift-x: 20px;
+      }
+
       html[data-layout="narrow"] .lobby-body {
         grid-template-columns: minmax(168px, 1fr) minmax(154px, 0.95fr);
       }

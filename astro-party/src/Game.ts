@@ -283,12 +283,16 @@ export class Game {
 
       onPlayerLeft: (playerId, reason) => {
         const myPlayerId = this.network.getMyPlayerId();
+        const isSelfLeaving = myPlayerId !== null && playerId === myPlayerId;
         const shouldToastLeave =
           this.flowMgr.phase !== "START" && playerId !== myPlayerId;
         const leftName =
           this.playerMgr.players.get(playerId)?.name ??
           this.network.getPlayerName(playerId) ??
           "Player";
+        if (isSelfLeaving && !this.isIntentionalDisconnect) {
+          this.submitCurrentScoreOnSessionExit();
+        }
         if (this.isStickyRosterPhase()) {
           this.captureStickyDepartedPlayer(playerId, reason);
         }
@@ -1710,12 +1714,7 @@ export class Game {
     const hasEligibleLobbyBot =
       this.lobbyHasEligibleScoreBot ||
       this.hasEligibleScoreBotInCurrentRoster();
-    if (
-      !shouldSubmitScoreToPlatform(
-        hasEligibleLobbyBot,
-        this.debugSessionTainted,
-      )
-    ) {
+    if (!this.shouldSubmitScoreNow(hasEligibleLobbyBot)) {
       if (
         !this.lobbyHasEligibleScoreBot &&
         this.network.getPlayerCount() <= 0
@@ -1731,12 +1730,7 @@ export class Game {
       return;
     }
 
-    const resultScore = this.roundResult?.scoresById?.[myId];
-    const fallbackScore = this.playerMgr.players.get(myId)?.score;
-    const rawScore = Number.isFinite(resultScore) ? resultScore : fallbackScore;
-
-    if (!Number.isFinite(rawScore)) return;
-    const score = Math.max(0, Math.floor(rawScore as number));
+    const score = this.resolveScoreForSubmission(myId);
 
     if (
       typeof (window as unknown as { submitScore?: (value: number) => void })
@@ -1764,20 +1758,11 @@ export class Game {
     const hasEligibleLobbyBot =
       this.lobbyHasEligibleScoreBot ||
       this.hasEligibleScoreBotInCurrentRoster();
-    if (
-      !shouldSubmitScoreToPlatform(
-        hasEligibleLobbyBot,
-        this.debugSessionTainted,
-      )
-    ) {
+    if (!this.shouldSubmitScoreNow(hasEligibleLobbyBot)) {
       return;
     }
 
-    const roundResultScore = this.roundResult?.scoresById?.[myId];
-    const liveScore = this.playerMgr.players.get(myId)?.score;
-    const rawScore = Number.isFinite(liveScore) ? liveScore : roundResultScore;
-    if (!Number.isFinite(rawScore)) return;
-    const score = Math.max(0, Math.floor(rawScore as number));
+    const score = this.resolveScoreForSubmission(myId);
 
     const submitScore = (
       window as unknown as { submitScore?: (value: number) => void }
@@ -1787,6 +1772,28 @@ export class Game {
     submitScore(score);
     this.finalScoreSubmittedForMatch = true;
     console.log("[Game] Submitted exit score:", score);
+  }
+
+  private shouldSubmitScoreNow(hasEligibleLobbyBot: boolean): boolean {
+    return shouldSubmitScoreToPlatform(
+      hasEligibleLobbyBot,
+      this.debugSessionTainted,
+      this.network.getTransportMode(),
+    );
+  }
+
+  private resolveScoreForSubmission(playerId: string): number {
+    const candidates: unknown[] = [
+      this.roundResult?.scoresById?.[playerId],
+      this.playerMgr.players.get(playerId)?.score,
+      this.stickyDepartedPlayers.get(playerId)?.score,
+      this.network.getPlayer(playerId)?.getState("score"),
+    ];
+    for (const candidate of candidates) {
+      if (!Number.isFinite(candidate as number)) continue;
+      return Math.max(0, Math.floor(candidate as number));
+    }
+    return 0;
   }
 
   updateTouchLayout(): void {
