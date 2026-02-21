@@ -139,6 +139,7 @@ export class GameRenderer {
         }
       });
 
+      this.renderer.drawPilotDeathDebris();
       this.renderer.drawBulletCasings();
 
       renderProjectiles.forEach((state) => {

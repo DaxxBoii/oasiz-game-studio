@@ -18,9 +18,20 @@ export function setupCollisions(
   callbacks: CollisionCallbacks,
 ): void {
   physics.onCollision((event) => {
+    const processedPairs = new Set<string>();
+    const normalizeBody = (body: Matter.Body): Matter.Body => body.parent ?? body;
+
     for (const pair of event.pairs) {
-      const bodyA = pair.bodyA;
-      const bodyB = pair.bodyB;
+      const bodyA = normalizeBody(pair.bodyA);
+      const bodyB = normalizeBody(pair.bodyB);
+
+      const pairKey =
+        bodyA.id < bodyB.id
+          ? bodyA.id.toString() + ":" + bodyB.id.toString()
+          : bodyB.id.toString() + ":" + bodyA.id.toString();
+      if (processedPairs.has(pairKey)) continue;
+      processedPairs.add(pairKey);
+
       const labelA = bodyA.label;
       const labelB = bodyB.label;
 

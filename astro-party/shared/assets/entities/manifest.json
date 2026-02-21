@@ -22,5 +22,16 @@
       "slot-tertiary": "#d6d6d6",
       "slot-outline": "#dcdcdc"
     }
+  },
+  "pilot_death_burst": {
+    "file": "pilot_death_burst.svg",
+    "colliderPathId": "collider",
+    "renderScale": 1.15,
+    "physicsScale": 1.0,
+    "slotDefaults": {
+      "slot-primary": "#00f0ff",
+      "slot-secondary": "#ffffff",
+      "slot-stroke": "#ffffff"
+    }
   }
 }

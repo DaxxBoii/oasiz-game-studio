@@ -1300,7 +1300,15 @@ export class AstroPartySimulation implements SimState {
 
   private getPluginString(body: Matter.Body, key: string): string | null {
     const value = (body.plugin as Record<string, unknown> | undefined)?.[key];
-    return typeof value === "string" ? value : null;
+    if (typeof value === "string") return value;
+
+    const parent = body.parent;
+    if (parent && parent !== body) {
+      const parentValue = (parent.plugin as Record<string, unknown> | undefined)?.[key];
+      if (typeof parentValue === "string") return parentValue;
+    }
+
+    return null;
   }
 
   private reseed(seed: number): void {

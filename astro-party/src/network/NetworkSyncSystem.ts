@@ -636,7 +636,16 @@ export class NetworkSyncSystem {
     );
     for (const [playerId, pilotData] of this.clientPilotPositions) {
       if (!currentPilotIds.has(playerId)) {
-        this.renderer.spawnExplosion(pilotData.x, pilotData.y, "#ff0000");
+        const ownerShip = shipById.get(playerId);
+        if (!ownerShip || !ownerShip.alive) {
+          const pilotColor =
+            this.playerMgr.players.get(playerId)?.color.primary ?? "#00f0ff";
+          this.renderer.spawnPilotDeathBurst(
+            pilotData.x,
+            pilotData.y,
+            pilotColor,
+          );
+        }
         this.clientPilotPositions.delete(playerId);
       }
     }

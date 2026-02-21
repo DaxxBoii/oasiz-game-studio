@@ -1,4 +1,5 @@
 import Matter from "matter-js";
+import decomp from "poly-decomp";
 import {
   PILOT_COLLIDER_VERTICES,
   SHIP_CENTER_OF_GRAVITY_LOCAL,
@@ -9,7 +10,7 @@ import {
 import { POWERUP_PICKUP_SIZE, PROJECTILE_RADIUS } from "../constants.js";
 import { CollisionCategory } from "./CollisionCategories.js";
 
-const { Engine, Bodies, Body, Events, Composite } = Matter;
+const { Engine, Bodies, Body, Events, Composite, Common } = Matter;
 const FIXED_STEP_MS = 1000 / 60;
 const REMOVE_COLLINEAR_THRESHOLD = 0.01;
 const MIN_PART_AREA = 0.05;
@@ -41,6 +42,8 @@ export class Physics {
   private playerCollisionGroups = new Map<string, number>();
 
   constructor() {
+    // Enable concave polygon decomposition for SVG-derived collider shapes.
+    Common.setDecomp(decomp as never);
     this.engine = Engine.create({
       gravity: { x: 0, y: 0 },
     });

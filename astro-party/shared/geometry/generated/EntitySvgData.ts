@@ -246,5 +246,150 @@ export const GENERATED_ENTITY_SVG_DATA = [
       "slot-tertiary": "#d6d6d6",
       "slot-outline": "#dcdcdc"
     }
+  },
+  {
+    "id": "pilot_death_burst",
+    "svgTemplate": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-20 -20 40 40\" role=\"img\" aria-label=\"Pilot death (suit burst)\">\n  <defs>\n    <style>\n      .slot-secondary { fill: var(--slot-secondary, #ffffff); }\n      .slot-stroke { stroke: var(--slot-stroke, #ffffff); }\n      .stop-primary { stop-color: var(--slot-primary, #00f0ff); }\n      .stop-dark { stop-color: #07121a; }\n    </style>\n\n    <!-- Suit metal -->\n    <linearGradient id=\"suitMetal\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">\n      <stop offset=\"0\" class=\"stop-primary\" stop-opacity=\"0.25\"/>\n      <stop offset=\"0.35\" class=\"stop-dark\" stop-opacity=\"1\"/>\n      <stop offset=\"1\" stop-color=\"#020508\" stop-opacity=\"1\"/>\n    </linearGradient>\n\n    <!-- Big energy burst -->\n    <radialGradient id=\"burstGlow\" cx=\"52%\" cy=\"48%\" r=\"62%\">\n      <stop offset=\"0\" class=\"stop-primary\" stop-opacity=\"0.98\"/>\n      <stop offset=\"0.35\" class=\"stop-primary\" stop-opacity=\"0.7\"/>\n      <stop offset=\"0.7\" class=\"stop-primary\" stop-opacity=\"0.25\"/>\n      <stop offset=\"1\" class=\"stop-primary\" stop-opacity=\"0\"/>\n    </radialGradient>\n\n    <!-- Hot core -->\n    <radialGradient id=\"core\" cx=\"50%\" cy=\"50%\" r=\"60%\">\n      <stop offset=\"0\" class=\"stop-primary\" stop-opacity=\"1\"/>\n      <stop offset=\"0.55\" class=\"stop-primary\" stop-opacity=\"0.7\"/>\n      <stop offset=\"1\" class=\"stop-primary\" stop-opacity=\"0\"/>\n    </radialGradient>\n\n    <filter id=\"softGlow\" x=\"-40%\" y=\"-40%\" width=\"180%\" height=\"180%\">\n      <feGaussianBlur stdDeviation=\"0.8\" result=\"b\"/>\n      <feMerge>\n        <feMergeNode in=\"b\"/>\n        <feMergeNode in=\"SourceGraphic\"/>\n      </feMerge>\n    </filter>\n\n    <filter id=\"shadow\" x=\"-30%\" y=\"-30%\" width=\"160%\" height=\"160%\">\n      <feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"0.6\" result=\"b\"/>\n      <feOffset in=\"b\" dx=\"0.4\" dy=\"0.55\" result=\"o\"/>\n      <feColorMatrix in=\"o\" type=\"matrix\"\n        values=\"0 0 0 0 0\n                0 0 0 0 0\n                0 0 0 0 0\n                0 0 0 0.26 0\" result=\"s\"/>\n      <feMerge>\n        <feMergeNode in=\"s\"/>\n        <feMergeNode in=\"SourceGraphic\"/>\n      </feMerge>\n    </filter>\n  </defs>\n\n  <g id=\"visual\" filter=\"url(#shadow)\">\n    <!-- Energy bloom -->\n    <circle cx=\"1.2\" cy=\"0\" r=\"12.6\" fill=\"url(#burstGlow)\" opacity=\"0.95\" filter=\"url(#softGlow)\"/>\n\n    <!-- Burst rays (ship-like triangles) -->\n    <g opacity=\"0.75\">\n      <polygon points=\"2,-15 4,-10 0,-11\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"12,-10 9,-6 7,-10\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"15,1 10,1 12,-2\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"12,12 8,8 12,7\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"-2,16 -1,11 3,13\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"-13,10 -9,7 -10,12\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"-16,-1 -11,-2 -13,2\" fill=\"var(--slot-primary, #00f0ff)\"/>\n      <polygon points=\"-12,-12 -9,-7 -13,-7\" fill=\"var(--slot-primary, #00f0ff)\"/>\n    </g>\n\n    <!-- Suit halves pulled apart (reads as \"burst open\") -->\n    <g opacity=\"0.92\">\n      <!-- Left half -->\n      <path\n        d=\"M -10.8 -6.8\n           L -1.2 -6.8\n           L -2.6 -1.0\n           L -2.6 1.0\n           L -1.2 6.8\n           L -9.2 6.8\n           Q -10.7 6.8 -11.6 5.2\n           L -13.1 2.2\n           Q -13.8 1.1 -13.8 0\n           Q -13.8 -1.1 -13.1 -2.2\n           L -11.6 -5.2\n           Q -10.7 -6.8 -10.8 -6.8 Z\"\n        fill=\"url(#suitMetal)\"\n        class=\"slot-stroke\"\n        stroke-width=\"0.95\"\n        stroke-linejoin=\"round\"\n        transform=\"translate(-1.0,0) rotate(-8)\"\n      />\n\n      <!-- Right half (with helmet stub) -->\n      <path\n        d=\"M 2.0 -6.8\n           L 5.2 -6.8\n           Q 7.3 -6.8 8.9 -5.2\n           L 10.8 -3.3\n           Q 11.9 -2.2 11.9 -0.8\n           L 11.9 0.8\n           Q 11.9 2.2 10.8 3.3\n           L 8.9 5.2\n           Q 7.3 6.8 5.2 6.8\n           L 2.0 6.8\n           L 0.6 1.0\n           L 0.6 -1.0 Z\"\n        fill=\"url(#suitMetal)\"\n        class=\"slot-stroke\"\n        stroke-width=\"0.95\"\n        stroke-linejoin=\"round\"\n        transform=\"translate(1.4,0) rotate(10)\"\n      />\n    </g>\n\n    <!-- Torn seam highlights -->\n    <path d=\"M -1.2 -6.7 L 0.6 -1.0 L 0.6 1.0 L -1.2 6.7\"\n      stroke=\"var(--slot-primary, #00f0ff)\" stroke-width=\"0.55\" opacity=\"0.9\" stroke-linecap=\"round\" />\n\n    <!-- Core shard (diamond like pilot chest) -->\n    <polygon points=\"-0.4,-2.4 2.4,0 -0.4,2.4 -3.0,0\" fill=\"var(--slot-primary, #00f0ff)\" opacity=\"0.88\" filter=\"url(#softGlow)\"/>\n\n    <!-- Helmet popped off (small, upper-right) -->\n    <g transform=\"translate(10.6,-7.8) rotate(18)\" opacity=\"0.95\">\n      <circle cx=\"0\" cy=\"0\" r=\"3.2\" fill=\"#07121a\" class=\"slot-stroke\" stroke-width=\"0.85\"/>\n      <path d=\"M -2.2 -1.2 Q 0 -2.2 2.2 -1.2 Q 2.6 0 2.2 1.2 Q 0 2.2 -2.2 1.2 Q -2.6 0 -2.2 -1.2 Z\"\n        fill=\"var(--slot-primary, #00f0ff)\" opacity=\"0.35\"/>\n    </g>\n\n    <!-- Small debris blocks (ship plating) -->\n    <g opacity=\"0.65\">\n      <polygon points=\"-8,-12 -5,-10 -8,-9 -10,-11\" fill=\"var(--slot-secondary, #ffffff)\"/>\n      <polygon points=\"6,12 9,10 10,13 7,14\" fill=\"var(--slot-secondary, #ffffff)\"/>\n      <polygon points=\"-14,6 -12,4 -11,7 -13,8\" fill=\"var(--slot-secondary, #ffffff)\"/>\n      <polygon points=\"14,4 16,2 16,5\" fill=\"var(--slot-secondary, #ffffff)\"/>\n    </g>\n\n    <!-- Tiny status light dying out -->\n    <circle cx=\"18.3\" cy=\"0\" r=\"0.85\" fill=\"#ff2b6f\" opacity=\"0.5\"/>\n  </g>\n\n  <path id=\"collider\" d=\"M -17.2 0\n       L -16.0 -5.6\n       L -11.2 -8.6\n       L -9.6 -7.2\n       L 2.8 -7.2\n       Q 5.0 -7.2 6.6 -5.6\n       L 8.4 -3.8\n       Q 9.6 -2.6 9.6 -0.8\n       L 9.6 -3.3\n       Q 12.4 -5.2 15.2 -4.0\n       Q 17.8 -2.8 17.8 0\n       Q 17.8 2.8 15.2 4.0\n       Q 12.4 5.2 9.6 3.3\n       L 9.6 0.8\n       Q 9.6 2.6 8.4 3.8\n       L 6.6 5.6\n       Q 5.0 7.2 2.8 7.2\n       L 4.8 8.4\n       L 5.3 9.5\n       L -8.1 9.5\n       L -11.2 8.6\n       L -16.0 5.6\n       Z\" fill=\"none\" stroke=\"none\"/>\n</svg>",
+    "viewBox": {
+      "minX": -20,
+      "minY": -20,
+      "width": 40,
+      "height": 40
+    },
+    "colliderPathId": "collider",
+    "colliderPath": "M -17.2 0\n       L -16.0 -5.6\n       L -11.2 -8.6\n       L -9.6 -7.2\n       L 2.8 -7.2\n       Q 5.0 -7.2 6.6 -5.6\n       L 8.4 -3.8\n       Q 9.6 -2.6 9.6 -0.8\n       L 9.6 -3.3\n       Q 12.4 -5.2 15.2 -4.0\n       Q 17.8 -2.8 17.8 0\n       Q 17.8 2.8 15.2 4.0\n       Q 12.4 5.2 9.6 3.3\n       L 9.6 0.8\n       Q 9.6 2.6 8.4 3.8\n       L 6.6 5.6\n       Q 5.0 7.2 2.8 7.2\n       L 4.8 8.4\n       L 5.3 9.5\n       L -8.1 9.5\n       L -11.2 8.6\n       L -16.0 5.6\n       Z",
+    "colliderVertices": [
+      {
+        "x": -17.2,
+        "y": 0
+      },
+      {
+        "x": -16,
+        "y": -5.6
+      },
+      {
+        "x": -11.2,
+        "y": -8.6
+      },
+      {
+        "x": -9.6,
+        "y": -7.2
+      },
+      {
+        "x": 2.8,
+        "y": -7.2
+      },
+      {
+        "x": 5,
+        "y": -7.2
+      },
+      {
+        "x": 6.6,
+        "y": -5.6
+      },
+      {
+        "x": 8.4,
+        "y": -3.8
+      },
+      {
+        "x": 9.6,
+        "y": -2.6
+      },
+      {
+        "x": 9.6,
+        "y": -0.8
+      },
+      {
+        "x": 9.6,
+        "y": -3.3
+      },
+      {
+        "x": 12.4,
+        "y": -5.2
+      },
+      {
+        "x": 15.2,
+        "y": -4
+      },
+      {
+        "x": 17.8,
+        "y": -2.8
+      },
+      {
+        "x": 17.8,
+        "y": 0
+      },
+      {
+        "x": 17.8,
+        "y": 2.8
+      },
+      {
+        "x": 15.2,
+        "y": 4
+      },
+      {
+        "x": 12.4,
+        "y": 5.2
+      },
+      {
+        "x": 9.6,
+        "y": 3.3
+      },
+      {
+        "x": 9.6,
+        "y": 0.8
+      },
+      {
+        "x": 9.6,
+        "y": 2.6
+      },
+      {
+        "x": 8.4,
+        "y": 3.8
+      },
+      {
+        "x": 6.6,
+        "y": 5.6
+      },
+      {
+        "x": 5,
+        "y": 7.2
+      },
+      {
+        "x": 2.8,
+        "y": 7.2
+      },
+      {
+        "x": 4.8,
+        "y": 8.4
+      },
+      {
+        "x": 5.3,
+        "y": 9.5
+      },
+      {
+        "x": -8.1,
+        "y": 9.5
+      },
+      {
+        "x": -11.2,
+        "y": 8.6
+      },
+      {
+        "x": -16,
+        "y": 5.6
+      }
+    ],
+    "centerOfGravityLocal": {
+      "x": -17.2,
+      "y": 0
+    },
+    "renderScale": 1.15,
+    "physicsScale": 1,
+    "slotDefaults": {
+      "slot-primary": "#00f0ff",
+      "slot-secondary": "#ffffff",
+      "slot-stroke": "#ffffff"
+    }
   }
 ] as const;
