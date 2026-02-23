@@ -2497,10 +2497,14 @@ function drawDrawMeter(): void {
 function drawHUD(): void {
   const secs = Math.ceil(timeRemaining / 1000);
   const timerText = secs.toString();
-  const urgent = secs <= 5;
   const labelFontSize = Math.max(11, Math.round(11 * gameScale));
   const valueFontSize = Math.max(18, Math.round(19 * gameScale));
-  const timeFontSize = Math.max(44, Math.round((urgent ? 68 : 58) * gameScale)) * 3;
+  const timeElapsedRatio = Math.max(0, Math.min(1, 1 - timeRemaining / CONFIG.ROUND_TIME_MS));
+  const lastTenRatio = Math.max(0, Math.min(1, (10000 - timeRemaining) / 10000));
+  const lastFifteenShakeRatio = Math.max(0, Math.min(1, (15000 - timeRemaining) / 15000));
+  const minTimeFont = Math.max(34, Math.round(40 * gameScale));
+  const maxTimeFont = Math.max(102, Math.round(132 * gameScale));
+  const timeFontSize = Math.round(minTimeFont + (maxTimeFont - minTimeFont) * timeElapsedRatio);
   const hudLeftX = 20;
   const labelX = hudLeftX;
   const valueX = hudLeftX + Math.max(66, 74 * gameScale);
@@ -2549,30 +2553,23 @@ function drawHUD(): void {
   ctx.fillText(score.toString(), valueX, scoreY);
 
   const timerX = w * 0.5;
-  const timerY = isMobile ? 156 : 82;
-  ctx.fillStyle = urgent ? "#FF3333" : "rgba(255, 255, 255, 0.95)";
-  ctx.shadowColor = urgent ? "rgba(255, 0, 0, 0.6)" : "rgba(0, 0, 0, 0.55)";
-  ctx.shadowBlur = urgent ? 22 : 12;
-  ctx.textAlign = "center";
-  if (urgent) {
-    const panicProgress = Math.max(0, Math.min(1, (5000 - timeRemaining) / 5000));
-    const growthScale = 1 + panicProgress * 0.55;
-    const pulse = 1 + Math.sin(environmentTime * 0.045) * (0.03 + panicProgress * 0.07);
-    const finalScale = growthScale * pulse;
-    const shakeAmp = 0.8 + panicProgress * 2.8;
-    const shakeX = Math.sin(environmentTime * 0.11) * shakeAmp;
-    const shakeY = Math.cos(environmentTime * 0.16) * shakeAmp;
+  const timerY = Math.max(120, 132 * gameScale);
+  const timerR = Math.round(245 + (255 - 245) * lastTenRatio);
+  const timerG = Math.round(245 + (60 - 245) * lastTenRatio);
+  const timerB = Math.round(245 + (60 - 245) * lastTenRatio);
+  const shakeAmp = lastFifteenShakeRatio * (1.2 + lastFifteenShakeRatio * 4.2);
+  const shakeX = Math.sin(environmentTime * 0.12) * shakeAmp;
+  const shakeY = Math.cos(environmentTime * 0.17) * shakeAmp;
 
-    ctx.save();
-    ctx.translate(timerX + shakeX, timerY + shakeY);
-    ctx.scale(finalScale, finalScale);
-    ctx.font = `bold ${timeFontSize}px 'Sora', sans-serif`;
-    ctx.fillText(timerText, 0, 0);
-    ctx.restore();
-  } else {
-    ctx.font = `bold ${timeFontSize}px 'Sora', sans-serif`;
-    ctx.fillText(timerText, timerX, timerY);
-  }
+  ctx.fillStyle = "rgb(" + timerR + ", " + timerG + ", " + timerB + ")";
+  ctx.shadowColor = "rgba(" + (210 + Math.round(45 * lastTenRatio)) + ", 0, 0, " + (0.22 + lastTenRatio * 0.5).toFixed(3) + ")";
+  ctx.shadowBlur = 12 + lastTenRatio * 16;
+  ctx.textAlign = "center";
+  ctx.save();
+  ctx.translate(timerX + shakeX, timerY + shakeY);
+  ctx.font = `bold ${timeFontSize}px 'Sora', sans-serif`;
+  ctx.fillText(timerText, 0, 0);
+  ctx.restore();
   ctx.textAlign = "left";
 
   const headPos = getPlayerHeadScreenPosition();
