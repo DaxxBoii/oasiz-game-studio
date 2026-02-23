@@ -150,7 +150,7 @@ const CONFIG = {
   DEPTH_NEAR: 400,         // perspective factor: higher = less foreshortening
   HORIZON_RATIO: 0.28,
 
-  ROUND_TIME_MS: 30000,
+  ROUND_TIME_MS: 40000,
   PERFECT_MULTIPLIER: 2,
   WAVE_HIT_GOAL: 10,
   WAVE_SPEED_MULT: 1.12,
@@ -175,7 +175,7 @@ const MOUNTED_SPRITE_HEAD = {
   y: 0.33,
 };
 
-const MOUNTED_CHARACTER_SCALE = 2.2;
+const MOUNTED_CHARACTER_SCALE = 1.32;
 const HORSE_RUN_CYCLE_RATE = 0.0105;
 
 // ============= GLOBALS =============
@@ -196,6 +196,7 @@ const pauseBtn = document.getElementById("pauseBtn")!;
 const finalScoreEl = document.getElementById("finalScore")!;
 const fireBtn = document.getElementById("fireBtn")!;
 const fireLabelEl = document.querySelector("#fireBtn .fire-label") as HTMLSpanElement;
+const startTipEl = document.getElementById("startTip");
 const upgradeButtons = [
   document.getElementById("upgradeOption1") as HTMLButtonElement,
   document.getElementById("upgradeOption2") as HTMLButtonElement,
@@ -348,7 +349,7 @@ function resizeCanvas(): void {
   groundY = h * (1 - CONFIG.GROUND_RATIO);
   horizonY = h * CONFIG.HORIZON_RATIO;
   horse.screenX = w * 0.22;
-  horse.baseY = groundY - 30 * gameScale;
+  horse.baseY = groundY + (h - groundY) * 0.5;
   horse.screenY = horse.baseY;
   pxPerUnit = (w - horse.screenX) / 900;
   updateOrientationState();
@@ -674,7 +675,7 @@ function getRiderPlacement(): RiderPlacement | null {
   const tipScreenX = nockX + aDirX * arrowLen;
   const tipScreenY = nockY + aDirY * arrowLen;
   const headScreenX = riderBaseX + 1 * horseScale;
-  const headScreenY = riderBaseY - 32 * horseScale;
+  const headScreenY = riderBaseY - 55 * horseScale;
 
   return {
     tipScreenX,
@@ -816,6 +817,21 @@ function getDrawSpeedMultiplier(): number {
 
 function getWobbleMultiplier(): number {
   return upgradeLevels.wobbleControl > 0 ? 0.5 : 1;
+}
+
+function updateStartTip(): void {
+  if (!startTipEl) return;
+  const roundSeconds = Math.round(CONFIG.ROUND_TIME_MS / 1000);
+  const lineOne =
+    "You have " +
+    roundSeconds.toString() +
+    " seconds to hit " +
+    CONFIG.WAVE_HIT_GOAL.toString() +
+    " targets!";
+  const lineTwo = isMobile
+    ? "Hold the button to pull your arrow back!"
+    : "Hold the Space bar to pull your arrow back!";
+  startTipEl.innerHTML = lineOne + "<br>" + lineTwo;
 }
 
 function getArrowLaunchSpeed(drawAmount: number): number {
@@ -1129,6 +1145,52 @@ function getArrowCollisionPoint(arrow: Arrow): { x: number; y: number; angle: nu
   return { x: tipX, y: tipY, angle };
 }
 
+function getPointToSegmentDistance(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq <= 0.0000001) {
+    const dx = px - ax;
+    const dy = py - ay;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
+  const cx = ax + abx * t;
+  const cy = ay + aby * t;
+  const dx = px - cx;
+  const dy = py - cy;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getClosestPointOnSegment(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): { x: number; y: number } {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq <= 0.0000001) {
+    return { x: ax, y: ay };
+  }
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
+  return { x: ax + abx * t, y: ay + aby * t };
+}
+
 // ============= BOW DRAW & FIRE =============
 function startDraw(): void {
   if (isDrawing) return;
@@ -1222,6 +1284,7 @@ function fireArrow(): void {
   if (ammoCount === 0) {
     isReloading = true;
     reloadRemaining = CONFIG.RELOAD_MS;
+    playSfx("reloadReady");
   }
 
   playSfx("bowRelease");
@@ -1839,7 +1902,7 @@ function drawHorseAndArcher(): void {
 
   // HORSE LEGS - BACK (further from camera)
   ctx.strokeStyle = horseDarkColor;
-  ctx.lineWidth = 5.5;
+  ctx.lineWidth = 6.2;
   ctx.lineCap = "round";
   const legPositions = [
     { base: -30, offset: 0, isFore: false, isFar: true },
@@ -1859,7 +1922,7 @@ function drawHorseAndArcher(): void {
     const hoofX = leg.base + swing;
     const hoofY = 8 - lift;
 
-    ctx.strokeStyle = leg.isFar ? horseDarkColor : horseColor;
+    ctx.strokeStyle = horseDarkColor;
     ctx.beginPath();
     ctx.moveTo(leg.base, -24);
     ctx.lineTo(kneeX, kneeY);
@@ -2437,18 +2500,36 @@ function drawHUD(): void {
   const urgent = secs <= 5;
   const labelFontSize = Math.max(11, Math.round(11 * gameScale));
   const valueFontSize = Math.max(18, Math.round(19 * gameScale));
-  const timeFontSize = Math.max(18, Math.round((urgent ? 21 : 19) * gameScale));
+  const timeFontSize = Math.max(44, Math.round((urgent ? 68 : 58) * gameScale)) * 3;
   const hudLeftX = 20;
   const labelX = hudLeftX;
   const valueX = hudLeftX + Math.max(66, 74 * gameScale);
   const rowGap = Math.max(27, 29 * gameScale);
-  const hudRows = 4;
+  const hudRows = 3;
   const hudBlockHeight = rowGap * (hudRows - 1);
   const startY = h * 0.5 - hudBlockHeight * 0.5;
   const waveY = startY;
   const hitsY = waveY + rowGap;
   const scoreY = hitsY + rowGap;
-  const timeY = scoreY + rowGap;
+
+  const hudPanelX = hudLeftX - Math.max(10, 12 * gameScale);
+  const hudPanelY = waveY - Math.max(24, 28 * gameScale);
+  const hudPanelW = Math.max(136, 162 * gameScale);
+  const hudPanelH = (scoreY - waveY) + Math.max(42, 52 * gameScale);
+  const hudPanelR = Math.max(10, 14 * gameScale);
+  const hudPanelGrad = ctx.createLinearGradient(hudPanelX, hudPanelY, hudPanelX, hudPanelY + hudPanelH);
+  hudPanelGrad.addColorStop(0, "rgba(39, 27, 18, 0.72)");
+  hudPanelGrad.addColorStop(1, "rgba(24, 16, 10, 0.62)");
+  ctx.fillStyle = hudPanelGrad;
+  ctx.beginPath();
+  ctx.roundRect(hudPanelX, hudPanelY, hudPanelW, hudPanelH, hudPanelR);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(227, 192, 132, 0.28)";
+  ctx.lineWidth = Math.max(1, 1.4 * gameScale);
+  ctx.beginPath();
+  ctx.roundRect(hudPanelX, hudPanelY, hudPanelW, hudPanelH, hudPanelR);
+  ctx.stroke();
+
   ctx.textAlign = "left";
   ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
   ctx.shadowBlur = 8;
@@ -2458,7 +2539,6 @@ function drawHUD(): void {
   ctx.fillText("WAVE", labelX, waveY);
   ctx.fillText("HITS", labelX, hitsY);
   ctx.fillText("SCORE", labelX, scoreY);
-  ctx.fillText("TIME", labelX, timeY);
 
   ctx.textAlign = "left";
 
@@ -2468,9 +2548,12 @@ function drawHUD(): void {
   ctx.fillText(waveHits.toString() + "/" + CONFIG.WAVE_HIT_GOAL.toString(), valueX, hitsY);
   ctx.fillText(score.toString(), valueX, scoreY);
 
+  const timerX = w * 0.5;
+  const timerY = isMobile ? 156 : 82;
   ctx.fillStyle = urgent ? "#FF3333" : "rgba(255, 255, 255, 0.95)";
   ctx.shadowColor = urgent ? "rgba(255, 0, 0, 0.6)" : "rgba(0, 0, 0, 0.55)";
-  ctx.shadowBlur = urgent ? 14 : 8;
+  ctx.shadowBlur = urgent ? 22 : 12;
+  ctx.textAlign = "center";
   if (urgent) {
     const panicProgress = Math.max(0, Math.min(1, (5000 - timeRemaining) / 5000));
     const growthScale = 1 + panicProgress * 0.55;
@@ -2481,19 +2564,20 @@ function drawHUD(): void {
     const shakeY = Math.cos(environmentTime * 0.16) * shakeAmp;
 
     ctx.save();
-    ctx.translate(valueX + shakeX, timeY + shakeY);
+    ctx.translate(timerX + shakeX, timerY + shakeY);
     ctx.scale(finalScale, finalScale);
     ctx.font = `bold ${timeFontSize}px 'Sora', sans-serif`;
     ctx.fillText(timerText, 0, 0);
     ctx.restore();
   } else {
     ctx.font = `bold ${timeFontSize}px 'Sora', sans-serif`;
-    ctx.fillText(timerText, valueX, timeY);
+    ctx.fillText(timerText, timerX, timerY);
   }
+  ctx.textAlign = "left";
 
   const headPos = getPlayerHeadScreenPosition();
-  const quiverCenterX = headPos.x - 20;
-  const quiverY = headPos.y + Math.max(24, 28 * gameScale) - 90;
+  const quiverCenterX = headPos.x;
+  const quiverY = headPos.y - Math.max(44, 52 * gameScale);
   ctx.shadowBlur = 0;
   const arrowSpacing = Math.max(15, 17 * gameScale);
   const arrowStemH = Math.max(10, 12 * gameScale);
@@ -2526,7 +2610,7 @@ function drawHUD(): void {
     const clampedReloadT = Math.max(0, Math.min(1, reloadT));
     const quiverSpan = (maxQuiver - 1) * arrowSpacing;
     const centerX = quiverStartX + quiverSpan * 0.5;
-    const centerY = quiverY - Math.max(26, 30 * gameScale);
+    const centerY = quiverY - Math.max(42, 48 * gameScale);
     const ringRadius = Math.max(15, 19 * gameScale);
     const ringWidth = Math.max(3, 4 * gameScale);
     const startAngle = -Math.PI / 2;
@@ -2613,7 +2697,6 @@ function update(dt: number): void {
       reloadRemaining = 0;
       isReloading = false;
       ammoCount = getMaxQuiverArrows();
-      playSfx("reloadReady");
     }
   }
   let waveClearedThisFrame = false;
@@ -2638,29 +2721,6 @@ function update(dt: number): void {
       arrow.vy += crosswindAccel * 0.18 * dt;
       arrow.worldX += arrow.vx * dt;
       arrow.height += arrow.vy * dt;
-
-      arrow.trailSpawnCooldown -= dt;
-      while (arrow.trailSpawnCooldown <= 0) {
-        const speedMag = Math.sqrt(arrow.vx * arrow.vx + arrow.vy * arrow.vy);
-        const dirX = speedMag > 0.0001 ? arrow.vx / speedMag : 1;
-        const dirY = speedMag > 0.0001 ? arrow.vy / speedMag : 0;
-        const trailBackUnits = Math.max(7, (18 * gameScale) / Math.max(0.001, pxPerUnit));
-        arrow.trailPoints.push({
-          worldX: arrow.worldX - dirX * trailBackUnits,
-          height: arrow.height - dirY * trailBackUnits,
-          life: 260,
-          maxLife: 260,
-        });
-        arrow.trailSpawnCooldown += 14;
-      }
-    }
-
-    for (let i = arrow.trailPoints.length - 1; i >= 0; i--) {
-      const tp = arrow.trailPoints[i];
-      tp.life -= dt;
-      if (tp.life <= 0) {
-        arrow.trailPoints.splice(i, 1);
-      }
     }
 
     // Hit ground and stick in place so the rider passes by it.
@@ -2689,6 +2749,8 @@ function update(dt: number): void {
     // Target collision (2D: worldX + height)
     if (arrow.stuckInGround) continue;
     const collisionPoint = getArrowCollisionPoint(arrow);
+    const prevCollisionX = collisionPoint.x - arrow.vx * dt;
+    const prevCollisionY = collisionPoint.y - arrow.vy * dt;
     let closestTarget: WorldTarget | null = null;
     let closestDist = Number.POSITIVE_INFINITY;
     let closestDx = 0;
@@ -2702,14 +2764,40 @@ function update(dt: number): void {
 
       const dy = collisionPoint.y - t.postHeight;
       const dist = Math.sqrt(tdx * tdx + dy * dy);
-      if (dist < closestDist) {
-        closestDist = dist;
+      const targetXAligned = collisionPoint.x - tdx;
+      const sweptDist = getPointToSegmentDistance(
+        targetXAligned,
+        t.postHeight,
+        prevCollisionX,
+        prevCollisionY,
+        collisionPoint.x,
+        collisionPoint.y,
+      );
+      const sweptClosestPoint = getClosestPointOnSegment(
+        targetXAligned,
+        t.postHeight,
+        prevCollisionX,
+        prevCollisionY,
+        collisionPoint.x,
+        collisionPoint.y,
+      );
+      const sweptDx = sweptClosestPoint.x - targetXAligned;
+      const sweptDy = sweptClosestPoint.y - t.postHeight;
+      const useSweptForLock = sweptDist < dist;
+      const lockDx = useSweptForLock ? sweptDx : tdx;
+      const lockDy = useSweptForLock ? sweptDy : dy;
+      const pullDist = Math.min(dist, sweptDist);
+      if (pullDist < closestDist) {
+        closestDist = pullDist;
         closestTarget = t;
-        closestDx = tdx;
-        closestDy = dy;
+        closestDx = lockDx;
+        closestDy = lockDy;
       }
       const hitRadius = getTargetHitRadius(t);
-      const isMagnetLockHit = upgradeLevels.magnetArrows > 0 && dist <= CONFIG.MAGNET_RADIUS;
+      // Reduced by ~40% from prior tuning to avoid overpowered lock behavior.
+      const magnetCatchRadius = Math.max(CONFIG.MAGNET_RADIUS * 1.32, t.radius * 1.08);
+      const isMagnetLockHit =
+        upgradeLevels.magnetArrows > 0 && (dist <= magnetCatchRadius || sweptDist <= magnetCatchRadius);
       const isDirectHit = dist < hitRadius;
 
       if (isMagnetLockHit || isDirectHit) {
@@ -2722,14 +2810,17 @@ function update(dt: number): void {
         let magnetAssistedEdgeHit = false;
 
         if (isMagnetLockHit) {
-          const safeDist = Math.max(0.0001, dist);
-          const edgeNx = tdx / safeDist;
-          const edgeNy = dy / safeDist;
+          // Use current frame target-relative vector for embedding so arrows stick to the face.
+          const embedDx = Math.abs(tdx) + Math.abs(dy) > 0.0001 ? tdx : lockDx;
+          const embedDy = Math.abs(tdx) + Math.abs(dy) > 0.0001 ? dy : lockDy;
+          const safeDist = Math.max(0.0001, Math.sqrt(embedDx * embedDx + embedDy * embedDy));
+          const edgeNx = embedDx / safeDist;
+          const edgeNy = embedDy / safeDist;
           // Magnet lock turns the arrow toward center but only grants an edge impact.
           scoreDx = edgeNx * t.radius;
           scoreDy = edgeNy * t.radius;
           scoreDist = t.radius;
-          impactAngle = Math.atan2(dy, -tdx);
+          impactAngle = Math.atan2(embedDy, -embedDx);
           magnetAssistedEdgeHit = true;
         } else if (Math.abs(arrow.vx) > 0.00001) {
           const tToCenter = -tdx / arrow.vx;
@@ -2741,6 +2832,13 @@ function update(dt: number): void {
         }
 
         arrow.active = false;
+        // Always clamp embedded-arrow position to the target face to avoid floating off-disc artifacts.
+        const embedDist = Math.sqrt(scoreDx * scoreDx + scoreDy * scoreDy);
+        if (embedDist > t.radius && embedDist > 0.0001) {
+          const scaleToFace = t.radius / embedDist;
+          scoreDx *= scaleToFace;
+          scoreDy *= scaleToFace;
+        }
         t.embeddedArrow = {
           offsetX: scoreDx,
           offsetY: scoreDy,
@@ -2804,16 +2902,24 @@ function update(dt: number): void {
       }
 
     }
-    if (arrow.active && closestTarget && upgradeLevels.magnetArrows > 0 && closestDist <= CONFIG.MAGNET_PULL_RADIUS) {
-      const pullRatio = 1 - closestDist / CONFIG.MAGNET_PULL_RADIUS;
-      const pullAccel = CONFIG.MAGNET_PULL_STRENGTH * pullRatio * dt;
-      if (closestDist > 0.001) {
-        const pullX = -closestDx / closestDist;
-        const pullY = -closestDy / closestDist;
-        arrow.vx += pullX * pullAccel;
-        arrow.vy += pullY * pullAccel;
+    if (arrow.active && closestTarget && upgradeLevels.magnetArrows > 0) {
+      const magnetPullRadius = Math.max(CONFIG.MAGNET_PULL_RADIUS * 0.42, closestTarget.radius * 2.52);
+      if (closestDist <= magnetPullRadius) {
+        const pullRatio = 1 - closestDist / magnetPullRadius;
+        if (closestDist > 0.001) {
+          const pullX = -closestDx / closestDist;
+          const pullY = -closestDy / closestDist;
+          const speedMag = Math.sqrt(arrow.vx * arrow.vx + arrow.vy * arrow.vy);
+          const targetSpeed = Math.max(0.16, speedMag);
+          const desiredVx = pullX * targetSpeed;
+          const desiredVy = pullY * targetSpeed;
+          const steer = 1 - Math.exp(-(0.011 + pullRatio * 0.026) * dt);
+          // Strong directional steering makes above/below passes visibly bend toward center.
+          arrow.vx += (desiredVx - arrow.vx) * steer;
+          arrow.vy += (desiredVy - arrow.vy) * steer;
+        }
+        arrow.magnetFxStrength = pullRatio;
       }
-      arrow.magnetFxStrength = pullRatio;
       arrow.magnetTargetWorldX = closestTarget.worldX;
       arrow.magnetTargetHeight = closestTarget.postHeight;
       arrow.magnetTargetRadius = closestTarget.radius;
@@ -3096,6 +3202,7 @@ function init(): void {
   window.addEventListener("resize", resizeCanvas);
 
   loadAudio();
+  updateStartTip();
   setupInputHandlers();
   setupUpgradeButtons();
   initClouds();
