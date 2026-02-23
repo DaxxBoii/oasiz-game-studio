@@ -7,7 +7,7 @@
   <title>Astro Party</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Kodchasan:wght@300;400;500&family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;
@@ -25,6 +25,96 @@
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
+    }
+
+    /* ============= SPLASH SCREEN ============= */
+    .splash-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .splash-black {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #0a0a12;
+      opacity: 1;
+      transition: opacity 0.5s ease;
+    }
+
+    .splash-screen.fade-out .splash-black {
+      opacity: 0;
+    }
+
+    .splash-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    .splash-logo {
+      max-width: 180px;
+      max-height: 180px;
+      width: 40vw;
+      height: auto;
+      object-fit: contain;
+      opacity: 0;
+      transform: scale(0.9);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .splash-screen.show-logo .splash-logo {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .splash-tagline {
+      font-family: 'Kodchasan', sans-serif;
+      font-size: clamp(0.9rem, 3vw, 1.4rem);
+      font-weight: 300;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+
+    .splash-screen.show-tagline .splash-tagline {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .splash-screen.fade-tagline .splash-tagline {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+
+    .splash-screen.fade-logo .splash-logo {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+
+    .splash-screen.fade-out .splash-black {
+      opacity: 0;
+    }
+
+    .splash-screen.done {
+      display: none;
     }
 
     :root {
@@ -2145,6 +2235,124 @@
       pointer-events: none;
     }
 
+    /* ============= 3D STARFIELD BACKGROUND ============= */
+    .stars-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .stars-container.active {
+      opacity: 1;
+    }
+
+    .stars-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-attachment: fixed;
+    }
+
+    .stars-wrapper {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      width: 0;
+      height: 0;
+      perspective: 500px;
+      perspective-origin: 50% 100%;
+    }
+
+    .stars-layer {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform-style: preserve-3d;
+      animation: starsRotate 90s infinite linear;
+    }
+
+    @keyframes starsRotate {
+      0% {
+        transform: perspective(400px) rotateZ(20deg) rotateX(-40deg) rotateY(0);
+      }
+      100% {
+        transform: perspective(400px) rotateZ(20deg) rotateX(-40deg) rotateY(-360deg);
+      }
+    }
+
+    .star-node {
+      position: absolute;
+      background: #fff;
+      border-radius: 50%;
+      transform-origin: center center;
+    }
+
+    #game-wrapper {
+      position: fixed;
+      top: var(--vv-offset-y);
+      left: var(--vv-offset-x);
+      width: var(--vw);
+      height: var(--vh);
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    .stars-container.active {
+      opacity: 1;
+    }
+
+    .stars-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-attachment: fixed;
+    }
+
+    .stars-wrapper {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      width: 0;
+      height: 0;
+      perspective: 500px;
+      perspective-origin: 50% 100%;
+    }
+
+    .stars-layer {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform-style: preserve-3d;
+      animation: starsRotate 90s infinite linear;
+    }
+
+    @keyframes starsRotate {
+      0% {
+        transform: perspective(400px) rotateZ(20deg) rotateX(-40deg) rotateY(0);
+      }
+      100% {
+        transform: perspective(400px) rotateZ(20deg) rotateX(-40deg) rotateY(-360deg);
+      }
+    }
+
+    .star-node {
+      position: absolute;
+      background: #fff;
+      border-radius: 50%;
+      transform-origin: center center;
+    }
+
     /* ============= MOBILE OVERRIDES ============= */
     @media (pointer: coarse) {
       :root {
@@ -2717,6 +2925,22 @@
   </style>
 </head>
 <body>
+  <!-- Splash Screen -->
+  <div id="splashScreen" class="splash-screen">
+    <div class="splash-black"></div>
+    <div class="splash-content">
+      <img src="assets/Oasiz-logo-transparent.png" alt="Oasiz" class="splash-logo">
+      <div class="splash-tagline">AN OASIZ ORIGINAL</div>
+    </div>
+  </div>
+
+  <!-- 3D Starfield Background (only shown during gameplay) -->
+  <div class="stars-container" id="starsContainer">
+    <div class="stars-bg" id="starsBg"></div>
+    <div class="stars-wrapper">
+      <div class="stars-layer" id="starsLayer"></div>
+    </div>
+  </div>
   <div id="game-wrapper">
   <canvas id="gameCanvas"></canvas>
 

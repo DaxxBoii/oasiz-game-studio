@@ -40,8 +40,47 @@ window.setNextSeed = (seed: number): void => {
   game.setNextRngSeed(seed);
 };
 
+function runSplashScreen(): Promise<void> {
+  return new Promise((resolve) => {
+    const splash = document.getElementById("splashScreen");
+    if (!splash) {
+      resolve();
+      return;
+    }
+
+    const showLogo = (): void => {
+      splash.classList.add("show-logo");
+
+      setTimeout(() => {
+        splash.classList.add("show-tagline");
+
+        setTimeout(() => {
+          splash.classList.add("fade-tagline");
+
+          setTimeout(() => {
+            splash.classList.add("fade-logo");
+
+            setTimeout(() => {
+              splash.classList.add("fade-out");
+
+              setTimeout(() => {
+                splash.classList.add("done");
+                resolve();
+              }, 500);
+            }, 400);
+          }, 400);
+        }, 1200);
+      }, 300);
+    };
+
+    setTimeout(showLogo, 100);
+  });
+}
+
 async function init(): Promise<void> {
   console.log("[Main] Initializing Astro Party");
+
+  await runSplashScreen();
 
   const viewport = createViewportController(game);
   await tryLockOrientation(viewport.isMobile);
@@ -141,6 +180,7 @@ async function init(): Promise<void> {
       lobbyUI.setMapUI(mapId, "remote");
       lobbyUI.updateMapSelector();
       mapPreviewUI.updateMapPreview(mapId);
+      screenController.updateStarfieldForMap(mapId);
     },
   });
 
