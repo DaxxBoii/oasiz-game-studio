@@ -10,7 +10,7 @@
 // ============= TYPES =============
 type GameState = "START" | "PLAYING" | "PAUSED" | "WAVE_UPGRADE" | "GAME_OVER";
 type UpgradeId = "doubleShot" | "pullSpeed" | "wobbleControl" | "magnetArrows" | "windReader" | "perfectReload" | "extraQuiver";
-type TargetKind = "normal" | "armored" | "decoy" | "runner" | "tiny";
+type TargetKind = "normal" | "runner" | "tiny" | "stoneColumn";
 
 interface Settings {
   music: boolean;
@@ -163,6 +163,14 @@ const CONFIG = {
   GROUND_RATIO: 0.15,
 
   RING_COLORS: ["#FFD700", "#FF4444", "#4488FF", "#333333", "#EEEEEE"],
+};
+
+const TARGET_KIND_PROGRESS_ORDER: TargetKind[] = ["tiny", "runner", "stoneColumn"];
+const TARGET_KIND_WEIGHTS: Record<TargetKind, number> = {
+  normal: 1,
+  tiny: 0.28,
+  runner: 0.24,
+  stoneColumn: 0.18,
 };
 
 const MOUNTED_SPRITE_ANCHOR = {
@@ -901,29 +909,31 @@ function getSpawnGapDx(spacingFactor: number): number {
 }
 
 function pickTargetKind(): TargetKind {
-  if (waveNumber <= 2) return "normal";
-  const roll = Math.random();
-  if (waveNumber >= 4 && roll < 0.2) return "tiny";
-  if (waveNumber >= 4 && roll < 0.38) return "runner";
-  if (waveNumber >= 5 && roll < 0.52) return "decoy";
-  if (waveNumber >= 6 && roll < 0.68) return "armored";
-  return "normal";
+  const unlockedCount = Math.max(0, waveNumber - 1);
+  const unlockedKinds = TARGET_KIND_PROGRESS_ORDER.slice(0, unlockedCount);
+  const candidates: TargetKind[] = ["normal", ...unlockedKinds];
+
+  let totalWeight = 0;
+  for (const kind of candidates) {
+    totalWeight += TARGET_KIND_WEIGHTS[kind] || 0;
+  }
+  if (totalWeight <= 0) return "normal";
+
+  let roll = Math.random() * totalWeight;
+  for (const kind of candidates) {
+    roll -= TARGET_KIND_WEIGHTS[kind] || 0;
+    if (roll <= 0) return kind;
+  }
+  return candidates[candidates.length - 1] || "normal";
 }
 
 function applyTargetKindStats(t: WorldTarget, kind: TargetKind): void {
   t.kind = kind;
-  if (kind === "armored") {
-    t.radius = 42;
-    t.maxHp = 2;
-    t.hp = 2;
-    t.speedMult = 1;
-    return;
-  }
-  if (kind === "decoy") {
-    t.radius = 36;
+  if (kind === "stoneColumn") {
+    t.radius = 34;
     t.maxHp = 1;
     t.hp = 1;
-    t.speedMult = 1.05;
+    t.speedMult = 1;
     return;
   }
   if (kind === "runner") {
@@ -1729,6 +1739,64 @@ function drawWorldTargets(): void {
     ctx.save();
     ctx.translate(screenX, groundY);
 
+    if (t.kind === "stoneColumn") {
+      const colW = Math.max(10, visualR * 1.08);
+      const colH = Math.max(26, postHeightPx + visualR * 0.9);
+      const colTopY = -colH;
+      const stoneGrad = ctx.createLinearGradient(0, colTopY, 0, 0);
+      stoneGrad.addColorStop(0, "#D5C9AF");
+      stoneGrad.addColorStop(0.5, "#B4A07D");
+      stoneGrad.addColorStop(1, "#8E7754");
+      ctx.fillStyle = stoneGrad;
+      ctx.beginPath();
+      ctx.roundRect(-colW * 0.5, colTopY, colW, colH, Math.max(4, 5 * gameScale));
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(74, 57, 35, 0.6)";
+      ctx.lineWidth = Math.max(1.1, 1.7 * gameScale);
+      ctx.beginPath();
+      ctx.moveTo(-colW * 0.3, colTopY + colH * 0.18);
+      ctx.lineTo(-colW * 0.22, colTopY + colH * 0.84);
+      ctx.moveTo(colW * 0.12, colTopY + colH * 0.1);
+      ctx.lineTo(colW * 0.2, colTopY + colH * 0.72);
+      ctx.stroke();
+
+      if (t.embeddedArrow) {
+        const arrowRenderScale = 3;
+        const arrowLen = 22 * gameScale * arrowRenderScale;
+        const impactX = t.embeddedArrow.offsetX * pxPerUnit;
+        const impactY = -t.postHeight * scale - t.embeddedArrow.offsetY * pxPerUnit;
+        const angle = t.embeddedArrow.angle;
+        const embedDepth = Math.max(8, arrowLen * 0.28);
+        const tipX = impactX;
+        const tipY = impactY;
+        const visibleTipX = tipX - Math.cos(angle) * embedDepth;
+        const visibleTipY = tipY - Math.sin(angle) * embedDepth;
+        const tailX = tipX - Math.cos(angle) * arrowLen;
+        const tailY = tipY - Math.sin(angle) * arrowLen;
+        const hs = 6 * gameScale * arrowRenderScale;
+        const shaftInset = hs * 0.78;
+        const shaftTipX = visibleTipX - Math.cos(angle) * shaftInset;
+        const shaftTipY = visibleTipY - Math.sin(angle) * shaftInset;
+
+        ctx.strokeStyle = "#5C3A1E";
+        ctx.lineWidth = Math.max(1.5, 2.5 * gameScale * arrowRenderScale * 0.7);
+        ctx.lineCap = "butt";
+        ctx.beginPath();
+        ctx.moveTo(tailX, tailY);
+        ctx.lineTo(shaftTipX, shaftTipY);
+        ctx.stroke();
+        ctx.lineCap = "round";
+
+        const fSize = 5 * gameScale * arrowRenderScale;
+        const backAngle = angle + Math.PI;
+        drawArrowFletching(tailX, tailY, backAngle, fSize);
+      }
+
+      ctx.restore();
+      continue;
+    }
+
     // Post
     ctx.strokeStyle = "#5A3A1E";
     ctx.lineWidth = Math.max(2, 3 * gameScale);
@@ -1827,36 +1895,6 @@ function drawWorldTargets(): void {
       const fSize = 5 * gameScale * arrowRenderScale;
       const backAngle = angle + Math.PI;
       drawArrowFletching(tailX, tailY, backAngle, fSize);
-    }
-
-    // Archetype cues for active targets.
-    if (!t.hit) {
-      if (t.kind === "armored") {
-        ctx.strokeStyle = "rgba(180, 192, 205, 0.9)";
-        ctx.lineWidth = Math.max(1.5, 2.2 * gameScale);
-        ctx.beginPath();
-        ctx.arc(0, faceY, Math.max(2, visualR * 1.08), 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (t.kind === "decoy") {
-        ctx.strokeStyle = "rgba(236, 90, 214, 0.9)";
-        ctx.lineWidth = Math.max(1.2, 2 * gameScale);
-        ctx.beginPath();
-        ctx.moveTo(-visualR * 0.6, faceY - visualR * 0.6);
-        ctx.lineTo(visualR * 0.6, faceY + visualR * 0.6);
-        ctx.moveTo(visualR * 0.6, faceY - visualR * 0.6);
-        ctx.lineTo(-visualR * 0.6, faceY + visualR * 0.6);
-        ctx.stroke();
-      }
-      if (t.maxHp > 1) {
-        const pipY = faceY - visualR - Math.max(6, 8 * gameScale);
-        for (let i = 0; i < t.maxHp; i++) {
-          const pipX = (i - (t.maxHp - 1) * 0.5) * Math.max(8, 10 * gameScale);
-          ctx.fillStyle = i < t.hp ? "#D8E3F1" : "rgba(216, 227, 241, 0.25)";
-          ctx.beginPath();
-          ctx.arc(pipX, pipY, Math.max(2.5, 3.5 * gameScale), 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
     }
 
     ctx.restore();
@@ -2917,6 +2955,11 @@ function update(dt: number): void {
           offsetY: scoreDy,
           angle: impactAngle,
         };
+        if (t.kind === "stoneColumn") {
+          playSfx("targetHit");
+          triggerHaptic("light");
+          break;
+        }
         spawnTargetRingBurst(t);
 
         let points = 2;
@@ -2937,9 +2980,6 @@ function update(dt: number): void {
           }
         }
         if (t.kind === "tiny") points += 2;
-        if (t.kind === "decoy") {
-          points = -3;
-        }
 
         t.hp = Math.max(0, t.hp - 1);
         const targetCleared = t.hp <= 0;
@@ -2947,7 +2987,7 @@ function update(dt: number): void {
 
         score += points;
         if (score < 0) score = 0;
-        if (targetCleared && t.kind !== "decoy") {
+        if (targetCleared) {
           waveHits += 1;
         }
         // Screen position for score popup (perspective-matched)
@@ -2956,8 +2996,8 @@ function update(dt: number): void {
         const sx = horse.screenX + lateralX * pxPerUnit;
         const hitBaseY = groundY;
         const sy = hitBaseY - t.postHeight * hitScale;
-        spawnScorePopup(sx, sy - 30, points, isBullseye && t.kind !== "decoy");
-        if (isBullseye && t.kind !== "decoy") {
+        spawnScorePopup(sx, sy - 30, points, isBullseye);
+        if (isBullseye) {
           spawnPerfectBurst(t);
           if (upgradeLevels.perfectReload > 0) {
             isReloading = false;
@@ -2966,7 +3006,7 @@ function update(dt: number): void {
           }
         }
 
-        playSfx(isBullseye && t.kind !== "decoy" ? "perfectHit" : "targetHit");
+        playSfx(isBullseye ? "perfectHit" : "targetHit");
         triggerHaptic("light");
         if (waveHits >= CONFIG.WAVE_HIT_GOAL) {
           waveClearedThisFrame = true;
