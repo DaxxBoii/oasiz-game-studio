@@ -16,6 +16,7 @@ import { spawnInitialAsteroids, scheduleAsteroidSpawn } from "./AsteroidSystem.j
 import { grantStartingPowerups } from "./PowerUpSystem.js";
 import { getMapDefinition } from "../maps.js";
 import { getScoreAwardForEvent } from "../scoring.js";
+import { getPilotDashWorldPoint } from "../../geometry/PilotRenderAnchors.js";
 
 // Keep both pilot dash trigger modes available for easy tuning/rollback.
 const PILOT_DASH_USE_EDGE_TRIGGER = false;
@@ -109,10 +110,11 @@ export function updatePilots(sim: SimState, dtSec: number): void {
         Math.cos(pilot.angle) * cfg.PILOT_DASH_FORCE,
         Math.sin(pilot.angle) * cfg.PILOT_DASH_FORCE,
       );
+      const dashPoint = getPilotDashWorldPoint(pilot);
       sim.hooks.onDashParticles({
         playerId,
-        x: pilot.x,
-        y: pilot.y,
+        x: dashPoint.x,
+        y: dashPoint.y,
         angle: pilot.angle,
         color: PLAYER_COLORS[player.colorIndex].primary,
         kind: "pilot",

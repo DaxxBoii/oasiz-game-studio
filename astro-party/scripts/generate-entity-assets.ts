@@ -40,6 +40,9 @@ interface EntityHardpointsMeta {
   joustLeft?: ShapePoint;
   joustRight?: ShapePoint;
   shieldRadii?: ShapePoint;
+  pilotDash?: ShapePoint;
+  pilotArmLeft?: ShapePoint;
+  pilotArmRight?: ShapePoint;
 }
 
 interface EntityRenderMeta {
@@ -54,6 +57,9 @@ const HARDPOINT_GUIDE_IDS = Object.freeze({
   joustLeft: "hardpoint-joust-left",
   joustRight: "hardpoint-joust-right",
   shield: "hardpoint-shield",
+  pilotDash: "hardpoint-pilot-dash",
+  pilotArmLeft: "hardpoint-pilot-arm-left",
+  pilotArmRight: "hardpoint-pilot-arm-right",
 });
 
 function deriveCenterOfGravity(vertices: ReadonlyArray<ShapePoint>): ShapePoint {
@@ -256,6 +262,27 @@ function parseHardpointsRecord(
       fileName,
     );
   }
+  if (record.pilotDash !== undefined) {
+    out.pilotDash = parsePointRecord(
+      record.pilotDash,
+      `${fieldPath}.pilotDash`,
+      fileName,
+    );
+  }
+  if (record.pilotArmLeft !== undefined) {
+    out.pilotArmLeft = parsePointRecord(
+      record.pilotArmLeft,
+      `${fieldPath}.pilotArmLeft`,
+      fileName,
+    );
+  }
+  if (record.pilotArmRight !== undefined) {
+    out.pilotArmRight = parsePointRecord(
+      record.pilotArmRight,
+      `${fieldPath}.pilotArmRight`,
+      fileName,
+    );
+  }
 
   return out;
 }
@@ -420,6 +447,51 @@ function extractHardpointsFromGuideGroup(
         x: parseFiniteAttributeNumber(attrs, "rx", "hardpoint-shield.rx", fileName),
         y: parseFiniteAttributeNumber(attrs, "ry", "hardpoint-shield.ry", fileName),
       };
+    } else if (id === HARDPOINT_GUIDE_IDS.pilotDash) {
+      out.pilotDash = {
+        x: parseFiniteAttributeNumber(
+          attrs,
+          "cx",
+          "hardpoint-pilot-dash.x",
+          fileName,
+        ),
+        y: parseFiniteAttributeNumber(
+          attrs,
+          "cy",
+          "hardpoint-pilot-dash.y",
+          fileName,
+        ),
+      };
+    } else if (id === HARDPOINT_GUIDE_IDS.pilotArmLeft) {
+      out.pilotArmLeft = {
+        x: parseFiniteAttributeNumber(
+          attrs,
+          "cx",
+          "hardpoint-pilot-arm-left.x",
+          fileName,
+        ),
+        y: parseFiniteAttributeNumber(
+          attrs,
+          "cy",
+          "hardpoint-pilot-arm-left.y",
+          fileName,
+        ),
+      };
+    } else if (id === HARDPOINT_GUIDE_IDS.pilotArmRight) {
+      out.pilotArmRight = {
+        x: parseFiniteAttributeNumber(
+          attrs,
+          "cx",
+          "hardpoint-pilot-arm-right.x",
+          fileName,
+        ),
+        y: parseFiniteAttributeNumber(
+          attrs,
+          "cy",
+          "hardpoint-pilot-arm-right.y",
+          fileName,
+        ),
+      };
     }
 
     match = tagRegex.exec(groupMarkup);
@@ -540,6 +612,9 @@ function main(): void {
     "  joustLeft?: ShapePoint;\n" +
     "  joustRight?: ShapePoint;\n" +
     "  shieldRadii?: ShapePoint;\n" +
+    "  pilotDash?: ShapePoint;\n" +
+    "  pilotArmLeft?: ShapePoint;\n" +
+    "  pilotArmRight?: ShapePoint;\n" +
     "}\n\n" +
     "export interface GeneratedEntityRenderMeta {\n" +
     "  trail?: GeneratedEntityTrailMeta;\n" +

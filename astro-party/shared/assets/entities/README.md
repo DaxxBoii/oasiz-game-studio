@@ -14,7 +14,7 @@ This folder is the source of truth for entity art + collider geometry.
 - `<metadata id="render-meta"> ...json... </metadata>` is supported.
 - Current metadata keys:
   - `trail`: trail VFX tuning (`anchor`, `maxAgeSec`, radii, alpha, blur, sampling fields).
-  - `hardpoints`: optional explicit hardpoints (`muzzle`, `trail`, `joustLeft`, `joustRight`, `shieldRadii`).
+  - `hardpoints`: optional explicit hardpoints (`muzzle`, `trail`, `joustLeft`, `joustRight`, `shieldRadii`, `pilotDash`, `pilotArmLeft`, `pilotArmRight`).
 
 ## Editor hardpoint guide layer (optional)
 
@@ -26,6 +26,9 @@ This folder is the source of truth for entity art + collider geometry.
   - `hardpoint-joust-left` (`circle`)
   - `hardpoint-joust-right` (`circle`)
   - `hardpoint-shield` (`ellipse`, uses `rx/ry`)
+  - `hardpoint-pilot-dash` (`circle`)
+  - `hardpoint-pilot-arm-left` (`circle`)
+  - `hardpoint-pilot-arm-right` (`circle`)
 
 ## Add or update an entity
 

@@ -20,6 +20,7 @@ import {
   SHIP_VISUAL_REFERENCE_SIZE,
   getShipTrailWorldPoint,
 } from "../../../shared/geometry/ShipRenderAnchors";
+import { PILOT_EFFECT_LOCAL_POINTS } from "../../../shared/geometry/PilotRenderAnchors";
 import {
   SHIP_COLLIDER_VERTICES,
   transformLocalVertices,
@@ -1233,16 +1234,96 @@ export class Renderer {
     ctx.save();
     ctx.rotate(angle);
 
+    const swimIntensity = this.getPilotSwimArmIntensity(state);
+    const swimPhase = nowMs * 0.021;
+
     this.entitySprites.drawEntity(this.ctx, "pilot", {
       "slot-primary": color.primary,
       "slot-secondary": "#f4fbff",
       "slot-tertiary": "#1d2636",
       "slot-outline": "#ffffff",
     });
+    this.drawPilotSwimArms(ctx, swimPhase, swimIntensity, color.primary);
 
     ctx.restore();
 
     ctx.restore();
+  }
+
+  private getPilotSwimArmIntensity(state: PilotState): number {
+    const speed = Math.hypot(state.vx, state.vy);
+    return Math.max(0.7, Math.min(1.25, 0.72 + speed / 120));
+  }
+
+  private drawPilotSwimArms(
+    ctx: CanvasRenderingContext2D,
+    phase: number,
+    intensity: number,
+    armColor: string,
+  ): void {
+    const armFrequency = phase * (1 + (intensity - 0.7) * 0.55);
+    this.drawSinglePilotSwimArm(
+      ctx,
+      PILOT_EFFECT_LOCAL_POINTS.armLeft.x,
+      PILOT_EFFECT_LOCAL_POINTS.armLeft.y,
+      armFrequency,
+      intensity,
+      armColor,
+      -1,
+    );
+    this.drawSinglePilotSwimArm(
+      ctx,
+      PILOT_EFFECT_LOCAL_POINTS.armRight.x,
+      PILOT_EFFECT_LOCAL_POINTS.armRight.y,
+      armFrequency + Math.PI,
+      intensity,
+      armColor,
+      1,
+    );
+  }
+
+  private drawSinglePilotSwimArm(
+    ctx: CanvasRenderingContext2D,
+    anchorX: number,
+    anchorY: number,
+    phase: number,
+    intensity: number,
+    armColor: string,
+    verticalDirection: 1 | -1,
+  ): void {
+    const lateralBase = 8.4 + intensity * 2.3;
+    const lateralSwing = Math.sin(phase) * (2.8 + intensity * 1.2);
+    const trailingPull = Math.cos(phase) * (2.2 + intensity * 0.9);
+    const controlLift = Math.sin(phase * 0.5) * 1.2;
+
+    const endX = anchorX - 1.6 - trailingPull;
+    const endY = anchorY + verticalDirection * (lateralBase + lateralSwing);
+    const controlX = anchorX - 1.1 - trailingPull * 0.45;
+    const controlY =
+      anchorY +
+      verticalDirection * (lateralBase * 0.58 + lateralSwing * 0.72) +
+      controlLift;
+
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    ctx.quadraticCurveTo(controlX, controlY, endX, endY);
+    ctx.lineWidth = 3.8;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(226, 246, 255, 0.84)";
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(anchorX, anchorY);
+    ctx.quadraticCurveTo(controlX, controlY, endX, endY);
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = armColor;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(endX, endY, 1.45 + intensity * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = armColor;
+    ctx.fill();
   }
 
   // ============= ASTEROID RENDERING =============

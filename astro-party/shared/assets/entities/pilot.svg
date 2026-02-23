@@ -172,6 +172,22 @@
     <circle cx="15.4" cy="1.6" r="0.40" fill="var(--slot-secondary, #f5f5f5)" opacity="0.18"/>
   </g>
 
+  <!-- Editor-only dash FX guide (removed by generate-entity-assets via #editor-hardpoints) -->
+  <g id="editor-hardpoints">
+    <!-- Pilot dash hardpoint (used by runtime dash FX spawn) -->
+    <circle id="hardpoint-pilot-dash" cx="-10.6" cy="0" r="0.95" fill="#00ff9d" stroke="#ffffff" stroke-width="0.25"/>
+    <circle cx="-10.6" cy="0" r="1.75" fill="none" stroke="#00ff9d" stroke-width="0.22" opacity="0.8"/>
+    <path d="M -11.45 0 L -9.75 0 M -10.6 -0.85 L -10.6 0.85" stroke="#0b1120" stroke-width="0.18" opacity="0.9"/>
+
+    <!-- Arm anchor guides for swim animation -->
+    <circle id="hardpoint-pilot-arm-left" cx="-0.8" cy="-5.8" r="0.95" fill="#ff5ca8" stroke="#ffffff" stroke-width="0.25"/>
+    <circle id="hardpoint-pilot-arm-right" cx="-0.8" cy="5.8" r="0.95" fill="#ff5ca8" stroke="#ffffff" stroke-width="0.25"/>
+
+    <!-- Release fan reference: renderer uses pilotAngle + PI (backward in local -X) -->
+    <path d="M -10.6 0 L -16.4 0" stroke="#ffd65e" stroke-width="0.22" stroke-linecap="round" opacity="0.9"/>
+    <path d="M -16.4 0 L -14.95 -0.9 L -14.95 0.9 Z" fill="#ffd65e" opacity="0.9"/>
+  </g>
+
   <!-- Keep pilot collider stable for gameplay parity; M/L/Z only for extractor -->
   <path
     id="collider"

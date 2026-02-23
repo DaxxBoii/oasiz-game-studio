@@ -45,6 +45,9 @@ export interface EntityHardpointsMeta {
   joustLeft?: Readonly<ShapePoint>;
   joustRight?: Readonly<ShapePoint>;
   shieldRadii?: Readonly<ShapePoint>;
+  pilotDash?: Readonly<ShapePoint>;
+  pilotArmLeft?: Readonly<ShapePoint>;
+  pilotArmRight?: Readonly<ShapePoint>;
 }
 
 export interface EntityRenderMeta {
@@ -113,6 +116,15 @@ function scaleHardpointsMeta(
   }
   if (hardpoints.shieldRadii) {
     out.shieldRadii = scalePoint(hardpoints.shieldRadii, renderScale);
+  }
+  if (hardpoints.pilotDash) {
+    out.pilotDash = scalePoint(hardpoints.pilotDash, renderScale);
+  }
+  if (hardpoints.pilotArmLeft) {
+    out.pilotArmLeft = scalePoint(hardpoints.pilotArmLeft, renderScale);
+  }
+  if (hardpoints.pilotArmRight) {
+    out.pilotArmRight = scalePoint(hardpoints.pilotArmRight, renderScale);
   }
   return Object.freeze(out);
 }
