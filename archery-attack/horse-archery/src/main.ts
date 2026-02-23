@@ -1459,7 +1459,8 @@ function updateClouds(dt: number): void {
 }
 
 function drawCloud(c: Cloud): void {
-  ctx.globalAlpha = c.opacity;
+  const cloudVisibility = 1 - getDayNightDarkness() * 0.95;
+  ctx.globalAlpha = c.opacity * cloudVisibility;
   ctx.fillStyle = "#FFEEDD";
   const s = c.scale;
   ctx.beginPath();
@@ -1479,6 +1480,14 @@ function drawCloud(c: Cloud): void {
 
 function getParallaxShift(speedFactor: number): number {
   return world.cameraX * speedFactor * pxPerUnit;
+}
+
+function getDayNightDarkness(): number {
+  // Smooth full loop day->night->day where darkness is driven by moon altitude.
+  const phase = (environmentTime * 0.000045) % (Math.PI * 2);
+  const moonAltitude = Math.sin(phase + Math.PI);
+  const moonLight = Math.max(0, Math.min(1, (moonAltitude + 0.1) / 1.1));
+  return moonLight * moonLight;
 }
 
 function drawLayerRidge(
@@ -1526,23 +1535,45 @@ function updateWorld(dt: number): void {
 
 // ============= DRAWING =============
 function drawSky(): void {
+  const darkness = getDayNightDarkness();
+  const phase = (environmentTime * 0.000045) % (Math.PI * 2);
+  const sunAltitude = Math.sin(phase);
+  const moonPhase = phase + Math.PI;
+  const moonAltitude = Math.sin(moonPhase);
+  // Keep both celestial bodies visible around the horizon to avoid abrupt switches.
+  const sunVisibility = Math.max(0, Math.min(1, (sunAltitude + 0.14) / 0.34));
+  const moonVisibility = Math.max(0, Math.min(1, (moonAltitude + 0.14) / 0.34));
+  const sunX = w * (0.5 + Math.cos(phase) * 0.42);
+  const sunY = horizonY * (0.92 - sunAltitude * 0.66);
+  const moonX = w * (0.5 + Math.cos(moonPhase) * 0.42);
+  const moonY = horizonY * (0.92 - moonAltitude * 0.66);
   const grad = ctx.createLinearGradient(0, 0, 0, horizonY);
-  grad.addColorStop(0, "#10254F");
-  grad.addColorStop(0.28, "#4B2F7A");
-  grad.addColorStop(0.56, "#BA4E9C");
-  grad.addColorStop(0.82, "#F18F6B");
-  grad.addColorStop(1, "#FFD47E");
+  const daySkyTop = [102, 185, 242];
+  const daySkyMid = [142, 210, 255];
+  const daySkyLow = [192, 224, 255];
+  const nightSkyTop = [2, 6, 17];
+  const nightSkyMid = [11, 23, 48];
+  const nightSkyLow = [20, 36, 62];
+  const blend = darkness;
+  const topR = Math.round(daySkyTop[0] * (1 - blend) + nightSkyTop[0] * blend);
+  const topG = Math.round(daySkyTop[1] * (1 - blend) + nightSkyTop[1] * blend);
+  const topB = Math.round(daySkyTop[2] * (1 - blend) + nightSkyTop[2] * blend);
+  const midR = Math.round(daySkyMid[0] * (1 - blend) + nightSkyMid[0] * blend);
+  const midG = Math.round(daySkyMid[1] * (1 - blend) + nightSkyMid[1] * blend);
+  const midB = Math.round(daySkyMid[2] * (1 - blend) + nightSkyMid[2] * blend);
+  const lowR = Math.round(daySkyLow[0] * (1 - blend) + nightSkyLow[0] * blend);
+  const lowG = Math.round(daySkyLow[1] * (1 - blend) + nightSkyLow[1] * blend);
+  const lowB = Math.round(daySkyLow[2] * (1 - blend) + nightSkyLow[2] * blend);
+  grad.addColorStop(0, "rgb(" + topR + ", " + topG + ", " + topB + ")");
+  grad.addColorStop(0.45, "rgb(" + midR + ", " + midG + ", " + midB + ")");
+  grad.addColorStop(1, "rgb(" + lowR + ", " + lowG + ", " + lowB + ")");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, horizonY + 5);
 
-  // Sun at horizon center
-  const sunX = w * 0.5;
-  const sunY = horizonY * 0.85;
-  const sunR = 40;
-
+  const sunR = 38;
   const glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.3, sunX, sunY, sunR * 3);
-  glow.addColorStop(0, "rgba(255, 245, 195, 0.62)");
-  glow.addColorStop(0.45, "rgba(255, 159, 110, 0.26)");
+  glow.addColorStop(0, "rgba(255, 245, 195, " + (0.62 * sunVisibility).toFixed(3) + ")");
+  glow.addColorStop(0.45, "rgba(255, 159, 110, " + (0.26 * sunVisibility).toFixed(3) + ")");
   glow.addColorStop(1, "rgba(255, 120, 80, 0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
@@ -1576,6 +1607,43 @@ function drawSky(): void {
     ctx.ellipse(cx, cy, 120, 30, -0.02, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  const nightAlpha = moonVisibility * 0.82;
+  if (nightAlpha > 0.001) {
+    const moonR = 24;
+
+    // Dark sky veil first, then moon and stars above it.
+    ctx.fillStyle = "rgba(8, 14, 28, " + (darkness * 0.38).toFixed(3) + ")";
+    ctx.fillRect(0, 0, w, horizonY + 5);
+
+    const moonGlow = ctx.createRadialGradient(moonX, moonY, moonR * 0.2, moonX, moonY, moonR * 2.2);
+    moonGlow.addColorStop(0, "rgba(214, 234, 255, " + (0.35 * nightAlpha).toFixed(3) + ")");
+    moonGlow.addColorStop(1, "rgba(214, 234, 255, 0)");
+    ctx.fillStyle = moonGlow;
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, moonR * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(228, 240, 255, " + (0.72 * nightAlpha).toFixed(3) + ")";
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Deterministic starfield with subtle twinkle.
+    for (let i = 0; i < 70; i++) {
+      const fx = (Math.sin(i * 97.13) * 43758.5453) % 1;
+      const fy = (Math.sin(i * 53.71 + 8.2) * 24634.6345) % 1;
+      const x = (fx < 0 ? fx + 1 : fx) * w;
+      const y = (fy < 0 ? fy + 1 : fy) * (horizonY * 0.9);
+      const twinkle = 0.5 + 0.5 * Math.sin(environmentTime * 0.003 + i * 1.7);
+      const a = nightAlpha * (0.14 + twinkle * 0.42);
+      const r = 0.8 + (i % 3) * 0.5;
+      ctx.fillStyle = "rgba(228, 240, 255, " + a.toFixed(3) + ")";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
 function drawMountains(): void {
@@ -1585,6 +1653,7 @@ function drawMountains(): void {
 }
 
 function drawGround(): void {
+  const darkness = getDayNightDarkness();
   // Base ground gradient stays green for the distant flatlands.
   const grad = ctx.createLinearGradient(0, horizonY, 0, h);
   grad.addColorStop(0, "#2F8B8A");
@@ -1631,6 +1700,13 @@ function drawGround(): void {
       else ctx.lineTo(x, py);
     }
     ctx.stroke();
+  }
+
+  // Keep terrain readable at night with a simple cool tint.
+  const terrainNightAlpha = darkness * 0.56;
+  if (terrainNightAlpha > 0.001) {
+    ctx.fillStyle = "rgba(10, 16, 24, " + terrainNightAlpha.toFixed(3) + ")";
+    ctx.fillRect(0, horizonY, w, h - horizonY);
   }
 }
 
