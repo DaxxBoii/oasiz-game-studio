@@ -556,34 +556,73 @@ export class LevelSpawner {
 
       const leftWidth = gapX - laneLeft;
       if (leftWidth >= minSeg) {
-        chunk.platforms.push({
-          x: laneLeft,
-          y: shelfY,
-          width: leftWidth,
-          height: thickness,
-          isWall: false,
-          breakable: false,
-          oneWay: true,
-          hp: 0,
-          chunkIndex: chunk.index,
-        });
+        if (this.canPlaceOneWayWithGap(chunk.platforms, laneLeft, shelfY, leftWidth, thickness)) {
+          chunk.platforms.push({
+            x: laneLeft,
+            y: shelfY,
+            width: leftWidth,
+            height: thickness,
+            isWall: false,
+            breakable: false,
+            oneWay: true,
+            hp: 0,
+            chunkIndex: chunk.index,
+          });
+        }
       }
 
       const rightWidth = laneRight - gapRight;
       if (rightWidth >= minSeg) {
-        chunk.platforms.push({
-          x: gapRight,
-          y: shelfY,
-          width: rightWidth,
-          height: thickness,
-          isWall: false,
-          breakable: false,
-          oneWay: true,
-          hp: 0,
-          chunkIndex: chunk.index,
-        });
+        if (this.canPlaceOneWayWithGap(chunk.platforms, gapRight, shelfY, rightWidth, thickness)) {
+          chunk.platforms.push({
+            x: gapRight,
+            y: shelfY,
+            width: rightWidth,
+            height: thickness,
+            isWall: false,
+            breakable: false,
+            oneWay: true,
+            hp: 0,
+            chunkIndex: chunk.index,
+          });
+        }
       }
     }
+  }
+
+  // One-way platforms should keep breathing room:
+  // - same row: at least one full block gap between segments
+  // - stacked rows: no direct overlap when vertically adjacent
+  private canPlaceOneWayWithGap(
+    platforms: Platform[],
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): boolean {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const sameRowGap = BLOCK;
+    const verticalGap = BLOCK;
+    const left = x;
+    const right = x + width;
+
+    for (const p of platforms) {
+      if (!p.oneWay) continue;
+      const pLeft = p.x;
+      const pRight = p.x + p.width;
+
+      const sameRow = Math.abs(p.y - y) <= height + 2;
+      if (sameRow) {
+        const gap = Math.max(left, pLeft) - Math.min(right, pRight);
+        if (gap < sameRowGap) return false;
+      }
+
+      const nearVertical = Math.abs(p.y - y) < verticalGap + height;
+      const overlapsX = right > pLeft && left < pRight;
+      if (nearVertical && overlapsX) return false;
+    }
+
+    return true;
   }
 
   // Breakable tiles directly under an unbreakable solid become unbreakable.
@@ -650,6 +689,7 @@ export class LevelSpawner {
       const x = playableLeft + rng.range(0, playableWidth - width);
       const overlaps = this.overlapsAnyPlatform(chunk.platforms, x, y - 2, width, thickness + 4, 6);
       if (overlaps) continue;
+      if (!this.canPlaceOneWayWithGap(chunk.platforms, x, y, width, thickness)) continue;
 
       chunk.platforms.push({
         x,

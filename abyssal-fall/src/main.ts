@@ -1575,20 +1575,22 @@ class Game {
       const platformTop = platform.y;
       const platformLeft = platform.x;
       const platformRight = platform.x + platform.width;
+      const overlapsX = playerRight > platformLeft && playerLeft < platformRight;
+      const crossedTop = prevBottom <= platformTop + 1 && playerBottom >= platformTop;
       
       // Check if player is standing on top of this platform
       const isOnTop = playerBottom >= platformTop - 2 && 
                       playerBottom <= platformTop + 8 &&
-                      playerRight > platformLeft && 
-                      playerLeft < platformRight;
+                      overlapsX;
       
-      if (platform.oneWay) {
-        const crossedFromAbove = prevBottom <= platformTop + 2;
-        if (isOnTop && crossedFromAbove && player.vy >= 0) {
+      if (player.vy >= 0 && overlapsX) {
+        if (platform.oneWay) {
+          if (crossedTop) {
+            this.playerController.land(platformTop);
+          }
+        } else if (crossedTop || isOnTop) {
           this.playerController.land(platformTop);
         }
-      } else if (isOnTop && player.vy >= 0) {
-        this.playerController.land(platformTop);
       }
     }
 
