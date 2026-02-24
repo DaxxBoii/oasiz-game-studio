@@ -6,7 +6,7 @@
  */
 
 import { CONFIG } from "./config";
-import { BaseEnemy, EnemyFactory, EnemyType } from "./enemies";
+import { BaseEnemy, EnemyFactory, EnemyType, StaticEnemy } from "./enemies";
 
 // ============= SEEDED RNG =============
 export class SeededRNG {
@@ -437,6 +437,7 @@ export class LevelSpawner {
     this.normalizeBreakablesUnderUnbreakables(chunk);
     this.enforceBreakableStructureCap(chunk);
     this.enforceBreakableRunCap(chunk);
+    this.ensureNoPocketSoftlocks(chunk);
   }
 
   // Guarantee at least a 2-block-wide no-break route through each chunk.
@@ -880,6 +881,209 @@ export class LevelSpawner {
     }
   }
 
+  // Final safety post-pass:
+  // detect 1-cell pockets that can trap the player against a wall/floor combo
+  // and carve a nearby breakable cell to guarantee an escape route.
+  private ensureNoPocketSoftlocks(chunk: Chunk): void {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const rows = Math.max(1, Math.floor(CONFIG.CHUNK_HEIGHT / BLOCK));
+    const cols = Math.max(1, Math.floor(CONFIG.INTERNAL_WIDTH / BLOCK));
+    const maxEscapeScanRows = 4;
+    const maxFixes = 24;
+
+    const toKey = (row: number, col: number): string => `${row}:${col}`;
+
+    for (let fixes = 0; fixes < maxFixes; fixes++) {
+      const blocked = new Set<string>();
+      const breakable = new Set<string>();
+
+      for (const p of chunk.platforms) {
+        if (p.oneWay) continue;
+        const startCol = Math.max(0, Math.floor(p.x / BLOCK));
+        const endCol = Math.min(cols - 1, Math.floor((p.x + p.width - 1) / BLOCK));
+        const startRow = Math.max(0, Math.floor((p.y - chunk.y) / BLOCK));
+        const endRow = Math.min(rows - 1, Math.floor((p.y + p.height - 1 - chunk.y) / BLOCK));
+        for (let row = startRow; row <= endRow; row++) {
+          for (let col = startCol; col <= endCol; col++) {
+            const key = toKey(row, col);
+            blocked.add(key);
+            if (p.breakable) breakable.add(key);
+          }
+        }
+
+        // Slightly de-rectangularize larger islands while keeping connected chunks.
+        if (cells.length >= 6 && rng.chance(0.35)) {
+          const cornerIndex = rng.int(0, 1) === 0 ? 0 : widthBlocks - 1;
+          const removeRow = rng.int(0, 1) === 0 ? baseRow : baseRow + heightBlocks - 1;
+          const idx = cells.findIndex((c) => c.row === removeRow && c.col === startCol + cornerIndex);
+          if (idx >= 0) cells.splice(idx, 1);
+        }
+
+        let valid = true;
+        for (const c of cells) {
+          if (!canPlaceTile(c.row, c.col)) {
+            valid = false;
+            break;
+          }
+        }
+        if (!valid) continue;
+
+        for (const c of cells) {
+          chunk.platforms.push({
+            x: c.col * BLOCK,
+            y: chunk.y + c.row * BLOCK,
+            width: BLOCK,
+            height: BLOCK,
+            isWall: false,
+            breakable: true,
+            hp: 1,
+            chunkIndex: chunk.index,
+          });
+        }
+        madeIsland = true;
+      }
+
+      const isBlocked = (row: number, col: number): boolean => {
+        if (col < 0 || col >= cols) return true;
+        if (row < 0) return false;
+        if (row >= rows) return true;
+        return blocked.has(toKey(row, col));
+      };
+      const isBreakable = (row: number, col: number): boolean => {
+        if (col < 0 || col >= cols || row < 0 || row >= rows) return false;
+        return breakable.has(toKey(row, col));
+      };
+
+      let carved = false;
+
+      for (let row = 1; row < rows - 1 && !carved; row++) {
+        for (let col = 1; col < cols - 1 && !carved; col++) {
+          const here = toKey(row, col);
+          if (blocked.has(here)) continue;
+          if (!isBlocked(row + 1, col)) continue; // no floor support
+          if (!isBlocked(row, col - 1) || !isBlocked(row, col + 1)) continue; // not enclosed laterally
+
+          // If there is already a reachable side opening within jump range, this isn't a softlock.
+          let hasReachableExit = false;
+          for (let up = 0; up <= maxEscapeScanRows; up++) {
+            const rr = row - up;
+            if (rr < 0) {
+              hasReachableExit = true;
+              break;
+            }
+            if (isBlocked(rr, col)) break;
+            if (!isBlocked(rr, col - 1) || !isBlocked(rr, col + 1)) {
+              hasReachableExit = true;
+              break;
+            }
+          }
+          if (hasReachableExit) continue;
+
+          // Carve a nearby breakable side cell (prefer immediate height, then above).
+          for (let up = 0; up <= maxEscapeScanRows && !carved; up++) {
+            const rr = row - up;
+            if (rr < 0) break;
+            if (isBreakable(rr, col - 1) && this.carveBreakableCell(chunk, rr, col - 1)) {
+              carved = true;
+              break;
+            }
+            if (isBreakable(rr, col + 1) && this.carveBreakableCell(chunk, rr, col + 1)) {
+              carved = true;
+              break;
+            }
+          }
+
+          // Fallback: open ceiling above pocket if side breakables weren't available.
+          if (!carved) {
+            for (let up = 1; up <= maxEscapeScanRows; up++) {
+              const rr = row - up;
+              if (rr < 0) break;
+              if (isBreakable(rr, col) && this.carveBreakableCell(chunk, rr, col)) {
+                carved = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (!carved) break;
+    }
+  }
+
+  private carveBreakableCell(chunk: Chunk, row: number, col: number): boolean {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const cellX = col * BLOCK;
+    const cellY = chunk.y + row * BLOCK;
+    const cellRight = cellX + BLOCK;
+    const cellBottom = cellY + BLOCK;
+
+    for (let i = chunk.platforms.length - 1; i >= 0; i--) {
+      const p = chunk.platforms[i];
+      if (!p.breakable) continue;
+      if (cellX >= p.x + p.width || cellRight <= p.x || cellY >= p.y + p.height || cellBottom <= p.y) continue;
+
+      chunk.platforms.splice(i, 1);
+
+      const leftW = Math.max(0, cellX - p.x);
+      const rightW = Math.max(0, p.x + p.width - cellRight);
+      const topH = Math.max(0, cellY - p.y);
+      const bottomH = Math.max(0, p.y + p.height - cellBottom);
+
+      if (leftW > 0) {
+        chunk.platforms.push({
+          x: p.x,
+          y: p.y,
+          width: leftW,
+          height: p.height,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (rightW > 0) {
+        chunk.platforms.push({
+          x: cellRight,
+          y: p.y,
+          width: rightW,
+          height: p.height,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (topH > 0) {
+        chunk.platforms.push({
+          x: Math.max(p.x, cellX),
+          y: p.y,
+          width: Math.min(p.x + p.width, cellRight) - Math.max(p.x, cellX),
+          height: topH,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (bottomH > 0) {
+        chunk.platforms.push({
+          x: Math.max(p.x, cellX),
+          y: cellBottom,
+          width: Math.min(p.x + p.width, cellRight) - Math.max(p.x, cellX),
+          height: bottomH,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   // Hard post-pass: any connected breakable structure (4-neighbor adjacency)
   // can never exceed BREAKABLE_CHUNK_MAX_BLOCKS tiles.
   private enforceBreakableStructureCap(chunk: Chunk): void {
@@ -1283,18 +1487,31 @@ export class LevelSpawner {
     // Weighted spawn chances for enemy types (STATIC is rarer since it shoots)
     const getWeightedEnemyType = (): EnemyType => {
       const roll = rng.range(0, 1);
-      
-      // If EXPLODER is available (chunk >= 5): 20% STATIC, 50% HORIZONTAL, 30% EXPLODER
-      // Otherwise: 25% STATIC, 75% HORIZONTAL
-      if (enemyTypes.includes("EXPLODER")) {
-        if (roll < 0.20) return "STATIC";
-        if (roll < 0.70) return "HORIZONTAL";
+
+      // With PUFFER + EXPLODER available:
+      // 18% STATIC, 42% HORIZONTAL, 20% PUFFER, 20% EXPLODER
+      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("EXPLODER")) {
+        if (roll < 0.18) return "STATIC";
+        if (roll < 0.60) return "HORIZONTAL";
+        if (roll < 0.80) return "PUFFER";
         return "EXPLODER";
-      } else if (enemyTypes.includes("HORIZONTAL")) {
+      }
+
+      // With PUFFER available, before EXPLODER depth:
+      // 22% STATIC, 58% HORIZONTAL, 20% PUFFER
+      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("HORIZONTAL")) {
+        if (roll < 0.22) return "STATIC";
+        if (roll < 0.80) return "HORIZONTAL";
+        return "PUFFER";
+      }
+
+      // Legacy pool: 25% STATIC, 75% HORIZONTAL
+      if (enemyTypes.includes("HORIZONTAL")) {
         if (roll < 0.25) return "STATIC";
         return "HORIZONTAL";
       }
-      return "STATIC"; // Fallback if only STATIC is available
+
+      return "STATIC";
     };
     
     // Collect all non-wall platforms in this chunk for overlap checking
@@ -1315,6 +1532,7 @@ export class LevelSpawner {
       let enemyX = 0;
       let enemyY = 0;
       let placed = false;
+      let selectedStaticSurface: { x: number; y: number; width: number } | null = null;
       const maxAttempts = 15;
       
       // STATIC enemies must be placed on standable surfaces (platforms + wall ledges)
@@ -1357,6 +1575,11 @@ export class LevelSpawner {
           );
 
           if (!tooCloseToOther && hasHeadroom) {
+            selectedStaticSurface = {
+              x: surface.x,
+              y: surface.y,
+              width: surface.width,
+            };
             placed = true;
             break;
           }
@@ -1428,6 +1651,13 @@ export class LevelSpawner {
         BLOCK_SIZE
       );
       if (!hasHeadroom) continue;
+
+      if (type === "STATIC" && enemy instanceof StaticEnemy && selectedStaticSurface) {
+        const margin = 2;
+        const minX = selectedStaticSurface.x + margin;
+        const maxX = selectedStaticSurface.x + selectedStaticSurface.width - enemy.width - margin;
+        enemy.setMovementBounds(minX, maxX);
+      }
 
       enemy.chunkIndex = chunk.index;
       chunk.enemies.push(enemy);
@@ -1547,6 +1777,46 @@ export class LevelSpawner {
     const rows = wallProfile.leftWidths.length;
     const weedBodyWidth = 20;
     const weedBodyHeight = 20;
+    const trySpawnLedgeEntity = (
+      ledgeX: number,
+      ledgeY: number,
+      isLeft: boolean,
+    ): void => {
+      const bodyX = ledgeX - weedBodyWidth / 2;
+      const bodyY = ledgeY - weedBodyHeight;
+      const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
+      const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
+      const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
+      if (!insideLane || overlapsSolid || !hasHeadroom) return;
+
+      // Promote pufferfish from decorative weeds to an active enemy.
+      if (rng.chance(0.26)) {
+        const puffer = EnemyFactory.create("PUFFER", bodyX, bodyY, rng);
+        const pufferInsideLane = this.isRectInsideLane(chunk, wallProfile, puffer.x, puffer.y, puffer.width, puffer.height, 2);
+        const pufferOverlapsSolid = this.overlapsSolidPlatforms(chunk.platforms, puffer.x, puffer.y, puffer.width, puffer.height, 1);
+        const pufferHasHeadroom = this.hasSpawnHeadroom(chunk.platforms, puffer.x, puffer.y, puffer.width, BLOCK);
+        const tooCloseToOtherEnemy = chunk.enemies.some((e) => {
+          const dx = (e.x + e.width / 2) - (puffer.x + puffer.width / 2);
+          const dy = (e.y + e.height / 2) - (puffer.y + puffer.height / 2);
+          return dx * dx + dy * dy < 42 * 42;
+        });
+        if (pufferInsideLane && !pufferOverlapsSolid && pufferHasHeadroom && !tooCloseToOtherEnemy) {
+          puffer.chunkIndex = chunk.index;
+          chunk.enemies.push(puffer);
+          return;
+        }
+      }
+
+      // Non-puffer decorative weeds only.
+      const weedSpriteChoices = [0, 1, 3, 4, 6];
+      chunk.weeds.push({
+        x: ledgeX,
+        y: ledgeY,
+        spriteIndex: rng.pick(weedSpriteChoices),
+        flipX: rng.chance(0.5),
+        isLeft,
+      });
+    };
     
     // A ledge forms when the row BELOW is wider than the row above.
     // The wider lower row protrudes further into the well, creating a shelf.
@@ -1565,20 +1835,7 @@ export class LevelSpawner {
           const ledgeX = (narrowEdge + wideEdge) / 2;
           // Top of the wider row = shelf surface
           const ledgeY = chunk.y + (r + 1) * BLOCK;
-          const bodyX = ledgeX - weedBodyWidth / 2;
-          const bodyY = ledgeY - weedBodyHeight;
-          const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
-          const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
-          const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
-          if (insideLane && !overlapsSolid && hasHeadroom) {
-            chunk.weeds.push({
-              x: ledgeX,
-              y: ledgeY,
-              spriteIndex: rng.int(0, 6),
-              flipX: rng.chance(0.5),
-              isLeft: true,
-            });
-          }
+          trySpawnLedgeEntity(ledgeX, ledgeY, true);
         }
       }
     }
@@ -1591,20 +1848,7 @@ export class LevelSpawner {
           const wideEdge = CONFIG.INTERNAL_WIDTH - wallProfile.rightWidths[r + 1] * BLOCK;
           const ledgeX = (narrowEdge + wideEdge) / 2;
           const ledgeY = chunk.y + (r + 1) * BLOCK;
-          const bodyX = ledgeX - weedBodyWidth / 2;
-          const bodyY = ledgeY - weedBodyHeight;
-          const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
-          const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
-          const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
-          if (insideLane && !overlapsSolid && hasHeadroom) {
-            chunk.weeds.push({
-              x: ledgeX,
-              y: ledgeY,
-              spriteIndex: rng.int(0, 6),
-              flipX: rng.chance(0.5),
-              isLeft: false,
-            });
-          }
+          trySpawnLedgeEntity(ledgeX, ledgeY, false);
         }
       }
     }
@@ -1635,7 +1879,11 @@ export class LevelSpawner {
       const chunk = this.getChunk(i);
       platforms.push(...chunk.platforms);
       enemies.push(...chunk.enemies);
-      gems.push(...chunk.gems.filter(g => !g.collected));
+      for (const gem of chunk.gems) {
+        if (!gem.collected) {
+          gems.push(gem);
+        }
+      }
       weeds.push(...chunk.weeds);
     }
     

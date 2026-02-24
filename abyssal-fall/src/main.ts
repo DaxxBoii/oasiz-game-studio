@@ -9,13 +9,30 @@ import { CONFIG } from "./config";
 import { LevelSpawner, Entity, Platform, Gem, BaseEnemy, Weed } from "./world";
 import { PlayerController, InputState } from "./player";
 import { PowerUpManager, PowerUpOrb, POWERUP_INFO, POWERUP_CONSTANTS, PowerUpType } from "./powerups";
-import { EnemyBullet, StaticEnemy } from "./enemies";
+import { EnemyBullet, PufferEnemy, StaticEnemy } from "./enemies";
 
 // ============= TYPES =============
 interface Settings {
   music: boolean;
   fx: boolean;
   haptics: boolean;
+}
+
+interface HudRefs {
+  scoreEl: HTMLElement | null;
+  depthEl: HTMLElement | null;
+  ammoEl: HTMLElement | null;
+  comboEl: HTMLElement | null;
+  ammoSliderFill: HTMLElement | null;
+  hpBar: HTMLElement | null;
+  hpBubbles: HTMLElement[];
+  powerupBar: HTMLElement | null;
+}
+
+interface ChunkPlatformCache {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  dirty: boolean;
 }
 
 // ============= GAME STATE =============
@@ -33,9 +50,29 @@ class Game {
   private droppedGems: Gem[] = [];
   private droppedGemPool: Gem[] = [];
   private activePlatforms: Platform[] = [];
+  private activeWallPlatforms: Platform[] = [];
   private activeWeeds: Weed[] = [];
   private brokenWeeds: Set<string> = new Set();
+  private stompedWeeds: Map<string, { weed: Weed; timer: number }> = new Map();
   private enemyBullets: EnemyBullet[] = [];
+  private platformBuckets: Map<string, Platform[]> = new Map();
+  private readonly PLATFORM_BUCKET_SIZE: number = 64;
+  private chunkPlatformCache: Map<number, ChunkPlatformCache> = new Map();
+  private hudRefs: HudRefs = {
+    scoreEl: null,
+    depthEl: null,
+    ammoEl: null,
+    comboEl: null,
+    ammoSliderFill: null,
+    hpBar: null,
+    hpBubbles: [],
+    powerupBar: null,
+  };
+  private prevHudScore: number = -1;
+  private prevHudDepth: number = -1;
+  private prevHudAmmo: string = "";
+  private prevHudAmmoPercent: number = -1;
+  private prevHudCombo: number = -1;
   
   // Powerup state
   private lastShotEffects: { triggerBlast: boolean; triggerLightning: boolean; triggerLaser: boolean } = { triggerBlast: false, triggerLightning: false, triggerLaser: false };
@@ -52,6 +89,9 @@ class Game {
   private scoreEnemies: number = 0;
   private scoreGems: number = 0;
   private scoreBreakables: number = 0;
+  private enemyKillCount: number = 0;
+  private gemCollectCount: number = 0;
+  private breakableDestroyCount: number = 0;
   private gameOverTimers: number[] = [];
   private frameCount: number = 0;
   
@@ -71,6 +111,7 @@ class Game {
   private weedsImg: HTMLImageElement | null = null;
   private menuCrabImg: HTMLImageElement | null = null;
   private menuCrabFrame: number = 0;
+  private readonly SUBMARINE_DRAW_SIZE: number = 64;
   
   // Screen shake
   private screenShakeIntensity: number = 0;
@@ -100,7 +141,7 @@ class Game {
     maxFrames: number;
     color: string;
     direction: number;
-    spriteType: "shark" | "crab" | "squid"; // Which hurt sprite to use
+    spriteType: "shark" | "crab" | "squid" | "puffer"; // Which hurt sprite to use
   }[] = [];
   
   // Hurt sprite sheets (loaded once, shared by all hurt animations)
@@ -162,6 +203,7 @@ class Game {
   }[] = [];
   private deathFreezeFrames: number = 0;
   private deathFreezeKiller: { x: number; y: number } | null = null;
+  private readonly DEATH_FREEZE_DURATION_FRAMES: number = 180;
   
   // Track previous HP for bubble pop detection
   private previousHp: number = CONFIG.PLAYER_MAX_HP;
@@ -185,6 +227,13 @@ class Game {
   private laserBuffer: AudioBuffer | null = null;
   private gemBuffer: AudioBuffer | null = null;
   private enemyCrunchBuffer: AudioBuffer | null = null;
+  private blastBuffer: AudioBuffer | null = null;
+  private lightningBuffer: AudioBuffer | null = null;
+  private shieldBuffer: AudioBuffer | null = null;
+  private readonly UNIFORM_SFX_VOLUME: number = 0.55;
+  private readonly UNIFORM_SYNTH_PEAK_GAIN: number = 0.14;
+  private readonly MAGNET_RADIUS: number = 200;
+  private magnetPullSfxCooldownFrames: number = 0;
   
   // Menu animation entities
   private menuEnemies: BaseEnemy[] = [];
@@ -215,6 +264,7 @@ class Game {
     
     // Ensure DOM is in correct initial state (handles WebView soft reloads)
     this.resetDOMState();
+    this.cacheHudRefs();
     
     // Start game loop
     this.gameLoop();
@@ -545,7 +595,96 @@ class Game {
       ammoSlider.style.transform = "translateY(-50%)";
     }
   }
-  
+
+  private cacheHudRefs(): void {
+    this.hudRefs.scoreEl = document.getElementById("score");
+    this.hudRefs.depthEl = document.getElementById("depth");
+    this.hudRefs.ammoEl = document.getElementById("ammo");
+    this.hudRefs.comboEl = document.getElementById("combo");
+    this.hudRefs.ammoSliderFill = document.getElementById("ammo-slider-fill");
+    this.hudRefs.hpBar = document.getElementById("hp-bar");
+    this.hudRefs.powerupBar = document.getElementById("powerup-bar");
+    this.hudRefs.hpBubbles = this.hudRefs.hpBar
+      ? Array.from(this.hudRefs.hpBar.querySelectorAll(".hp-bubble")) as HTMLElement[]
+      : [];
+  }
+
+  private resetHudStateCache(): void {
+    this.prevHudScore = -1;
+    this.prevHudDepth = -1;
+    this.prevHudAmmo = "";
+    this.prevHudAmmoPercent = -1;
+    this.prevHudCombo = -1;
+  }
+
+  private getBucketKey(col: number, row: number): string {
+    return `${col}:${row}`;
+  }
+
+  private rebuildPlatformBuckets(): void {
+    this.platformBuckets.clear();
+    const size = this.PLATFORM_BUCKET_SIZE;
+    for (const platform of this.activePlatforms) {
+      const minCol = Math.floor(platform.x / size);
+      const maxCol = Math.floor((platform.x + platform.width) / size);
+      const minRow = Math.floor(platform.y / size);
+      const maxRow = Math.floor((platform.y + platform.height) / size);
+      for (let col = minCol; col <= maxCol; col++) {
+        for (let row = minRow; row <= maxRow; row++) {
+          const key = this.getBucketKey(col, row);
+          const list = this.platformBuckets.get(key);
+          if (list) {
+            list.push(platform);
+          } else {
+            this.platformBuckets.set(key, [platform]);
+          }
+        }
+      }
+    }
+  }
+
+  private getPlatformsNearRect(x: number, y: number, width: number, height: number, padding: number = 0): Platform[] {
+    const size = this.PLATFORM_BUCKET_SIZE;
+    const minCol = Math.floor((x - padding) / size);
+    const maxCol = Math.floor((x + width + padding) / size);
+    const minRow = Math.floor((y - padding) / size);
+    const maxRow = Math.floor((y + height + padding) / size);
+    const candidates: Platform[] = [];
+    const seen = new Set<Platform>();
+    for (let col = minCol; col <= maxCol; col++) {
+      for (let row = minRow; row <= maxRow; row++) {
+        const key = this.getBucketKey(col, row);
+        const bucket = this.platformBuckets.get(key);
+        if (!bucket) continue;
+        for (const platform of bucket) {
+          if (seen.has(platform)) continue;
+          seen.add(platform);
+          candidates.push(platform);
+        }
+      }
+    }
+    return candidates;
+  }
+
+  private clearPlatformChunkCache(): void {
+    this.chunkPlatformCache.clear();
+  }
+
+  private markChunkPlatformCacheDirty(chunkIndex: number): void {
+    const cache = this.chunkPlatformCache.get(chunkIndex);
+    if (cache) cache.dirty = true;
+  }
+
+  private cleanupChunkPlatformCache(cameraY: number): void {
+    const currentChunk = Math.floor(cameraY / CONFIG.CHUNK_HEIGHT);
+    const minChunk = currentChunk - 4;
+    for (const chunkIndex of this.chunkPlatformCache.keys()) {
+      if (chunkIndex < minChunk) {
+        this.chunkPlatformCache.delete(chunkIndex);
+      }
+    }
+  }
+
   private initDitherPattern(): void {
     // Create an offscreen canvas for processing
     this.ditherCanvas = document.createElement("canvas");
@@ -676,7 +815,7 @@ class Game {
       console.log("[Game] Submarine sprite loaded");
     };
     this.submarineImg.src = "assets/submarine.png";
-    
+
     // Load weeds sprite sheet (4 cols x 2 rows, 7 sprites)
     this.weedsImg = new Image();
     this.weedsImg.onload = () => {
@@ -761,6 +900,21 @@ class Game {
       this.enemyCrunchBuffer = buf;
       console.log("[loadAudio]", "Enemy crunch audio decoded");
     });
+
+    this.decodeAudioFile("assets/sfx/bubble-laser-fx.wav").then((buf) => {
+      this.blastBuffer = buf;
+      console.log("[loadAudio]", "Blast audio decoded");
+    });
+
+    this.decodeAudioFile("assets/sfx/lightning-zap.mp3").then((buf) => {
+      this.lightningBuffer = buf;
+      console.log("[loadAudio]", "Lightning audio decoded");
+    });
+
+    this.decodeAudioFile("assets/sfx/shield-hit.mp3").then((buf) => {
+      this.shieldBuffer = buf;
+      console.log("[loadAudio]", "Shield audio decoded");
+    });
   }
   
   private getAudioCtx(): AudioContext {
@@ -803,12 +957,180 @@ class Game {
   
   private playBulletSound(): void {
     if (!this.settings.fx) return;
-    this.playSfx(this.bulletBuffer, 0.5);
+    this.playSfx(this.bulletBuffer, this.UNIFORM_SFX_VOLUME);
   }
   
   private playLaserSound(): void {
     if (!this.settings.fx) return;
-    this.playSfx(this.laserBuffer, 1.0);
+    this.playSfx(this.laserBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playGemSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.gemBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playHurtSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.1;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(120, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  private playDeathSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.22;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(170, now);
+    osc.frequency.exponentialRampToValueAtTime(52, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  private startDeathFreeze(killerX: number, killerY: number): void {
+    if (this.deathFreezeFrames > 0) return;
+    this.deathFreezeFrames = this.DEATH_FREEZE_DURATION_FRAMES;
+    this.deathFreezeKiller = { x: killerX, y: killerY };
+    this.playDeathSound();
+    this.triggerHaptic("error");
+  }
+
+  private triggerPlayerDeath(killerX: number, killerY: number): void {
+    this.startDeathFreeze(killerX, killerY);
+  }
+
+  private getDeathFreezeZoom(): number {
+    if (this.deathFreezeFrames <= 0) return 1;
+    const elapsed = this.DEATH_FREEZE_DURATION_FRAMES - this.deathFreezeFrames;
+    const t = Math.max(0, Math.min(1, elapsed / this.DEATH_FREEZE_DURATION_FRAMES));
+    const easeOut = 1 - Math.pow(1 - t, 3);
+    return 1 + easeOut * 0.18;
+  }
+
+  private applyPlayerDamage(killerX: number, killerY: number): void {
+    if (this.powerUpManager.hasPowerUp("SHIELD")) return;
+    if (this.playerController.isInvulnerable()) return;
+    const player = this.playerController.getPlayer();
+    this.playerController.takeDamage();
+    this.spawnDamageText(player.x, player.y - player.height * 0.6, "-1");
+    this.playHurtSound();
+    if (this.playerController.isDead()) {
+      this.triggerPlayerDeath(killerX, killerY);
+    }
+  }
+
+  private playEnemyCrunchSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.enemyCrunchBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playBlockBreakSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.07;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  private playBlastSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.blastBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playLightningSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.lightningBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playShieldSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.shieldBuffer, this.UNIFORM_SFX_VOLUME);
+  }
+
+  private playMagnetPullSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.045;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(920, now);
+    osc.frequency.exponentialRampToValueAtTime(680, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  private playPufferBoingSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.11;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.045);
+    osc.frequency.exponentialRampToValueAtTime(250, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN * 1.08, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
   }
 
   private playGemSound(): void {
@@ -951,6 +1273,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.add("hidden");
     document.getElementById("ammo-slider")?.classList.add("hidden");
     document.getElementById("hp-bar")?.classList.add("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     // Hide settings modal
     document.getElementById("settings-modal")?.classList.add("hidden");
@@ -1118,6 +1441,9 @@ class Game {
     this.scoreEnemies = 0;
     this.scoreGems = 0;
     this.scoreBreakables = 0;
+    this.enemyKillCount = 0;
+    this.gemCollectCount = 0;
+    this.breakableDestroyCount = 0;
     this.maxDepth = 0;
     this.frameCount = 0;
     this.cameraY = 0;
@@ -1131,9 +1457,12 @@ class Game {
     this.enemyBullets = [];
     this.releaseAllDroppedGems();
     this.brokenWeeds.clear();
+    this.stompedWeeds.clear();
     this.damageTexts = [];
     this.deathFreezeFrames = 0;
     this.deathFreezeKiller = null;
+    this.clearPlatformChunkCache();
+    this.resetHudStateCache();
     
     // Reset level spawner
     this.levelSpawner.reset();
@@ -1150,8 +1479,8 @@ class Game {
     this.previousHp = CONFIG.PLAYER_MAX_HP;
     
     // Reset bubble states
-    const bubbles = document.querySelectorAll(".hp-bubble");
-    bubbles.forEach((bubble) => {
+    this.cacheHudRefs();
+    this.hudRefs.hpBubbles.forEach((bubble) => {
       bubble.classList.remove("popped", "empty");
     });
     
@@ -1163,6 +1492,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.remove("hidden");
     document.getElementById("ammo-slider")?.classList.remove("hidden");
     document.getElementById("hp-bar")?.classList.remove("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     // Start ambience music
     this.startAmbience();
@@ -1191,6 +1521,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.add("hidden");
     document.getElementById("ammo-slider")?.classList.add("hidden");
     document.getElementById("hp-bar")?.classList.add("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     this.triggerHaptic("error");
   }
@@ -1232,7 +1563,7 @@ class Game {
     const killedByFall = this.playerController.checkKillPlane(this.cameraY);
     if (killedByFall) {
       const p = this.playerController.getPlayer();
-      this.startDeathFreeze(p.x, this.cameraY + CONFIG.INTERNAL_HEIGHT + 70);
+      this.triggerPlayerDeath(p.x, this.cameraY + CONFIG.INTERNAL_HEIGHT + 70);
       return;
     }
     
@@ -1269,13 +1600,16 @@ class Game {
     
     // 10. Cleanup
     this.levelSpawner.cleanupChunks(this.cameraY);
+    this.cleanupChunkPlatformCache(this.cameraY);
     
     // Update HUD
     this.updateHUD();
     
     // Check fail states
     if (this.playerController.isDead() && this.deathFreezeFrames <= 0) {
-      this.gameOver();
+      const p = this.playerController.getPlayer();
+      this.triggerPlayerDeath(p.x, p.y);
+      return;
     }
   }
   
@@ -1283,8 +1617,16 @@ class Game {
     const visible = this.levelSpawner.getVisibleEntities(this.cameraY, CONFIG.INTERNAL_HEIGHT);
     this.activeEnemies = visible.enemies;
     this.activePlatforms = visible.platforms;
+    this.activeWallPlatforms = this.activePlatforms.filter((p) => p.isWall);
     this.activeGems = visible.gems;
-    this.activeWeeds = visible.weeds.filter((weed) => !this.brokenWeeds.has(this.getWeedKey(weed)));
+    this.activeWeeds = [];
+    for (const weed of visible.weeds) {
+      if (!this.brokenWeeds.has(this.getWeedKey(weed))) {
+        this.activeWeeds.push(weed);
+      }
+    }
+    this.rebuildPlatformBuckets();
+    this.updateStompedWeeds();
     
     const player = this.playerController.getPlayer();
     
@@ -1292,9 +1634,13 @@ class Game {
     for (const enemy of this.activeEnemies) {
       enemy.update(player.x, player.y);
 
+      if (enemy instanceof PufferEnemy && enemy.consumePuffStart()) {
+        this.playPufferBoingSound();
+      }
+
       // Horizontal movers should never enter cave walls.
       // Use actual generated wall geometry at this enemy's Y, not static WALL_WIDTH.
-      if (enemy.type === "HORIZONTAL" || enemy.type === "EXPLODER") {
+      if (enemy.type === "HORIZONTAL" || enemy.type === "EXPLODER" || enemy.type === "PUFFER") {
         this.constrainEnemyInsideWalls(enemy);
       }
       
@@ -1308,13 +1654,22 @@ class Game {
     }
   }
 
+  private updateStompedWeeds(): void {
+    for (const [key, stomped] of this.stompedWeeds) {
+      stomped.timer--;
+      if (stomped.timer <= 0) {
+        this.stompedWeeds.delete(key);
+        this.brokenWeeds.add(key);
+      }
+    }
+  }
+
   private constrainEnemyInsideWalls(enemy: BaseEnemy): void {
     const sampleY = enemy.y + enemy.height * 0.5;
     let leftBound = CONFIG.WALL_WIDTH;
     let rightBound = CONFIG.INTERNAL_WIDTH - CONFIG.WALL_WIDTH;
 
-    for (const platform of this.activePlatforms) {
-      if (!platform.isWall) continue;
+    for (const platform of this.activeWallPlatforms) {
       if (sampleY < platform.y || sampleY > platform.y + platform.height) continue;
       if (platform.x <= 0) {
         leftBound = Math.max(leftBound, platform.x + platform.width);
@@ -1371,6 +1726,9 @@ class Game {
     if (!gem) return;
     gem.collected = false;
     gem.dropped = true;
+    gem.width = 14;
+    gem.height = 14;
+    gem.value = CONFIG.SCORE_PER_GEM;
     gem.vx = 0;
     gem.vy = 0;
     gem.life = 0;
@@ -1481,7 +1839,8 @@ class Game {
         // If a gem ended up inside geometry, push it out along the shallowest overlap axis.
         const gemLeft = gem.x - halfW;
         const gemTop = gem.y - halfH;
-        for (const platform of this.activePlatforms) {
+        const nearbyPlatforms = this.getPlatformsNearRect(gemLeft, gemTop, gem.width, gem.height, 6);
+        for (const platform of nearbyPlatforms) {
           if (!overlapsRect(gemLeft, gemTop, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
           const overlapLeft = gemLeft + gem.width - platform.x;
           const overlapRight = platform.x + platform.width - gemLeft;
@@ -1509,27 +1868,18 @@ class Game {
           }
         }
 
-        // Once almost still on ground, transition to flashing despawn state
+        // Keep dropped gems dynamic; despawn is time-based (not settle/flash-based).
         const nearStill = Math.abs(gem.vx) < 0.08 && Math.abs(gem.vy) < 0.08;
         if (onGround && nearStill) {
-          gem.settleFrames++;
-          if (gem.settleFrames > 10) {
-            gem.settled = true;
-            gem.vx = 0;
-            gem.vy = 0;
-            gem.fadeTimer = 0;
-          }
-        } else {
-          gem.settleFrames = 0;
+          gem.vx = 0;
+          gem.vy = 0;
         }
-      } else {
-        gem.fadeTimer++;
       }
 
       const offTopOfScreen = gem.y + gem.height * 0.5 < this.cameraY - 24;
       const isFarBelow = gem.y > this.cameraY + CONFIG.INTERNAL_HEIGHT * 1.6;
-      const expiredAfterSettle = gem.settled && (gem.fadeTimer ?? 0) > 140;
-      if ((gem.life ?? 0) > 1200 || offTopOfScreen || isFarBelow || expiredAfterSettle) {
+      const expiredByLifetime = (gem.life ?? 0) > 300; // 5 seconds at 60fps
+      if (expiredByLifetime || offTopOfScreen || isFarBelow) {
         this.releaseDroppedGem(i);
       }
     }
@@ -1544,8 +1894,9 @@ class Game {
     // Check collision with platforms (destroy bullet on any contact)
     for (let i = bullets.length - 1; i >= 0; i--) {
       const bullet = bullets[i];
+      const nearbyPlatforms = this.getPlatformsNearRect(bullet.x, bullet.y, bullet.width, bullet.height, 4);
       
-      for (const platform of this.activePlatforms) {
+      for (const platform of nearbyPlatforms) {
         if (this.checkCollision(bullet, platform)) {
           if (platform.breakable) {
             // Damage breakable platform
@@ -1583,6 +1934,7 @@ class Game {
           // Trigger blast explosion if blast powerup shot
           if (this.lastShotEffects.triggerBlast && this.powerUpManager.hasPowerUp("BLAST")) {
             this.powerUpManager.spawnBlastExplosion(hitX, hitY);
+            this.playBlastSound();
             this.addScreenShake(8);
             this.triggerHaptic("medium");
           }
@@ -1632,6 +1984,33 @@ class Game {
         width: bullet.size * 2,
         height: bullet.size * 2,
       };
+
+      // Enemy bullets should be blocked by any solid tile/wall.
+      // One-way platforms stay pass-through from below for consistency.
+      let hitSolid = false;
+      const nearbyPlatforms = this.getPlatformsNearRect(
+        bulletRect.x,
+        bulletRect.y,
+        bulletRect.width,
+        bulletRect.height,
+        2
+      );
+      for (const platform of nearbyPlatforms) {
+        if (platform.oneWay) continue;
+        const overlaps =
+          bulletRect.x < platform.x + platform.width &&
+          bulletRect.x + bulletRect.width > platform.x &&
+          bulletRect.y < platform.y + platform.height &&
+          bulletRect.y + bulletRect.height > platform.y;
+        if (overlaps) {
+          hitSolid = true;
+          break;
+        }
+      }
+      if (hitSolid) {
+        this.enemyBullets.splice(i, 1);
+        continue;
+      }
       
       if (this.checkCollision(bulletRect, playerRect)) {
         if (this.playerController.isInvulnerable()) {
@@ -1689,6 +2068,7 @@ class Game {
     
     if (chainPoints.length > 1) {
       this.powerUpManager.spawnLightningChain(chainPoints);
+      this.playLightningSound();
     }
   }
   
@@ -1711,11 +2091,14 @@ class Game {
     const index = chunk.platforms.indexOf(platform);
     if (index !== -1) {
       chunk.platforms.splice(index, 1);
+      this.markChunkPlatformCacheDirty(platform.chunkIndex);
+      this.rebuildPlatformBuckets();
     }
     
     // Award some score for breaking blocks
     this.score += 2;
     this.scoreBreakables += 2;
+    this.breakableDestroyCount++;
     this.triggerHaptic("light");
   }
   
@@ -1723,28 +2106,39 @@ class Game {
     const player = this.playerController.getPlayer();
     const prevX = player.x - player.vx;
     const prevY = player.y - player.vy;
+    const minLandingOverlap = player.width * 0.5;
     
     this.playerController.setGrounded(false);
+    const nearX = Math.min(prevX, player.x) - player.width;
+    const nearY = Math.min(prevY, player.y) - player.height;
+    const nearW = Math.abs(player.x - prevX) + player.width * 2;
+    const nearH = Math.abs(player.y - prevY) + player.height * 2;
+    const nearbyPlatforms = this.getPlatformsNearRect(nearX, nearY, nearW, nearH, 12);
     
     // First pass: Check if player is standing on any platform (including walls treated as floor)
     // This allows walking on blocks
-    for (const platform of this.activePlatforms) {
+    for (const platform of nearbyPlatforms) {
       const playerBottom = player.y + player.height / 2;
       const prevBottom = prevY + player.height / 2;
       const playerLeft = player.x - player.width / 2;
       const playerRight = player.x + player.width / 2;
+      const prevLeft = prevX - player.width / 2;
+      const prevRight = prevX + player.width / 2;
       const platformTop = platform.y;
       const platformLeft = platform.x;
       const platformRight = platform.x + platform.width;
       const overlapsX = playerRight > platformLeft && playerLeft < platformRight;
       const overlapWidth = Math.min(playerRight, platformRight) - Math.max(playerLeft, platformLeft);
-      const crossedTop = prevBottom <= platformTop + 1 && playerBottom >= platformTop;
+      const prevOverlapWidth = Math.min(prevRight, platformRight) - Math.max(prevLeft, platformLeft);
+      const crossedTop = prevBottom <= platformTop + 1 &&
+                        playerBottom >= platformTop &&
+                        Math.max(overlapWidth, prevOverlapWidth) >= minLandingOverlap;
       
       // Check if player is standing on top of this platform
       const isOnTop = playerBottom >= platformTop - 2 && 
                       playerBottom <= platformTop + 8 &&
                       overlapsX &&
-                      overlapWidth >= player.width * 0.35;
+                      overlapWidth >= minLandingOverlap;
       
       if (player.vy >= 0 && overlapsX) {
         if (platform.oneWay) {
@@ -1765,7 +2159,7 @@ class Game {
       const playerRight = player.x + player.width / 2;
 
       let hitCeilingY: number | null = null;
-      for (const platform of this.activePlatforms) {
+      for (const platform of nearbyPlatforms) {
         if (platform.oneWay) continue;
         const platformBottom = platform.y + platform.height;
         const platformLeft = platform.x;
@@ -1784,7 +2178,7 @@ class Game {
     
     // Second pass: Handle horizontal collisions for all platform tiles.
     // A tile blocks horizontal movement as long as it exists.
-    for (const platform of this.activePlatforms) {
+    for (const platform of nearbyPlatforms) {
       if (platform.oneWay) continue;
       const rect = this.playerController.getRect();
       const rectLeft = rect.x;
@@ -1827,7 +2221,7 @@ class Game {
       const rectTop = rect.y;
       const rectBottom = rect.y + rect.height;
 
-      for (const platform of this.activePlatforms) {
+      for (const platform of nearbyPlatforms) {
         if (platform.oneWay) continue;
         const platLeft = platform.x;
         const platRight = platform.x + platform.width;
@@ -1846,11 +2240,16 @@ class Game {
         const minOverlapY = Math.min(overlapTop, overlapBottom);
         const prevRectTop = prevY - player.height / 2;
         const prevRectBottom = prevY + player.height / 2;
+        const prevRectLeft = prevX - player.width / 2;
+        const prevRectRight = prevX + player.width / 2;
+        const overlapWidthNow = Math.min(rectRight, platRight) - Math.max(rectLeft, platLeft);
+        const overlapWidthPrev = Math.min(prevRectRight, platRight) - Math.max(prevRectLeft, platLeft);
         const playerBottomNow = player.y + player.height / 2;
         const playerTopNow = player.y - player.height / 2;
         const crossedTop = prevRectBottom <= platTop + 2 && playerBottomNow >= platTop;
         const crossedBottom = prevRectTop >= platBottom - 2 && playerTopNow <= platBottom;
-        const canResolveVertically = crossedTop || crossedBottom;
+        const canResolveVertically = (crossedTop || crossedBottom) &&
+          Math.max(overlapWidthNow, overlapWidthPrev) >= minLandingOverlap;
 
         if (minOverlapX < minOverlapY || !canResolveVertically) {
           const pushRight = overlapLeft < overlapRight;
@@ -1878,8 +2277,32 @@ class Game {
     // Enemy collisions
     for (let i = this.activeEnemies.length - 1; i >= 0; i--) {
       const enemy = this.activeEnemies[i];
-      
-      if (!this.checkCollision(playerRect, enemy)) continue;
+
+      if (enemy instanceof PufferEnemy) {
+        const cx = enemy.x + enemy.width / 2;
+        const cy = enemy.y + enemy.height / 2;
+        const radius = enemy.getVisualRadius();
+        const closestX = Math.max(playerRect.x, Math.min(cx, playerRect.x + playerRect.width));
+        const closestY = Math.max(playerRect.y, Math.min(cy, playerRect.y + playerRect.height));
+        const ddx = cx - closestX;
+        const ddy = cy - closestY;
+        const overlapsVisual = ddx * ddx + ddy * ddy <= radius * radius;
+        if (!overlapsVisual) continue;
+
+        if (enemy.isPuffed()) {
+          if (!this.playerController.isInvulnerable()) {
+            this.applyPlayerDamage(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+            const player = this.playerController.getPlayer();
+            const knock = enemy.getCollisionKnockback(player.x, player.y);
+            this.playerController.setVelocity(knock.vx, knock.vy);
+            this.addScreenShake(6);
+            this.triggerHaptic("error");
+          }
+          continue;
+        }
+      } else if (!this.checkCollision(playerRect, enemy)) {
+        continue;
+      }
       
       // Player bounces if falling downward (vy > 0 means moving down)
       // This is the primary stomp mechanic - if player is falling, they stomp
@@ -1898,6 +2321,8 @@ class Game {
     const weedHitHeight = 20;
     for (let i = this.activeWeeds.length - 1; i >= 0; i--) {
       const weed = this.activeWeeds[i];
+      const weedKey = this.getWeedKey(weed);
+      if (this.stompedWeeds.has(weedKey)) continue;
       const weedRect = {
         x: weed.x - weedHitWidth / 2,
         y: weed.y - weedHitHeight,
@@ -1912,11 +2337,10 @@ class Game {
         playerRect.y < weedRect.y + weedRect.height &&
         playerRect.y + playerRect.height > weedRect.y;
       if (overlapsWeed && player.vy > 0 && fromAbove) {
-        this.playerController.bounce();
+        this.playerController.bounce(false);
         this.playEnemyCrunchSound();
         this.triggerHaptic("light");
-        this.brokenWeeds.add(this.getWeedKey(weed));
-        this.activeWeeds.splice(i, 1);
+        this.stompedWeeds.set(weedKey, { weed, timer: 10 });
         break;
       }
     }
@@ -1932,6 +2356,7 @@ class Game {
         this.score += points;
         this.scoreGems += points;
         this.gems++;
+        this.gemCollectCount++;
         this.playGemSound();
       }
     }
@@ -1949,6 +2374,7 @@ class Game {
         this.score += points;
         this.scoreGems += points;
         this.gems++;
+        this.gemCollectCount++;
         this.playGemSound();
         this.releaseDroppedGem(i);
       }
@@ -1969,29 +2395,13 @@ class Game {
   
   private bounceOnEnemy(enemy: BaseEnemy, index: number): void {
     // Bounce and restore ammo
-    this.playerController.bounce();
-    
-    const hitX = enemy.x + enemy.width / 2;
-    const hitY = enemy.y + enemy.height / 2;
+    this.playerController.bounce(false);
     
     // Kill enemy instantly when stomped
     this.killEnemy(enemy, index);
     
     // Increment combo
     this.playerController.incrementCombo();
-    
-    // Stomp counts as a "shot" for blast/lightning purposes
-    const effects = this.powerUpManager.onPlayerShoot();
-    if (effects.triggerBlast && this.powerUpManager.hasPowerUp("BLAST")) {
-      this.powerUpManager.spawnBlastExplosion(hitX, hitY);
-      this.addScreenShake(8);
-      this.triggerHaptic("medium");
-    }
-    if (effects.triggerLightning && this.powerUpManager.hasPowerUp("LIGHTNING")) {
-      this.triggerLightningChain(hitX, hitY);
-      this.addScreenShake(5);
-      this.triggerHaptic("light");
-    }
   }
   
   private spawnDeathExplosion(x: number, y: number, color: string): void {
@@ -2254,7 +2664,8 @@ class Game {
     this.powerUpManager.checkSpawnOrb(
       this.maxDepth,
       player.x,
-      (worldY, entityWidth, preferredX) => this.levelSpawner.getSafeSpawnX(worldY, entityWidth, preferredX)
+      (worldY, entityWidth, preferredX) => this.levelSpawner.getSafeSpawnX(worldY, entityWidth, preferredX),
+      this.cameraY + CONFIG.INTERNAL_HEIGHT + 80
     );
     
     // Check powerup orb collection
@@ -2271,9 +2682,9 @@ class Game {
     // Update powerup manager (timers, effects)
     this.powerUpManager.update();
     
-    // Process satellite collisions with enemies
-    if (this.powerUpManager.hasPowerUp("SATELLITE")) {
-      this.processSatelliteCollisions();
+    // Process shield collisions with enemies
+    if (this.powerUpManager.hasPowerUp("SHIELD")) {
+      this.processShieldCollisions();
     }
     
     // Process laser beam collisions with enemies
@@ -2284,6 +2695,9 @@ class Game {
     
     // Process lightning chain from explosions
     this.processLightningCollisions();
+
+    // Process magnet pull on nearby gems
+    this.processMagnetAttraction();
     
     // (Powerup indicators removed - aura effect replaces them)
   }
@@ -2296,10 +2710,10 @@ class Game {
     this.powerupAuraFlashColor = info.color;
   }
   
-  private processSatelliteCollisions(): void {
+  private processShieldCollisions(): void {
     const player = this.playerController.getPlayer();
-    const positions = this.powerUpManager.getSatellitePositions(player.x, player.y);
-    const orbSize = POWERUP_CONSTANTS.SATELLITE_ORB_SIZE;
+    const positions = this.powerUpManager.getShieldPositions(player.x, player.y);
+    const orbSize = POWERUP_CONSTANTS.SHIELD_ORB_SIZE;
     
     for (const pos of positions) {
       for (let i = this.activeEnemies.length - 1; i >= 0; i--) {
@@ -2311,9 +2725,10 @@ class Game {
         const dist = Math.sqrt((pos.x - ecx) ** 2 + (pos.y - ecy) ** 2);
         
         if (dist < orbSize + Math.max(enemy.width, enemy.height) / 2) {
-          const isDead = enemy.takeDamage(POWERUP_CONSTANTS.SATELLITE_DAMAGE);
+          const isDead = enemy.takeDamage(POWERUP_CONSTANTS.SHIELD_DAMAGE);
           if (isDead) {
             this.killEnemy(enemy, i);
+            this.playShieldSound();
           }
         }
       }
@@ -2395,6 +2810,55 @@ class Game {
       }
     }
   }
+
+  private processMagnetAttraction(): void {
+    if (!this.powerUpManager.hasPowerUp("MAGNET")) return;
+
+    const player = this.playerController.getPlayer();
+    const radius = this.MAGNET_RADIUS;
+    const radiusSq = radius * radius;
+    let pulledGemCount = 0;
+
+    if (this.magnetPullSfxCooldownFrames > 0) {
+      this.magnetPullSfxCooldownFrames--;
+    }
+
+    const pullGem = (gem: Gem, useVelocity: boolean) => {
+      if (gem.collected) return;
+      const dx = player.x - gem.x;
+      const dy = player.y - gem.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= 0.001 || distSq > radiusSq) return;
+
+      const dist = Math.sqrt(distSq);
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const strength = (1 - dist / radius);
+      const pullSpeed = 0.9 + strength * 3.2;
+      pulledGemCount++;
+
+      if (useVelocity) {
+        gem.vx = (gem.vx ?? 0) + nx * pullSpeed * 0.35;
+        gem.vy = (gem.vy ?? 0) + ny * pullSpeed * 0.35;
+      } else {
+        gem.x += nx * pullSpeed;
+        gem.y += ny * pullSpeed;
+      }
+    };
+
+    for (const gem of this.activeGems) {
+      pullGem(gem, false);
+    }
+
+    for (const gem of this.droppedGems) {
+      pullGem(gem, true);
+    }
+
+    if (pulledGemCount > 0 && this.magnetPullSfxCooldownFrames <= 0) {
+      this.playMagnetPullSound();
+      this.magnetPullSfxCooldownFrames = 4;
+    }
+  }
   
   
   private killEnemy(enemy: BaseEnemy, index: number): void {
@@ -2405,11 +2869,13 @@ class Game {
     const enemyColor = enemy.getBaseColor();
     
     // Determine which hurt sprite to use based on enemy type
-    let spriteType: "shark" | "crab" | "squid";
+    let spriteType: "shark" | "crab" | "squid" | "puffer";
     if (enemy.type === "HORIZONTAL") {
       spriteType = "shark";
     } else if (enemy.type === "EXPLODER") {
       spriteType = "squid";
+    } else if (enemy.type === "PUFFER") {
+      spriteType = "puffer";
     } else {
       spriteType = "crab";
     }
@@ -2431,6 +2897,7 @@ class Game {
     const points = CONFIG.SCORE_PER_ENEMY * comboMultiplier;
     this.score += points;
     this.scoreEnemies += points;
+    this.enemyKillCount++;
     
     // Small screen shake on enemy death
     this.addScreenShake(3);
@@ -2461,6 +2928,28 @@ class Game {
     this.gameOverTimers.push(intervalId);
   }
 
+  private formatBreakdownMultiplier(multiplier: number): string {
+    if (!Number.isFinite(multiplier)) return "0";
+    if (Math.abs(multiplier - Math.round(multiplier)) < 0.001) {
+      return `${Math.round(multiplier)}`;
+    }
+    return multiplier.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+
+  private roundUpToNearestFive(value: number): number {
+    if (value <= 0) return 0;
+    return Math.ceil(value / 5) * 5;
+  }
+
+  private formatScoreBreakdown(count: number, score: number): string {
+    const roundedScore = this.roundUpToNearestFive(score);
+    if (count <= 0 || roundedScore <= 0) {
+      return "0 x 0 = 0";
+    }
+    const multiplier = roundedScore / count;
+    return `${count} x ${this.formatBreakdownMultiplier(multiplier)} = ${roundedScore}`;
+  }
+
   private animateGameOverScoreBreakdown(): void {
     this.clearGameOverTimers();
     const finalScoreEl = document.getElementById("final-score");
@@ -2484,52 +2973,59 @@ class Game {
     finalScoreEl.textContent = "0";
     finalDepthEl.textContent = `Depth: ${Math.floor(this.maxDepth)}m`;
     depthValueEl.textContent = "0";
-    enemiesValueEl.textContent = "0";
-    gemsValueEl.textContent = "0";
-    breakablesValueEl.textContent = "0";
+    enemiesValueEl.textContent = this.formatScoreBreakdown(this.enemyKillCount, this.scoreEnemies);
+    gemsValueEl.textContent = this.formatScoreBreakdown(this.gemCollectCount, this.scoreGems);
+    breakablesValueEl.textContent = this.formatScoreBreakdown(this.breakableDestroyCount, this.scoreBreakables);
     depthRow.classList.remove("visible");
     enemiesRow.classList.remove("visible");
     gemsRow.classList.remove("visible");
     breakablesRow.classList.remove("visible");
 
     const steps = [
-      { row: depthRow, el: depthValueEl, value: this.scoreDepth },
-      { row: enemiesRow, el: enemiesValueEl, value: this.scoreEnemies },
-      { row: gemsRow, el: gemsValueEl, value: this.scoreGems },
-      { row: breakablesRow, el: breakablesValueEl, value: this.scoreBreakables },
+      { row: depthRow, el: depthValueEl, value: this.roundUpToNearestFive(this.scoreDepth), animate: true },
+      { row: enemiesRow, el: enemiesValueEl, value: this.roundUpToNearestFive(this.scoreEnemies), animate: false },
+      { row: gemsRow, el: gemsValueEl, value: this.roundUpToNearestFive(this.scoreGems), animate: false },
+      { row: breakablesRow, el: breakablesValueEl, value: this.roundUpToNearestFive(this.scoreBreakables), animate: false },
     ];
 
     let delay = 120;
     for (const step of steps) {
       const showId = window.setTimeout(() => {
         step.row.classList.add("visible");
-        this.animateValue(step.el, 0, step.value, 420);
+        if (step.animate) {
+          this.animateValue(step.el, 0, step.value, 420);
+        }
       }, delay);
       this.gameOverTimers.push(showId);
       delay += 460;
     }
 
     const totalId = window.setTimeout(() => {
-      this.animateValue(finalScoreEl, 0, this.score, 550);
+      this.animateValue(finalScoreEl, 0, this.roundUpToNearestFive(this.score), 550);
     }, delay + 120);
     this.gameOverTimers.push(totalId);
   }
 
   private spawnDroppedGems(x: number, y: number, chunkIndex: number): void {
     const count = 2 + Math.floor(Math.random() * 3);
+    const hasLargeGem = Math.random() < 0.2;
+    const largeGemIndex = hasLargeGem ? Math.floor(Math.random() * count) : -1;
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 1.2 + Math.random() * 2.8;
       const spawnRadius = 12 + Math.random() * 10;
       const spawnX = x + Math.cos(angle) * spawnRadius;
       const spawnY = y + Math.sin(angle) * (spawnRadius * 0.6);
+      const isLargeGem = i === largeGemIndex;
+      const gemSize = isLargeGem ? 20 : 14;
+      const gemValue = isLargeGem ? CONFIG.SCORE_PER_GEM * 2 : CONFIG.SCORE_PER_GEM;
 
       this.droppedGems.push({
         x: spawnX,
         y: spawnY,
-        width: 14,
-        height: 14,
-        value: (1 + Math.floor(Math.random() * 2)) * CONFIG.SCORE_PER_GEM,
+        width: gemSize,
+        height: gemSize,
+        value: gemValue,
         collected: false,
         chunkIndex,
         bobOffset: Math.random() * Math.PI * 2,
@@ -2541,11 +3037,12 @@ class Game {
         settleFrames: 0,
         fadeTimer: 0,
         collectDelay: 8,
+        isLarge: isLargeGem,
       });
     }
   }
   
-  private spawnHurtAnimation(x: number, y: number, width: number, height: number, color: string, direction: number, spriteType: "shark" | "crab" | "squid"): void {
+  private spawnHurtAnimation(x: number, y: number, width: number, height: number, color: string, direction: number, spriteType: "shark" | "crab" | "squid" | "puffer"): void {
     this.hurtAnimations.push({
       x,
       y,
@@ -2599,6 +3096,10 @@ class Game {
       } else if (anim.spriteType === "squid") {
         sprite = this.hurtSpriteSquid;
         spriteLoaded = this.hurtSpriteSquidLoaded;
+      } else if (anim.spriteType === "puffer") {
+        // Puffer deaths should not briefly show the crab hurt sprite.
+        sprite = null;
+        spriteLoaded = false;
       } else {
         sprite = this.hurtSpriteCrab;
         spriteLoaded = this.hurtSpriteCrabLoaded;
@@ -2667,25 +3168,28 @@ class Game {
   
   private updateHUD(): void {
     const player = this.playerController.getPlayer();
-    const scoreEl = document.getElementById("score");
-    const depthEl = document.getElementById("depth");
-    const ammoEl = document.getElementById("ammo");
-    const comboEl = document.getElementById("combo");
-    const ammoSliderFill = document.getElementById("ammo-slider-fill");
-    const hpBar = document.getElementById("hp-bar");
-    
-    if (scoreEl) scoreEl.textContent = `${this.score}`;
-    if (depthEl) depthEl.textContent = `${Math.floor(this.maxDepth)}m`;
-    if (ammoEl) ammoEl.textContent = "AMMO: " + "●".repeat(player.ammo) + "○".repeat(player.maxAmmo - player.ammo);
+    const scoreText = `${this.score}`;
+    if (this.hudRefs.scoreEl && this.prevHudScore !== this.score) {
+      this.hudRefs.scoreEl.textContent = scoreText;
+      this.prevHudScore = this.score;
+    }
+    const depthValue = Math.floor(this.maxDepth);
+    if (this.hudRefs.depthEl && this.prevHudDepth !== depthValue) {
+      this.hudRefs.depthEl.textContent = `${depthValue}m`;
+      this.prevHudDepth = depthValue;
+    }
+    const ammoText = "AMMO: " + "●".repeat(player.ammo) + "○".repeat(player.maxAmmo - player.ammo);
+    if (this.hudRefs.ammoEl && this.prevHudAmmo !== ammoText) {
+      this.hudRefs.ammoEl.textContent = ammoText;
+      this.prevHudAmmo = ammoText;
+    }
     
     // Update HP bubbles - detect lost HP and trigger pop
-    if (hpBar) {
-      const bubbles = hpBar.querySelectorAll(".hp-bubble");
-      
+    if (this.hudRefs.hpBar && this.hudRefs.hpBubbles.length > 0) {
       // Detect if HP just decreased (bubble pop trigger)
       if (player.hp < this.previousHp) {
         // Pop bubbles for each lost HP point
-        bubbles.forEach((bubble, index) => {
+        this.hudRefs.hpBubbles.forEach((bubble, index) => {
           // Bubbles are ordered top-to-bottom: data-hp 3,2,1,0
           // Index 0 = hp slot 3 (top), index 3 = hp slot 0 (bottom)
           const hpSlot = player.maxHp - 1 - index;
@@ -2709,7 +3213,7 @@ class Game {
           this.previousHp = player.hp;
         }
         
-        bubbles.forEach((bubble, index) => {
+        this.hudRefs.hpBubbles.forEach((bubble, index) => {
           const hpSlot = player.maxHp - 1 - index;
           
           if (hpSlot < player.hp) {
@@ -2724,17 +3228,27 @@ class Game {
     }
     
     // Update vertical ammo slider
-    if (ammoSliderFill) {
+    if (this.hudRefs.ammoSliderFill) {
       const ammoPercent = (player.ammo / player.maxAmmo) * 100;
-      ammoSliderFill.style.height = `${ammoPercent}%`;
+      if (ammoPercent !== this.prevHudAmmoPercent) {
+        this.hudRefs.ammoSliderFill.style.height = `${ammoPercent}%`;
+        this.prevHudAmmoPercent = ammoPercent;
+      }
     }
+
+    // DOM powerup bar is hidden; active timer is rendered above the player.
+    this.hudRefs.powerupBar?.classList.add("hidden");
     
-    if (comboEl) {
+    if (this.hudRefs.comboEl) {
       if (player.combo > 0) {
-        comboEl.textContent = `x${player.combo}`;
-        comboEl.style.opacity = "1";
+        if (this.prevHudCombo !== player.combo) {
+          this.hudRefs.comboEl.textContent = `x${player.combo}`;
+          this.prevHudCombo = player.combo;
+        }
+        this.hudRefs.comboEl.style.opacity = "1";
       } else {
-        comboEl.style.opacity = "0";
+        this.hudRefs.comboEl.style.opacity = "0";
+        this.prevHudCombo = 0;
       }
     }
   }
@@ -2848,6 +3362,13 @@ class Game {
       // Apply camera transform with screen shake
       ctx.save();
       ctx.translate(this.screenShakeX, -this.cameraY + this.screenShakeY);
+      if (this.deathFreezeFrames > 0) {
+        const player = this.playerController.getPlayer();
+        const zoom = this.getDeathFreezeZoom();
+        ctx.translate(player.x, player.y);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-player.x, -player.y);
+      }
       
       // Draw platforms
       this.drawPlatforms();
@@ -2881,12 +3402,13 @@ class Game {
       
       // Draw player
       this.drawPlayer();
+      this.drawPowerUpBarAbovePlayer();
       if (this.deathFreezeFrames > 0) {
         this.drawDeathFreezeHighlight();
       }
       
       // Draw powerup effects (on top of player)
-      this.drawSatellites();
+      this.drawShields();
       this.drawBlastExplosions();
       this.drawLightningChains();
       this.drawLaserBeams();
@@ -2911,9 +3433,6 @@ class Game {
     const k = this.deathFreezeKiller;
 
     ctx.save();
-    ctx.fillStyle = "rgba(6, 15, 30, 0.35)";
-    ctx.fillRect(0, this.cameraY, CONFIG.INTERNAL_WIDTH, CONFIG.INTERNAL_HEIGHT);
-
     ctx.strokeStyle = "rgba(255, 255, 210, 0.9)";
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -2943,17 +3462,9 @@ class Game {
     if (this.submarineImg && this.submarineImg.complete) {
       const subX = CONFIG.INTERNAL_WIDTH / 2;
       const bobY = crabY - 18 + Math.sin(this.frameCount * 0.03) * 4;
-      const subSize = 64;
-      
-      ctx.save();
-      
       // Gentle tilt with the bob
       const tilt = Math.sin(this.frameCount * 0.03 + 0.5) * 0.08;
-      ctx.translate(subX, bobY);
-      ctx.rotate(tilt);
-      
-      ctx.drawImage(this.submarineImg, -subSize / 2, -subSize / 2, subSize, subSize);
-      ctx.restore();
+      this.drawSharedSubmarine(ctx, subX, bobY, { tilt, faceRight: true, scale: 1 });
     }
     
     // Draw animated crab near the bottom of the start screen
@@ -2984,192 +3495,208 @@ class Game {
     // Draw title weeds (once, after sprite sheet loads)
     this.drawTitleWeeds();
   }
+
+  private drawSharedSubmarine(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    opts?: { tilt?: number; faceRight?: boolean; scale?: number }
+  ): void {
+    if (!this.submarineImg || !this.submarineImg.complete) return;
+    const tilt = opts?.tilt ?? 0;
+    const faceRight = opts?.faceRight ?? false;
+    const scale = opts?.scale ?? 1;
+    const drawSize = this.SUBMARINE_DRAW_SIZE * scale;
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(tilt);
+    if (!faceRight) {
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(this.submarineImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+    ctx.restore();
+  }
   
   private drawPlatforms(): void {
     const ctx = this.ctx;
-    const BLOCK_SIZE = 32; // Size of individual blocks (2x bigger)
-    
-    // Sand color palette for underwater theme - bright & vibrant
-    const SAND_LIGHT = { r: 255, g: 225, b: 150 };    // Bright warm sand
-    const SAND_MID   = { r: 235, g: 200, b: 120 };     // Vivid golden sand
-    const SAND_DARK  = { r: 210, g: 175, b: 100 };     // Rich sand
-    const SAND_DEEP  = { r: 175, g: 140, b: 70 };      // Deep shadow sand
-    
+    const visibleChunkSet = new Set<number>();
     for (const platform of this.activePlatforms) {
-      if (platform.oneWay) {
-        const x = platform.x;
-        const y = platform.y;
-        const w = platform.width;
-        const h = platform.height;
-        ctx.fillStyle = "rgba(215, 190, 120, 0.95)";
-        ctx.fillRect(x, y, w, h);
-        // Brighter top edge for readability.
-        ctx.fillStyle = "rgba(255, 240, 190, 0.9)";
-        ctx.fillRect(x, y, w, 2);
-        // Pixel-like dark notches so it reads as a platform strip.
-        ctx.fillStyle = "rgba(120, 90, 45, 0.55)";
-        for (let px = 2; px < w - 2; px += 10) {
-          ctx.fillRect(x + px, y + h - 2, 4, 2);
-        }
-        continue;
-      }
-
-      // Render cave walls and any impenetrable (non-breakable) masses
-      if (platform.isWall || !platform.breakable) {
-        // Organic wall made up of sand-colored pixelated blocks
-        const blocksX = Math.ceil(platform.width / BLOCK_SIZE);
-        const blocksY = Math.ceil(platform.height / BLOCK_SIZE);
-        const isLeftWall = platform.x < CONFIG.INTERNAL_WIDTH / 2;
-        
-        for (let bx = 0; bx < blocksX; bx++) {
-          for (let by = 0; by < blocksY; by++) {
-            const blockX = platform.x + bx * BLOCK_SIZE;
-            const blockY = platform.y + by * BLOCK_SIZE;
-            const blockW = Math.min(BLOCK_SIZE, platform.x + platform.width - blockX);
-            const blockH = Math.min(BLOCK_SIZE, platform.y + platform.height - blockY);
-            
-            // Determine if this is the inner edge block (facing the well)
-            const isInnerEdge = isLeftWall ? (bx === blocksX - 1) : (bx === 0);
-            // Depth from the inner edge (0 = edge, higher = deeper into wall)
-            const depthFromEdge = isLeftWall ? (blocksX - 1 - bx) : bx;
-            
-            // Sand color with depth variation - deeper into wall = darker sand
-            const depthDarken = depthFromEdge * 12;
-            const edgeBrighten = isInnerEdge ? 15 : 0;
-            const variation = ((bx + by) % 3) * 8;
-            // Alternate between slightly different hues for natural sand look
-            const hueShift = ((bx * 3 + by * 7) % 5) * 3;
-            
-            const r = Math.max(120, SAND_MID.r - depthDarken + edgeBrighten + variation - hueShift);
-            const g = Math.max(95, SAND_MID.g - depthDarken + edgeBrighten + variation - hueShift);
-            const b = Math.max(50, SAND_MID.b - depthDarken + edgeBrighten + variation - hueShift);
-            
-            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-            ctx.fillRect(blockX, blockY, blockW, blockH);
-            
-            // Pixelated grain detail (4x4 pixel sub-blocks for sandy texture)
-            const grainSize = 4;
-            for (let gx = 0; gx < blockW; gx += grainSize) {
-              for (let gy = 0; gy < blockH; gy += grainSize) {
-                const seed = ((blockX + gx) * 13 + (blockY + gy) * 7) % 11;
-                if (seed < 3) {
-                  // Darker grain speckle
-                  ctx.fillStyle = `rgba(160, 120, 50, 0.18)`;
-                  ctx.fillRect(blockX + gx, blockY + gy, grainSize, grainSize);
-                } else if (seed > 8) {
-                  // Lighter grain speckle  
-                  ctx.fillStyle = `rgba(255, 245, 210, 0.2)`;
-                  ctx.fillRect(blockX + gx, blockY + gy, grainSize, grainSize);
-                }
-              }
-            }
-            
-            // Block outline / grid lines (warm brown)
-            ctx.strokeStyle = `rgb(${SAND_DEEP.r - 15}, ${SAND_DEEP.g - 15}, ${SAND_DEEP.b - 10})`;
-            ctx.lineWidth = 1;
-            ctx.strokeRect(blockX + 0.5, blockY + 0.5, blockW - 1, blockH - 1);
-            
-            // Inner highlight (top-left) - bright warm sand highlight
-            ctx.fillStyle = `rgba(255, 245, 200, 0.25)`;
-            ctx.fillRect(blockX + 1, blockY + 1, blockW - 2, 2);
-            ctx.fillRect(blockX + 1, blockY + 1, 2, blockH - 2);
-            
-            // Inner shadow (bottom-right) - warm brown shadow
-            ctx.fillStyle = `rgba(140, 100, 40, 0.25)`;
-            ctx.fillRect(blockX + 1, blockY + blockH - 3, blockW - 2, 2);
-            ctx.fillRect(blockX + blockW - 3, blockY + 1, 2, blockH - 2);
-            
-            // Edge highlight on the inner face of cave wall
-            if (isInnerEdge) {
-              const edgeX = isLeftWall 
-                ? blockX + blockW - 3  // Right edge of left wall
-                : blockX + 1;          // Left edge of right wall
-              
-              // Brighter sand highlight on the face
-              ctx.fillStyle = `rgba(255, 240, 180, 0.35)`;
-              ctx.fillRect(edgeX, blockY + 2, 2, blockH - 4);
-              
-              // Subtle rough edge detail (small notches) - sand erosion
-              const notchSeed = (blockX * 7 + blockY * 13) % 5;
-              if (notchSeed < 2) {
-                ctx.fillStyle = `rgba(140, 100, 40, 0.35)`;
-                const notchY = blockY + (notchSeed + 1) * 8;
-                const notchX = isLeftWall ? blockX + blockW - 4 : blockX;
-                ctx.fillRect(notchX, notchY, 4, 3);
-              }
-            }
-          }
-        }
-      } else {
-        // Breakable platform block (32x32 square, same size as wall blocks)
-        const blockX = platform.x;
-        const blockY = platform.y;
-        const blockW = platform.width;
-        const blockH = platform.height;
-        
-        // Breakable blocks - darker sand/dirt color (more brown, less yellow)
-        const variation = (Math.floor(blockX / BLOCK_SIZE) % 3) * 5;
-        const r = SAND_DEEP.r - 20 + variation;
-        const g = SAND_DEEP.g - 20 + variation;
-        const b = SAND_DEEP.b - 15 + variation;
-        
-        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-        ctx.fillRect(blockX, blockY, blockW, blockH);
-        
-        // Pixelated texture variation (darker/lighter spots)
-        const grainSize = 4;
-        for (let gx = 0; gx < blockW; gx += grainSize) {
-          for (let gy = 0; gy < blockH; gy += grainSize) {
-            const seed = ((blockX + gx) * 11 + (blockY + gy) * 17) % 9;
-            if (seed < 2) {
-              ctx.fillStyle = `rgba(100, 70, 30, 0.25)`;
-              ctx.fillRect(blockX + gx, blockY + gy, grainSize, grainSize);
-            } else if (seed > 7) {
-              ctx.fillStyle = `rgba(180, 140, 80, 0.2)`;
-              ctx.fillRect(blockX + gx, blockY + gy, grainSize, grainSize);
-            }
-          }
-        }
-        
-        // Minecraft-style pixelated X crack pattern
-        const crackColor = `rgba(40, 25, 10, 0.7)`;
-        const pixelSize = 4; // Size of crack pixels
-        
-        ctx.fillStyle = crackColor;
-        
-        // X-shaped crack pattern - diagonal from corners meeting in center
-        // Top-left to bottom-right diagonal
-        ctx.fillRect(blockX + 4, blockY + 4, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 8, blockY + 8, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 12, blockY + 12, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 16, blockY + 16, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 20, blockY + 20, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 24, blockY + 24, pixelSize, pixelSize);
-        
-        // Top-right to bottom-left diagonal
-        ctx.fillRect(blockX + 24, blockY + 4, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 20, blockY + 8, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 16, blockY + 12, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 12, blockY + 16, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 8, blockY + 20, pixelSize, pixelSize);
-        ctx.fillRect(blockX + 4, blockY + 24, pixelSize, pixelSize)
-        
-        // Block outline (dark brown)
-        ctx.strokeStyle = `rgb(80, 55, 25)`;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(blockX + 0.5, blockY + 0.5, blockW - 1, blockH - 1);
-        
-        // Subtle inner highlight (top-left) for 3D feel
-        ctx.fillStyle = `rgba(180, 140, 80, 0.15)`;
-        ctx.fillRect(blockX + 1, blockY + 1, blockW - 2, 2);
-        ctx.fillRect(blockX + 1, blockY + 1, 2, blockH - 2);
-        
-        // Subtle inner shadow (bottom-right)
-        ctx.fillStyle = `rgba(40, 25, 10, 0.2)`;
-        ctx.fillRect(blockX + 1, blockY + blockH - 3, blockW - 2, 2);
-        ctx.fillRect(blockX + blockW - 3, blockY + 1, 2, blockH - 2);
+      if (!platform.oneWay) {
+        visibleChunkSet.add(platform.chunkIndex);
       }
     }
+
+    for (const chunkIndex of visibleChunkSet) {
+      const cache = this.getChunkPlatformCache(chunkIndex);
+      ctx.drawImage(cache.canvas, 0, chunkIndex * CONFIG.CHUNK_HEIGHT);
+    }
+
+    // One-way strips are dynamic and inexpensive, so keep immediate rendering.
+    for (const platform of this.activePlatforms) {
+      if (!platform.oneWay) continue;
+      this.drawPlatformGeometry(ctx, platform);
+    }
+  }
+
+  private getChunkPlatformCache(chunkIndex: number): ChunkPlatformCache {
+    let cache = this.chunkPlatformCache.get(chunkIndex);
+    if (!cache) {
+      const canvas = document.createElement("canvas");
+      canvas.width = CONFIG.INTERNAL_WIDTH;
+      canvas.height = CONFIG.CHUNK_HEIGHT;
+      const cacheCtx = canvas.getContext("2d");
+      if (!cacheCtx) {
+        throw new Error("Failed to create chunk platform cache context");
+      }
+      cacheCtx.imageSmoothingEnabled = false;
+      cache = { canvas, ctx: cacheCtx, dirty: true };
+      this.chunkPlatformCache.set(chunkIndex, cache);
+    }
+    if (cache.dirty) {
+      this.redrawChunkPlatformCache(chunkIndex, cache);
+    }
+    return cache;
+  }
+
+  private redrawChunkPlatformCache(chunkIndex: number, cache: ChunkPlatformCache): void {
+    const chunk = this.levelSpawner.getChunk(chunkIndex);
+    cache.ctx.clearRect(0, 0, cache.canvas.width, cache.canvas.height);
+    cache.ctx.save();
+    cache.ctx.translate(0, -chunkIndex * CONFIG.CHUNK_HEIGHT);
+    for (const platform of chunk.platforms) {
+      if (platform.oneWay) continue;
+      this.drawPlatformGeometry(cache.ctx, platform);
+    }
+    cache.ctx.restore();
+    cache.dirty = false;
+  }
+
+  private drawPlatformGeometry(ctx: CanvasRenderingContext2D, platform: Platform): void {
+    const BLOCK_SIZE = 32;
+    const SAND_MID = { r: 235, g: 200, b: 120 };
+    const SAND_DEEP = { r: 175, g: 140, b: 70 };
+
+    if (platform.oneWay) {
+      const x = platform.x;
+      const y = platform.y;
+      const w = platform.width;
+      const h = platform.height;
+      ctx.fillStyle = "rgba(215, 190, 120, 0.95)";
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = "rgba(255, 240, 190, 0.9)";
+      ctx.fillRect(x, y, w, 2);
+      ctx.fillStyle = "rgba(120, 90, 45, 0.55)";
+      for (let px = 2; px < w - 2; px += 10) {
+        ctx.fillRect(x + px, y + h - 2, 4, 2);
+      }
+      return;
+    }
+
+    if (platform.isWall || !platform.breakable) {
+      const blocksX = Math.ceil(platform.width / BLOCK_SIZE);
+      const blocksY = Math.ceil(platform.height / BLOCK_SIZE);
+      const isLeftWall = platform.x < CONFIG.INTERNAL_WIDTH / 2;
+      for (let bx = 0; bx < blocksX; bx++) {
+        for (let by = 0; by < blocksY; by++) {
+          const blockX = platform.x + bx * BLOCK_SIZE;
+          const blockY = platform.y + by * BLOCK_SIZE;
+          const blockW = Math.min(BLOCK_SIZE, platform.x + platform.width - blockX);
+          const blockH = Math.min(BLOCK_SIZE, platform.y + platform.height - blockY);
+          const isInnerEdge = isLeftWall ? (bx === blocksX - 1) : (bx === 0);
+          const depthFromEdge = isLeftWall ? (blocksX - 1 - bx) : bx;
+          const depthDarken = depthFromEdge * 12;
+          const edgeBrighten = isInnerEdge ? 15 : 0;
+          const variation = ((bx + by) % 3) * 8;
+          const hueShift = ((bx * 3 + by * 7) % 5) * 3;
+          const r = Math.max(120, SAND_MID.r - depthDarken + edgeBrighten + variation - hueShift);
+          const g = Math.max(95, SAND_MID.g - depthDarken + edgeBrighten + variation - hueShift);
+          const b = Math.max(50, SAND_MID.b - depthDarken + edgeBrighten + variation - hueShift);
+          ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          ctx.fillRect(blockX, blockY, blockW, blockH);
+          for (let gx = 0; gx < blockW; gx += 4) {
+            for (let gy = 0; gy < blockH; gy += 4) {
+              const seed = ((blockX + gx) * 13 + (blockY + gy) * 7) % 11;
+              if (seed < 3) {
+                ctx.fillStyle = "rgba(160, 120, 50, 0.18)";
+                ctx.fillRect(blockX + gx, blockY + gy, 4, 4);
+              } else if (seed > 8) {
+                ctx.fillStyle = "rgba(255, 245, 210, 0.2)";
+                ctx.fillRect(blockX + gx, blockY + gy, 4, 4);
+              }
+            }
+          }
+          ctx.strokeStyle = `rgb(${SAND_DEEP.r - 15}, ${SAND_DEEP.g - 15}, ${SAND_DEEP.b - 10})`;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(blockX + 0.5, blockY + 0.5, blockW - 1, blockH - 1);
+          ctx.fillStyle = "rgba(255, 245, 200, 0.25)";
+          ctx.fillRect(blockX + 1, blockY + 1, blockW - 2, 2);
+          ctx.fillRect(blockX + 1, blockY + 1, 2, blockH - 2);
+          ctx.fillStyle = "rgba(140, 100, 40, 0.25)";
+          ctx.fillRect(blockX + 1, blockY + blockH - 3, blockW - 2, 2);
+          ctx.fillRect(blockX + blockW - 3, blockY + 1, 2, blockH - 2);
+          if (isInnerEdge) {
+            const edgeX = isLeftWall ? blockX + blockW - 3 : blockX + 1;
+            ctx.fillStyle = "rgba(255, 240, 180, 0.35)";
+            ctx.fillRect(edgeX, blockY + 2, 2, blockH - 4);
+            const notchSeed = (blockX * 7 + blockY * 13) % 5;
+            if (notchSeed < 2) {
+              ctx.fillStyle = "rgba(140, 100, 40, 0.35)";
+              const notchY = blockY + (notchSeed + 1) * 8;
+              const notchX = isLeftWall ? blockX + blockW - 4 : blockX;
+              ctx.fillRect(notchX, notchY, 4, 3);
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    const blockX = platform.x;
+    const blockY = platform.y;
+    const blockW = platform.width;
+    const blockH = platform.height;
+    const variation = (Math.floor(blockX / BLOCK_SIZE) % 3) * 5;
+    const r = SAND_DEEP.r - 20 + variation;
+    const g = SAND_DEEP.g - 20 + variation;
+    const b = SAND_DEEP.b - 15 + variation;
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(blockX, blockY, blockW, blockH);
+    for (let gx = 0; gx < blockW; gx += 4) {
+      for (let gy = 0; gy < blockH; gy += 4) {
+        const seed = ((blockX + gx) * 11 + (blockY + gy) * 17) % 9;
+        if (seed < 2) {
+          ctx.fillStyle = "rgba(100, 70, 30, 0.25)";
+          ctx.fillRect(blockX + gx, blockY + gy, 4, 4);
+        } else if (seed > 7) {
+          ctx.fillStyle = "rgba(180, 140, 80, 0.2)";
+          ctx.fillRect(blockX + gx, blockY + gy, 4, 4);
+        }
+      }
+    }
+    ctx.fillStyle = "rgba(40, 25, 10, 0.7)";
+    const pixelSize = 4;
+    ctx.fillRect(blockX + 4, blockY + 4, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 8, blockY + 8, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 12, blockY + 12, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 16, blockY + 16, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 20, blockY + 20, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 24, blockY + 24, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 24, blockY + 4, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 20, blockY + 8, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 16, blockY + 12, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 12, blockY + 16, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 8, blockY + 20, pixelSize, pixelSize);
+    ctx.fillRect(blockX + 4, blockY + 24, pixelSize, pixelSize);
+    ctx.strokeStyle = "rgb(80, 55, 25)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(blockX + 0.5, blockY + 0.5, blockW - 1, blockH - 1);
+    ctx.fillStyle = "rgba(180, 140, 80, 0.15)";
+    ctx.fillRect(blockX + 1, blockY + 1, blockW - 2, 2);
+    ctx.fillRect(blockX + 1, blockY + 1, 2, blockH - 2);
+    ctx.fillStyle = "rgba(40, 25, 10, 0.2)";
+    ctx.fillRect(blockX + 1, blockY + blockH - 3, blockW - 2, 2);
+    ctx.fillRect(blockX + blockW - 3, blockY + 1, 2, blockH - 2);
   }
   
   private drawWeeds(): void {
@@ -3189,6 +3716,7 @@ class Game {
     const drawSize = 56;
     
     for (const weed of this.activeWeeds) {
+      const weedKey = this.getWeedKey(weed);
       const col = weed.spriteIndex % cols;
       const row = Math.floor(weed.spriteIndex / cols);
       
@@ -3214,6 +3742,11 @@ class Game {
         ctx.translate(drawX + drawSize / 2, drawY + drawSize / 2);
         ctx.scale(-1, 1);
         ctx.translate(-(drawX + drawSize / 2), -(drawY + drawSize / 2));
+      }
+
+      if (this.stompedWeeds.has(weedKey)) {
+        // Tint only the sprite draw call to red; avoid rectangular overlay artifacts.
+        ctx.filter = "brightness(0.7) sepia(1) saturate(6) hue-rotate(-35deg)";
       }
       
       ctx.drawImage(
@@ -3254,13 +3787,9 @@ class Game {
     for (const gem of this.droppedGems) {
       if (gem.collected) continue;
 
-      const bobY = Math.sin(this.frameCount * 0.16 + gem.bobOffset) * 1.5;
-      const fadeTimer = gem.fadeTimer ?? 0;
-      const flashing = gem.settled && fadeTimer > 30;
-      const alpha = flashing ? (Math.floor((fadeTimer - 30) / 6) % 2 === 0 ? 0.22 : 0.95) : 1;
+      const bobY = 0;
       ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = "#ffd84a";
+      ctx.fillStyle = gem.isLarge ? "#ffea7a" : "#ffd84a";
       ctx.beginPath();
       ctx.moveTo(gem.x, gem.y - gem.height / 2 + bobY);
       ctx.lineTo(gem.x + gem.width / 2, gem.y + bobY);
@@ -3268,6 +3797,11 @@ class Game {
       ctx.lineTo(gem.x - gem.width / 2, gem.y + bobY);
       ctx.closePath();
       ctx.fill();
+      if (gem.isLarge) {
+        ctx.strokeStyle = "rgba(255, 255, 220, 0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
@@ -3670,7 +4204,7 @@ class Game {
       ctx.restore();
     }
   }
-  
+
   private drawPlayer(): void {
     const ctx = this.ctx;
     const p = this.playerController.getPlayer();
@@ -3682,26 +4216,14 @@ class Game {
     
     // Draw powerup aura(s) behind the submarine
     this.drawPowerUpAura(ctx, p.x, p.y);
+    this.drawMagnetRadiusIndicator(p.x, p.y);
     
     // Draw submarine sprite
     if (this.submarineImg && this.submarineImg.complete) {
-      const spriteWidth = 72;  // Display size (1.5x bigger: 48 * 1.5 = 72)
-      const spriteHeight = 72;
-      const x = p.x - spriteWidth / 2;
-      // Center on physics body with slight upward bias to avoid sinking into tiles.
-      const y = p.y - spriteHeight / 2 - 3;
-      
-      ctx.save();
-      
-      // Flip horizontally if facing right (fixed: was backwards)
-      if (p.facingRight) {
-        ctx.translate(p.x, p.y);
-        ctx.scale(-1, 1);
-        ctx.translate(-p.x, -p.y);
-      }
-      
-      ctx.drawImage(this.submarineImg, x, y, spriteWidth, spriteHeight);
-      ctx.restore();
+      this.drawSharedSubmarine(ctx, p.x, p.y + 7, {
+        faceRight: p.facingRight,
+        scale: 1,
+      });
     } else {
       // Fallback rectangle if image not loaded
       const x = p.x - p.width / 2;
@@ -3788,6 +4310,62 @@ class Game {
       }
     }
     
+    ctx.restore();
+  }
+
+  private drawMagnetRadiusIndicator(px: number, py: number): void {
+    if (!this.powerUpManager.hasPowerUp("MAGNET")) return;
+
+    const ctx = this.ctx;
+    const pulse = 0.5 + Math.sin(this.frameCount * 0.08) * 0.2;
+    ctx.save();
+    ctx.strokeStyle = `rgba(110, 220, 255, ${0.22 + pulse * 0.18})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.arc(px, py, this.MAGNET_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  private drawPowerUpBarAbovePlayer(): void {
+    const active = this.powerUpManager.getPrimaryPowerUp();
+    if (!active) return;
+
+    const ctx = this.ctx;
+    const p = this.playerController.getPlayer();
+    const info = POWERUP_INFO[active.type];
+    const pct = Math.max(0, Math.min(1, active.remainingFrames / active.totalFrames));
+
+    const width = 64;
+    const height = 8;
+    const x = Math.floor(p.x - width / 2);
+    const y = Math.floor(p.y - p.height / 2 - 20);
+
+    ctx.save();
+
+    // Label
+    ctx.fillStyle = "rgba(240, 252, 255, 0.95)";
+    ctx.font = "7px 'Press Start 2P'";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`${info.name}!`, p.x, y - 3);
+
+    // Track
+    ctx.fillStyle = "rgba(4, 16, 30, 0.82)";
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = "rgba(170, 230, 255, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+
+    // Fill
+    const fillW = Math.max(0, Math.floor((width - 2) * pct));
+    if (fillW > 0) {
+      ctx.fillStyle = info.color;
+      ctx.fillRect(x + 1, y + 1, fillW, height - 2);
+    }
+
     ctx.restore();
   }
   
@@ -3880,23 +4458,23 @@ class Game {
     }
   }
   
-  private drawSatellites(): void {
-    if (!this.powerUpManager.hasPowerUp("SATELLITE")) return;
+  private drawShields(): void {
+    if (!this.powerUpManager.hasPowerUp("SHIELD")) return;
     
     const ctx = this.ctx;
     const player = this.playerController.getPlayer();
-    const positions = this.powerUpManager.getSatellitePositions(player.x, player.y);
-    const orbSize = POWERUP_CONSTANTS.SATELLITE_ORB_SIZE;
-    const info = POWERUP_INFO["SATELLITE"];
+    const positions = this.powerUpManager.getShieldPositions(player.x, player.y);
+    const orbSize = POWERUP_CONSTANTS.SHIELD_ORB_SIZE;
+    const info = POWERUP_INFO["SHIELD"];
     
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
       
       // Trail effect
-      const satellites = this.powerUpManager.getSatellites();
-      const trailAngle = satellites[i].angle - POWERUP_CONSTANTS.SATELLITE_SPEED * 5;
-      const trailX = player.x + Math.cos(trailAngle) * satellites[i].radius;
-      const trailY = player.y + Math.sin(trailAngle) * satellites[i].radius;
+      const shields = this.powerUpManager.getShields();
+      const trailAngle = shields[i].angle - POWERUP_CONSTANTS.SHIELD_SPEED * 5;
+      const trailX = player.x + Math.cos(trailAngle) * shields[i].radius;
+      const trailY = player.y + Math.sin(trailAngle) * shields[i].radius;
       
       ctx.fillStyle = info.glowColor.replace("0.6", "0.15");
       ctx.beginPath();
@@ -3937,7 +4515,7 @@ class Game {
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.arc(player.x, player.y, POWERUP_CONSTANTS.SATELLITE_RADIUS, 0, Math.PI * 2);
+    ctx.arc(player.x, player.y, POWERUP_CONSTANTS.SHIELD_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
   }
