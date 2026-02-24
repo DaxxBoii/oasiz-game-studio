@@ -7,6 +7,12 @@
  */
 
 import { CONFIG } from "./config";
+
+function getAssetUrl(relativePath: string): string {
+  const baseUrl = import.meta.env.BASE_URL || "/";
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}assets/${relativePath}`;
+}
 import { SeededRNG } from "./world";
 
 // ============= TYPES =============
@@ -281,7 +287,7 @@ export class StaticEnemy extends BaseEnemy {
     
     // Red crab sprite sheet: 4 frames, 96×96 per frame (384x96 total)
     this.setupSprite({
-      src: "assets/Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/3/Idle.png",
+      src: getAssetUrl("Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/3/Idle.png"),
       frameWidth: 96,
       frameHeight: 96,
       frameCount: 4,
@@ -298,7 +304,7 @@ export class StaticEnemy extends BaseEnemy {
     this.attackSprite.onload = () => {
       this.attackSpriteLoaded = true;
     };
-    this.attackSprite.src = "assets/Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/3/Attack3.png";
+    this.attackSprite.src = getAssetUrl("Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/3/Attack3.png");
   }
 
   update(playerX: number, playerY: number): void {

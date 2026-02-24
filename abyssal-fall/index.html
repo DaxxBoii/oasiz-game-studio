@@ -403,6 +403,51 @@
             display: none;
         }
 
+        #powerup-bar {
+            position: absolute;
+            top: 45px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(360px, 58vw);
+            z-index: 7;
+            pointer-events: none;
+            display: block;
+        }
+
+        #powerup-bar.hidden {
+            display: none;
+        }
+
+        #powerup-label {
+            color: #e9f8ff;
+            text-align: center;
+            font-size: 0.62rem;
+            letter-spacing: 1px;
+            text-shadow:
+                0 0 6px rgba(0, 0, 0, 0.9),
+                0 0 10px rgba(130, 230, 255, 0.45);
+            margin-bottom: 7px;
+        }
+
+        #powerup-track {
+            width: 100%;
+            height: 14px;
+            border-radius: 7px;
+            border: 1px solid rgba(170, 230, 255, 0.6);
+            background: rgba(5, 20, 38, 0.78);
+            box-shadow:
+                inset 0 1px 4px rgba(0, 0, 0, 0.45),
+                0 4px 12px rgba(0, 0, 0, 0.35);
+            overflow: hidden;
+        }
+
+        #powerup-fill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #00ffcc 0%, #8dfbe9 100%);
+            transition: width 0.1s linear;
+        }
+
         .hud-top {
             display: flex;
             justify-content: space-between;
@@ -670,6 +715,10 @@
                 width: 58px;
                 height: 58px;
             }
+            #powerup-bar {
+                top: 120px;
+                width: min(320px, 70vw);
+            }
             .hud-top {
                 padding-top: 120px;
             }
@@ -708,6 +757,12 @@
 
         <!-- HUD -->
         <div id="hud">
+            <div id="powerup-bar" class="hidden">
+                <div id="powerup-label">LASER!</div>
+                <div id="powerup-track">
+                    <div id="powerup-fill"></div>
+                </div>
+            </div>
             <div class="hud-top">
                 <div class="hud-left">
                     <div id="score">0</div>

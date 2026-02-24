@@ -5,19 +5,20 @@
  * When collected, time freezes, a title-style text drops in with the 
  * powerup name/description, then rises away and the game continues.
  * 
- * Powerups are stackable and each has a configurable duration.
+ * Powerups are single-active with a configurable duration.
  * 
  * Types:
  *  - Blast: Every 3rd shot creates an explosion on enemy hit, damaging nearby enemies
  *  - Laser: Shoots a beam straight down (or in shoot direction)
  *  - Satellite: 3 rotating orbs that kill enemies on contact and block projectiles
  *  - Lightning Chain: Every 4th shot chains lightning to nearby enemies in a radius
+ *  - Magnet: Pulls nearby gems toward the player
  */
 
 import { CONFIG } from "./config";
 
 // ============= TYPES =============
-export type PowerUpType = "BLAST" | "LASER" | "SATELLITE" | "LIGHTNING";
+export type PowerUpType = "BLAST" | "LASER" | "SATELLITE" | "LIGHTNING" | "MAGNET";
 
 export interface PowerUpOrb {
   x: number;
@@ -76,7 +77,7 @@ export const POWERUP_CONSTANTS = {
   
   // Blast
   BLAST_EVERY_N_SHOTS: 3,        // Every 3rd shot triggers blast
-  BLAST_RADIUS: 80,              // Explosion radius
+  BLAST_RADIUS: 240,             // Explosion radius (3x larger)
   BLAST_DAMAGE: 1,               // Damage to nearby enemies
   
   // Laser
@@ -113,8 +114,8 @@ export const POWERUP_INFO: Record<PowerUpType, { name: string; description: stri
     glowColor: "rgba(0, 255, 204, 0.6)",
   },
   SATELLITE: {
-    name: "SATELLITE",
-    description: "3 orbs orbit and destroy enemies",
+    name: "SHIELD",
+    description: "3 orbiting shields destroy enemies",
     color: "#cc88ff",
     glowColor: "rgba(204, 136, 255, 0.6)",
   },
@@ -123,6 +124,12 @@ export const POWERUP_INFO: Record<PowerUpType, { name: string; description: stri
     description: "Every 4th shot chains to enemies",
     color: "#ffee33",
     glowColor: "rgba(255, 238, 51, 0.6)",
+  },
+  MAGNET: {
+    name: "MAGNET",
+    description: "Pulls nearby gems to you",
+    color: "#4dd4ff",
+    glowColor: "rgba(77, 212, 255, 0.6)",
   },
 };
 
@@ -151,7 +158,7 @@ export class PowerUpManager {
   
   // Available types to cycle through
   private typeIndex: number = 0;
-  private typeOrder: PowerUpType[] = ["LASER", "BLAST", "LIGHTNING", "SATELLITE"];
+  private typeOrder: PowerUpType[] = ["LASER", "BLAST", "LIGHTNING", "SATELLITE", "MAGNET"];
   
   constructor() {
     this.reset();
@@ -178,10 +185,20 @@ export class PowerUpManager {
   checkSpawnOrb(
     maxDepth: number,
     playerX: number,
-    resolveSafeX?: (worldY: number, entityWidth: number, preferredX: number) => number
+    resolveSafeX?: (worldY: number, entityWidth: number, preferredX: number) => number,
+    minWorldY?: number
   ): void {
+    // Do not spawn new upgrade orbs while one is active.
+    if (this.activePowerUps.length > 0) return;
+
     // Calculate the NEXT milestone ahead of the player
     const nextMilestone = (Math.floor(maxDepth / CONFIG.POWERUP_SPAWN_DEPTH_INTERVAL) + 1) * CONFIG.POWERUP_SPAWN_DEPTH_INTERVAL;
+    const nextWorldY = nextMilestone * 10;
+
+    // Keep spawns off-screen (below the visible area) so new upgrades don't pop in next to player.
+    if (minWorldY !== undefined && nextWorldY <= minWorldY) {
+      return;
+    }
     
     if (!this.spawnedMilestones.has(nextMilestone)) {
       this.spawnedMilestones.add(nextMilestone);
@@ -228,6 +245,9 @@ export class PowerUpManager {
   
   /** Check if player collects any orb. Returns the collected orb type or null */
   checkCollection(playerX: number, playerY: number, playerWidth: number, playerHeight: number): PowerUpType | null {
+    // While an upgrade is active, ignore new pickups.
+    if (this.activePowerUps.length > 0) return null;
+
     const px = playerX - playerWidth / 2;
     const py = playerY - playerHeight / 2;
     
@@ -248,26 +268,31 @@ export class PowerUpManager {
   }
   
   private activatePowerUp(type: PowerUpType): void {
-    // Check if this type is already active - if so, refresh its duration (stackable)
-    const existing = this.activePowerUps.find(p => p.type === type);
-    if (existing) {
-      // Stack: add duration on top
-      existing.remainingFrames += CONFIG.POWERUP_DURATION_FRAMES;
-      existing.totalFrames = existing.remainingFrames;
-    } else {
-      this.activePowerUps.push({
-        type,
-        remainingFrames: CONFIG.POWERUP_DURATION_FRAMES,
-        totalFrames: CONFIG.POWERUP_DURATION_FRAMES,
-      });
-    }
-    
+    // Clear any pending orbs so none remain visible while a powerup is active.
+    this.orbs = [];
+
+    // Single-active model: activating any upgrade replaces the current one.
+    const durationFrames = this.getPowerUpDurationFrames(type);
+    this.activePowerUps = [{
+      type,
+      remainingFrames: durationFrames,
+      totalFrames: durationFrames,
+    }];
+
     // Initialize satellites if this is a satellite powerup
     if (type === "SATELLITE" && this.satellites.length === 0) {
       this.initSatellites();
+    } else if (type !== "SATELLITE") {
+      this.satellites = [];
     }
     
     console.log(`[PowerUpManager] Activated ${type} powerup`);
+  }
+
+  private getPowerUpDurationFrames(type: PowerUpType): number {
+    // Shield is intentionally shorter than other powerups.
+    if (type === "SATELLITE") return 360;
+    return CONFIG.POWERUP_DURATION_FRAMES;
   }
   
   private initSatellites(): void {
@@ -420,6 +445,10 @@ export class PowerUpManager {
   
   getActivePowerUps(): ActivePowerUp[] {
     return this.activePowerUps;
+  }
+
+  getPrimaryPowerUp(): ActivePowerUp | null {
+    return this.activePowerUps.length > 0 ? this.activePowerUps[0] : null;
   }
   
   getSatellites(): SatelliteOrb[] {

@@ -187,6 +187,12 @@ class Game {
   private laserBuffer: AudioBuffer | null = null;
   private gemBuffer: AudioBuffer | null = null;
   private enemyCrunchBuffer: AudioBuffer | null = null;
+  private blastBuffer: AudioBuffer | null = null;
+  private lightningBuffer: AudioBuffer | null = null;
+  private satelliteBuffer: AudioBuffer | null = null;
+  private readonly POWERUP_SFX_VOLUME: number = 0.6;
+  private readonly MAGNET_RADIUS: number = 200;
+  private magnetPullSfxCooldownFrames: number = 0;
   
   // Menu animation entities
   private menuEnemies: BaseEnemy[] = [];
@@ -763,6 +769,21 @@ class Game {
       this.enemyCrunchBuffer = buf;
       console.log("[loadAudio]", "Enemy crunch audio decoded");
     });
+
+    this.decodeAudioFile("assets/sfx/bubble-laser-fx.wav").then((buf) => {
+      this.blastBuffer = buf;
+      console.log("[loadAudio]", "Blast audio decoded");
+    });
+
+    this.decodeAudioFile("assets/sfx/lightning-zap.mp3").then((buf) => {
+      this.lightningBuffer = buf;
+      console.log("[loadAudio]", "Lightning audio decoded");
+    });
+
+    this.decodeAudioFile("assets/sfx/satellite-hit.mp3").then((buf) => {
+      this.satelliteBuffer = buf;
+      console.log("[loadAudio]", "Satellite audio decoded");
+    });
   }
   
   private getAudioCtx(): AudioContext {
@@ -810,7 +831,7 @@ class Game {
   
   private playLaserSound(): void {
     if (!this.settings.fx) return;
-    this.playSfx(this.laserBuffer, 1.0);
+    this.playSfx(this.laserBuffer, this.POWERUP_SFX_VOLUME);
   }
 
   private playGemSound(): void {
@@ -919,6 +940,43 @@ class Game {
     osc.start(now);
     osc.stop(now + duration);
   }
+
+  private playBlastSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.blastBuffer, this.POWERUP_SFX_VOLUME);
+  }
+
+  private playLightningSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.lightningBuffer, this.POWERUP_SFX_VOLUME);
+  }
+
+  private playSatelliteSound(): void {
+    if (!this.settings.fx) return;
+    this.playSfx(this.satelliteBuffer, this.POWERUP_SFX_VOLUME);
+  }
+
+  private playMagnetPullSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.045;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(920, now);
+    osc.frequency.exponentialRampToValueAtTime(680, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.08, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
   
   private startAmbience(): void {
     if (!this.settings.music || !this.ambienceAudio) return;
@@ -965,6 +1023,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.add("hidden");
     document.getElementById("ammo-slider")?.classList.add("hidden");
     document.getElementById("hp-bar")?.classList.add("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     // Hide settings modal
     document.getElementById("settings-modal")?.classList.add("hidden");
@@ -1178,6 +1237,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.remove("hidden");
     document.getElementById("ammo-slider")?.classList.remove("hidden");
     document.getElementById("hp-bar")?.classList.remove("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     // Start ambience music
     this.startAmbience();
@@ -1206,6 +1266,7 @@ class Game {
     document.getElementById("settings-btn")?.classList.add("hidden");
     document.getElementById("ammo-slider")?.classList.add("hidden");
     document.getElementById("hp-bar")?.classList.add("hidden");
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     this.triggerHaptic("error");
   }
@@ -1605,6 +1666,7 @@ class Game {
           // Trigger blast explosion if blast powerup shot
           if (this.lastShotEffects.triggerBlast && this.powerUpManager.hasPowerUp("BLAST")) {
             this.powerUpManager.spawnBlastExplosion(hitX, hitY);
+            this.playBlastSound();
             this.addScreenShake(8);
             this.triggerHaptic("medium");
           }
@@ -1711,6 +1773,7 @@ class Game {
     
     if (chainPoints.length > 1) {
       this.powerUpManager.spawnLightningChain(chainPoints);
+      this.playLightningSound();
     }
   }
   
@@ -2018,6 +2081,7 @@ class Game {
     const effects = this.powerUpManager.onPlayerShoot();
     if (effects.triggerBlast && this.powerUpManager.hasPowerUp("BLAST")) {
       this.powerUpManager.spawnBlastExplosion(hitX, hitY);
+      this.playBlastSound();
       this.addScreenShake(8);
       this.triggerHaptic("medium");
     }
@@ -2288,7 +2352,8 @@ class Game {
     this.powerUpManager.checkSpawnOrb(
       this.maxDepth,
       player.x,
-      (worldY, entityWidth, preferredX) => this.levelSpawner.getSafeSpawnX(worldY, entityWidth, preferredX)
+      (worldY, entityWidth, preferredX) => this.levelSpawner.getSafeSpawnX(worldY, entityWidth, preferredX),
+      this.cameraY + CONFIG.INTERNAL_HEIGHT + 80
     );
     
     // Check powerup orb collection
@@ -2318,6 +2383,9 @@ class Game {
     
     // Process lightning chain from explosions
     this.processLightningCollisions();
+
+    // Process magnet pull on nearby gems
+    this.processMagnetAttraction();
     
     // (Powerup indicators removed - aura effect replaces them)
   }
@@ -2348,6 +2416,7 @@ class Game {
           const isDead = enemy.takeDamage(POWERUP_CONSTANTS.SATELLITE_DAMAGE);
           if (isDead) {
             this.killEnemy(enemy, i);
+            this.playSatelliteSound();
           }
         }
       }
@@ -2427,6 +2496,55 @@ class Game {
           }
         }
       }
+    }
+  }
+
+  private processMagnetAttraction(): void {
+    if (!this.powerUpManager.hasPowerUp("MAGNET")) return;
+
+    const player = this.playerController.getPlayer();
+    const radius = this.MAGNET_RADIUS;
+    const radiusSq = radius * radius;
+    let pulledGemCount = 0;
+
+    if (this.magnetPullSfxCooldownFrames > 0) {
+      this.magnetPullSfxCooldownFrames--;
+    }
+
+    const pullGem = (gem: Gem, useVelocity: boolean) => {
+      if (gem.collected) return;
+      const dx = player.x - gem.x;
+      const dy = player.y - gem.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= 0.001 || distSq > radiusSq) return;
+
+      const dist = Math.sqrt(distSq);
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const strength = (1 - dist / radius);
+      const pullSpeed = 0.9 + strength * 3.2;
+      pulledGemCount++;
+
+      if (useVelocity) {
+        gem.vx = (gem.vx ?? 0) + nx * pullSpeed * 0.35;
+        gem.vy = (gem.vy ?? 0) + ny * pullSpeed * 0.35;
+      } else {
+        gem.x += nx * pullSpeed;
+        gem.y += ny * pullSpeed;
+      }
+    };
+
+    for (const gem of this.activeGems) {
+      pullGem(gem, false);
+    }
+
+    for (const gem of this.droppedGems) {
+      pullGem(gem, true);
+    }
+
+    if (pulledGemCount > 0 && this.magnetPullSfxCooldownFrames <= 0) {
+      this.playMagnetPullSound();
+      this.magnetPullSfxCooldownFrames = 4;
     }
   }
   
@@ -2768,6 +2886,9 @@ class Game {
       const ammoPercent = (player.ammo / player.maxAmmo) * 100;
       ammoSliderFill.style.height = `${ammoPercent}%`;
     }
+
+    // DOM powerup bar is hidden; active timer is rendered above the player.
+    document.getElementById("powerup-bar")?.classList.add("hidden");
     
     if (comboEl) {
       if (player.combo > 0) {
@@ -2928,6 +3049,7 @@ class Game {
       
       // Draw player
       this.drawPlayer();
+      this.drawPowerUpBarAbovePlayer();
       if (this.deathFreezeFrames > 0) {
         this.drawDeathFreezeHighlight();
       }
@@ -3733,6 +3855,7 @@ class Game {
     
     // Draw powerup aura(s) behind the submarine
     this.drawPowerUpAura(ctx, p.x, p.y);
+    this.drawMagnetRadiusIndicator(p.x, p.y);
     
     // Draw submarine sprite
     if (this.submarineImg && this.submarineImg.complete) {
@@ -3839,6 +3962,62 @@ class Game {
       }
     }
     
+    ctx.restore();
+  }
+
+  private drawMagnetRadiusIndicator(px: number, py: number): void {
+    if (!this.powerUpManager.hasPowerUp("MAGNET")) return;
+
+    const ctx = this.ctx;
+    const pulse = 0.5 + Math.sin(this.frameCount * 0.08) * 0.2;
+    ctx.save();
+    ctx.strokeStyle = `rgba(110, 220, 255, ${0.22 + pulse * 0.18})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.arc(px, py, this.MAGNET_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  private drawPowerUpBarAbovePlayer(): void {
+    const active = this.powerUpManager.getPrimaryPowerUp();
+    if (!active) return;
+
+    const ctx = this.ctx;
+    const p = this.playerController.getPlayer();
+    const info = POWERUP_INFO[active.type];
+    const pct = Math.max(0, Math.min(1, active.remainingFrames / active.totalFrames));
+
+    const width = 64;
+    const height = 8;
+    const x = Math.floor(p.x - width / 2);
+    const y = Math.floor(p.y - p.height / 2 - 20);
+
+    ctx.save();
+
+    // Label
+    ctx.fillStyle = "rgba(240, 252, 255, 0.95)";
+    ctx.font = "7px 'Press Start 2P'";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`${info.name}!`, p.x, y - 3);
+
+    // Track
+    ctx.fillStyle = "rgba(4, 16, 30, 0.82)";
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = "rgba(170, 230, 255, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+
+    // Fill
+    const fillW = Math.max(0, Math.floor((width - 2) * pct));
+    if (fillW > 0) {
+      ctx.fillStyle = info.color;
+      ctx.fillRect(x + 1, y + 1, fillW, height - 2);
+    }
+
     ctx.restore();
   }
   
