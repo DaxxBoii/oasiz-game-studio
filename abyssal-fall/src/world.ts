@@ -437,6 +437,7 @@ export class LevelSpawner {
     this.normalizeBreakablesUnderUnbreakables(chunk);
     this.enforceBreakableStructureCap(chunk);
     this.enforceBreakableRunCap(chunk);
+    this.ensureNoPocketSoftlocks(chunk);
   }
 
   // Guarantee at least a 2-block-wide no-break route through each chunk.
@@ -878,6 +879,178 @@ export class LevelSpawner {
         runStart = runEnd + 1;
       }
     }
+  }
+
+  // Final safety post-pass:
+  // detect 1-cell pockets that can trap the player against a wall/floor combo
+  // and carve a nearby breakable cell to guarantee an escape route.
+  private ensureNoPocketSoftlocks(chunk: Chunk): void {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const rows = Math.max(1, Math.floor(CONFIG.CHUNK_HEIGHT / BLOCK));
+    const cols = Math.max(1, Math.floor(CONFIG.INTERNAL_WIDTH / BLOCK));
+    const maxEscapeScanRows = 4;
+    const maxFixes = 24;
+
+    const toKey = (row: number, col: number): string => `${row}:${col}`;
+
+    for (let fixes = 0; fixes < maxFixes; fixes++) {
+      const blocked = new Set<string>();
+      const breakable = new Set<string>();
+
+      for (const p of chunk.platforms) {
+        if (p.oneWay) continue;
+        const startCol = Math.max(0, Math.floor(p.x / BLOCK));
+        const endCol = Math.min(cols - 1, Math.floor((p.x + p.width - 1) / BLOCK));
+        const startRow = Math.max(0, Math.floor((p.y - chunk.y) / BLOCK));
+        const endRow = Math.min(rows - 1, Math.floor((p.y + p.height - 1 - chunk.y) / BLOCK));
+        for (let row = startRow; row <= endRow; row++) {
+          for (let col = startCol; col <= endCol; col++) {
+            const key = toKey(row, col);
+            blocked.add(key);
+            if (p.breakable) breakable.add(key);
+          }
+        }
+      }
+
+      const isBlocked = (row: number, col: number): boolean => {
+        if (col < 0 || col >= cols) return true;
+        if (row < 0) return false;
+        if (row >= rows) return true;
+        return blocked.has(toKey(row, col));
+      };
+      const isBreakable = (row: number, col: number): boolean => {
+        if (col < 0 || col >= cols || row < 0 || row >= rows) return false;
+        return breakable.has(toKey(row, col));
+      };
+
+      let carved = false;
+
+      for (let row = 1; row < rows - 1 && !carved; row++) {
+        for (let col = 1; col < cols - 1 && !carved; col++) {
+          const here = toKey(row, col);
+          if (blocked.has(here)) continue;
+          if (!isBlocked(row + 1, col)) continue; // no floor support
+          if (!isBlocked(row, col - 1) || !isBlocked(row, col + 1)) continue; // not enclosed laterally
+
+          // If there is already a reachable side opening within jump range, this isn't a softlock.
+          let hasReachableExit = false;
+          for (let up = 0; up <= maxEscapeScanRows; up++) {
+            const rr = row - up;
+            if (rr < 0) {
+              hasReachableExit = true;
+              break;
+            }
+            if (isBlocked(rr, col)) break;
+            if (!isBlocked(rr, col - 1) || !isBlocked(rr, col + 1)) {
+              hasReachableExit = true;
+              break;
+            }
+          }
+          if (hasReachableExit) continue;
+
+          // Carve a nearby breakable side cell (prefer immediate height, then above).
+          for (let up = 0; up <= maxEscapeScanRows && !carved; up++) {
+            const rr = row - up;
+            if (rr < 0) break;
+            if (isBreakable(rr, col - 1) && this.carveBreakableCell(chunk, rr, col - 1)) {
+              carved = true;
+              break;
+            }
+            if (isBreakable(rr, col + 1) && this.carveBreakableCell(chunk, rr, col + 1)) {
+              carved = true;
+              break;
+            }
+          }
+
+          // Fallback: open ceiling above pocket if side breakables weren't available.
+          if (!carved) {
+            for (let up = 1; up <= maxEscapeScanRows; up++) {
+              const rr = row - up;
+              if (rr < 0) break;
+              if (isBreakable(rr, col) && this.carveBreakableCell(chunk, rr, col)) {
+                carved = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (!carved) break;
+    }
+  }
+
+  private carveBreakableCell(chunk: Chunk, row: number, col: number): boolean {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const cellX = col * BLOCK;
+    const cellY = chunk.y + row * BLOCK;
+    const cellRight = cellX + BLOCK;
+    const cellBottom = cellY + BLOCK;
+
+    for (let i = chunk.platforms.length - 1; i >= 0; i--) {
+      const p = chunk.platforms[i];
+      if (!p.breakable) continue;
+      if (cellX >= p.x + p.width || cellRight <= p.x || cellY >= p.y + p.height || cellBottom <= p.y) continue;
+
+      chunk.platforms.splice(i, 1);
+
+      const leftW = Math.max(0, cellX - p.x);
+      const rightW = Math.max(0, p.x + p.width - cellRight);
+      const topH = Math.max(0, cellY - p.y);
+      const bottomH = Math.max(0, p.y + p.height - cellBottom);
+
+      if (leftW > 0) {
+        chunk.platforms.push({
+          x: p.x,
+          y: p.y,
+          width: leftW,
+          height: p.height,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (rightW > 0) {
+        chunk.platforms.push({
+          x: cellRight,
+          y: p.y,
+          width: rightW,
+          height: p.height,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (topH > 0) {
+        chunk.platforms.push({
+          x: Math.max(p.x, cellX),
+          y: p.y,
+          width: Math.min(p.x + p.width, cellRight) - Math.max(p.x, cellX),
+          height: topH,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      if (bottomH > 0) {
+        chunk.platforms.push({
+          x: Math.max(p.x, cellX),
+          y: cellBottom,
+          width: Math.min(p.x + p.width, cellRight) - Math.max(p.x, cellX),
+          height: bottomH,
+          isWall: p.isWall,
+          breakable: true,
+          hp: 1,
+          chunkIndex: p.chunkIndex,
+        });
+      }
+      return true;
+    }
+
+    return false;
   }
 
   // Hard post-pass: any connected breakable structure (4-neighbor adjacency)

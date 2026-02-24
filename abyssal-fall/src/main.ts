@@ -35,6 +35,7 @@ class Game {
   private activePlatforms: Platform[] = [];
   private activeWeeds: Weed[] = [];
   private brokenWeeds: Set<string> = new Set();
+  private stompedWeeds: Map<string, { weed: Weed; timer: number }> = new Map();
   private enemyBullets: EnemyBullet[] = [];
   
   // Powerup state
@@ -162,6 +163,7 @@ class Game {
   }[] = [];
   private deathFreezeFrames: number = 0;
   private deathFreezeKiller: { x: number; y: number } | null = null;
+  private readonly DEATH_FREEZE_DURATION_FRAMES: number = 180;
   
   // Track previous HP for bubble pop detection
   private previousHp: number = CONFIG.PLAYER_MAX_HP;
@@ -862,10 +864,22 @@ class Game {
 
   private startDeathFreeze(killerX: number, killerY: number): void {
     if (this.deathFreezeFrames > 0) return;
-    this.deathFreezeFrames = 120;
+    this.deathFreezeFrames = this.DEATH_FREEZE_DURATION_FRAMES;
     this.deathFreezeKiller = { x: killerX, y: killerY };
     this.playDeathSound();
     this.triggerHaptic("error");
+  }
+
+  private triggerPlayerDeath(killerX: number, killerY: number): void {
+    this.startDeathFreeze(killerX, killerY);
+  }
+
+  private getDeathFreezeZoom(): number {
+    if (this.deathFreezeFrames <= 0) return 1;
+    const elapsed = this.DEATH_FREEZE_DURATION_FRAMES - this.deathFreezeFrames;
+    const t = Math.max(0, Math.min(1, elapsed / this.DEATH_FREEZE_DURATION_FRAMES));
+    const easeOut = 1 - Math.pow(1 - t, 3);
+    return 1 + easeOut * 0.18;
   }
 
   private applyPlayerDamage(killerX: number, killerY: number): void {
@@ -875,7 +889,7 @@ class Game {
     this.spawnDamageText(player.x, player.y - player.height * 0.6, "-1");
     this.playHurtSound();
     if (this.playerController.isDead()) {
-      this.startDeathFreeze(killerX, killerY);
+      this.triggerPlayerDeath(killerX, killerY);
     }
   }
 
@@ -1131,6 +1145,7 @@ class Game {
     this.enemyBullets = [];
     this.releaseAllDroppedGems();
     this.brokenWeeds.clear();
+    this.stompedWeeds.clear();
     this.damageTexts = [];
     this.deathFreezeFrames = 0;
     this.deathFreezeKiller = null;
@@ -1232,7 +1247,7 @@ class Game {
     const killedByFall = this.playerController.checkKillPlane(this.cameraY);
     if (killedByFall) {
       const p = this.playerController.getPlayer();
-      this.startDeathFreeze(p.x, this.cameraY + CONFIG.INTERNAL_HEIGHT + 70);
+      this.triggerPlayerDeath(p.x, this.cameraY + CONFIG.INTERNAL_HEIGHT + 70);
       return;
     }
     
@@ -1275,7 +1290,9 @@ class Game {
     
     // Check fail states
     if (this.playerController.isDead() && this.deathFreezeFrames <= 0) {
-      this.gameOver();
+      const p = this.playerController.getPlayer();
+      this.triggerPlayerDeath(p.x, p.y);
+      return;
     }
   }
   
@@ -1285,6 +1302,7 @@ class Game {
     this.activePlatforms = visible.platforms;
     this.activeGems = visible.gems;
     this.activeWeeds = visible.weeds.filter((weed) => !this.brokenWeeds.has(this.getWeedKey(weed)));
+    this.updateStompedWeeds();
     
     const player = this.playerController.getPlayer();
     
@@ -1304,6 +1322,16 @@ class Game {
         if (bullet) {
           this.enemyBullets.push(bullet);
         }
+      }
+    }
+  }
+
+  private updateStompedWeeds(): void {
+    for (const [key, stomped] of this.stompedWeeds) {
+      stomped.timer--;
+      if (stomped.timer <= 0) {
+        this.stompedWeeds.delete(key);
+        this.brokenWeeds.add(key);
       }
     }
   }
@@ -1371,6 +1399,9 @@ class Game {
     if (!gem) return;
     gem.collected = false;
     gem.dropped = true;
+    gem.width = 14;
+    gem.height = 14;
+    gem.value = CONFIG.SCORE_PER_GEM;
     gem.vx = 0;
     gem.vy = 0;
     gem.life = 0;
@@ -1509,27 +1540,18 @@ class Game {
           }
         }
 
-        // Once almost still on ground, transition to flashing despawn state
+        // Keep dropped gems dynamic; despawn is time-based (not settle/flash-based).
         const nearStill = Math.abs(gem.vx) < 0.08 && Math.abs(gem.vy) < 0.08;
         if (onGround && nearStill) {
-          gem.settleFrames++;
-          if (gem.settleFrames > 10) {
-            gem.settled = true;
-            gem.vx = 0;
-            gem.vy = 0;
-            gem.fadeTimer = 0;
-          }
-        } else {
-          gem.settleFrames = 0;
+          gem.vx = 0;
+          gem.vy = 0;
         }
-      } else {
-        gem.fadeTimer++;
       }
 
       const offTopOfScreen = gem.y + gem.height * 0.5 < this.cameraY - 24;
       const isFarBelow = gem.y > this.cameraY + CONFIG.INTERNAL_HEIGHT * 1.6;
-      const expiredAfterSettle = gem.settled && (gem.fadeTimer ?? 0) > 140;
-      if ((gem.life ?? 0) > 1200 || offTopOfScreen || isFarBelow || expiredAfterSettle) {
+      const expiredByLifetime = (gem.life ?? 0) > 300; // 5 seconds at 60fps
+      if (expiredByLifetime || offTopOfScreen || isFarBelow) {
         this.releaseDroppedGem(i);
       }
     }
@@ -1723,6 +1745,7 @@ class Game {
     const player = this.playerController.getPlayer();
     const prevX = player.x - player.vx;
     const prevY = player.y - player.vy;
+    const minLandingOverlap = player.width * 0.5;
     
     this.playerController.setGrounded(false);
     
@@ -1733,18 +1756,23 @@ class Game {
       const prevBottom = prevY + player.height / 2;
       const playerLeft = player.x - player.width / 2;
       const playerRight = player.x + player.width / 2;
+      const prevLeft = prevX - player.width / 2;
+      const prevRight = prevX + player.width / 2;
       const platformTop = platform.y;
       const platformLeft = platform.x;
       const platformRight = platform.x + platform.width;
       const overlapsX = playerRight > platformLeft && playerLeft < platformRight;
       const overlapWidth = Math.min(playerRight, platformRight) - Math.max(playerLeft, platformLeft);
-      const crossedTop = prevBottom <= platformTop + 1 && playerBottom >= platformTop;
+      const prevOverlapWidth = Math.min(prevRight, platformRight) - Math.max(prevLeft, platformLeft);
+      const crossedTop = prevBottom <= platformTop + 1 &&
+                        playerBottom >= platformTop &&
+                        Math.max(overlapWidth, prevOverlapWidth) >= minLandingOverlap;
       
       // Check if player is standing on top of this platform
       const isOnTop = playerBottom >= platformTop - 2 && 
                       playerBottom <= platformTop + 8 &&
                       overlapsX &&
-                      overlapWidth >= player.width * 0.35;
+                      overlapWidth >= minLandingOverlap;
       
       if (player.vy >= 0 && overlapsX) {
         if (platform.oneWay) {
@@ -1846,11 +1874,16 @@ class Game {
         const minOverlapY = Math.min(overlapTop, overlapBottom);
         const prevRectTop = prevY - player.height / 2;
         const prevRectBottom = prevY + player.height / 2;
+        const prevRectLeft = prevX - player.width / 2;
+        const prevRectRight = prevX + player.width / 2;
+        const overlapWidthNow = Math.min(rectRight, platRight) - Math.max(rectLeft, platLeft);
+        const overlapWidthPrev = Math.min(prevRectRight, platRight) - Math.max(prevRectLeft, platLeft);
         const playerBottomNow = player.y + player.height / 2;
         const playerTopNow = player.y - player.height / 2;
         const crossedTop = prevRectBottom <= platTop + 2 && playerBottomNow >= platTop;
         const crossedBottom = prevRectTop >= platBottom - 2 && playerTopNow <= platBottom;
-        const canResolveVertically = crossedTop || crossedBottom;
+        const canResolveVertically = (crossedTop || crossedBottom) &&
+          Math.max(overlapWidthNow, overlapWidthPrev) >= minLandingOverlap;
 
         if (minOverlapX < minOverlapY || !canResolveVertically) {
           const pushRight = overlapLeft < overlapRight;
@@ -1898,6 +1931,8 @@ class Game {
     const weedHitHeight = 20;
     for (let i = this.activeWeeds.length - 1; i >= 0; i--) {
       const weed = this.activeWeeds[i];
+      const weedKey = this.getWeedKey(weed);
+      if (this.stompedWeeds.has(weedKey)) continue;
       const weedRect = {
         x: weed.x - weedHitWidth / 2,
         y: weed.y - weedHitHeight,
@@ -1915,8 +1950,7 @@ class Game {
         this.playerController.bounce();
         this.playEnemyCrunchSound();
         this.triggerHaptic("light");
-        this.brokenWeeds.add(this.getWeedKey(weed));
-        this.activeWeeds.splice(i, 1);
+        this.stompedWeeds.set(weedKey, { weed, timer: 10 });
         break;
       }
     }
@@ -2517,19 +2551,24 @@ class Game {
 
   private spawnDroppedGems(x: number, y: number, chunkIndex: number): void {
     const count = 2 + Math.floor(Math.random() * 3);
+    const hasLargeGem = Math.random() < 0.2;
+    const largeGemIndex = hasLargeGem ? Math.floor(Math.random() * count) : -1;
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 1.2 + Math.random() * 2.8;
       const spawnRadius = 12 + Math.random() * 10;
       const spawnX = x + Math.cos(angle) * spawnRadius;
       const spawnY = y + Math.sin(angle) * (spawnRadius * 0.6);
+      const isLargeGem = i === largeGemIndex;
+      const gemSize = isLargeGem ? 20 : 14;
+      const gemValue = isLargeGem ? CONFIG.SCORE_PER_GEM * 2 : CONFIG.SCORE_PER_GEM;
 
       this.droppedGems.push({
         x: spawnX,
         y: spawnY,
-        width: 14,
-        height: 14,
-        value: (1 + Math.floor(Math.random() * 2)) * CONFIG.SCORE_PER_GEM,
+        width: gemSize,
+        height: gemSize,
+        value: gemValue,
         collected: false,
         chunkIndex,
         bobOffset: Math.random() * Math.PI * 2,
@@ -2541,6 +2580,7 @@ class Game {
         settleFrames: 0,
         fadeTimer: 0,
         collectDelay: 8,
+        isLarge: isLargeGem,
       });
     }
   }
@@ -2848,6 +2888,13 @@ class Game {
       // Apply camera transform with screen shake
       ctx.save();
       ctx.translate(this.screenShakeX, -this.cameraY + this.screenShakeY);
+      if (this.deathFreezeFrames > 0) {
+        const player = this.playerController.getPlayer();
+        const zoom = this.getDeathFreezeZoom();
+        ctx.translate(player.x, player.y);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-player.x, -player.y);
+      }
       
       // Draw platforms
       this.drawPlatforms();
@@ -2911,9 +2958,6 @@ class Game {
     const k = this.deathFreezeKiller;
 
     ctx.save();
-    ctx.fillStyle = "rgba(6, 15, 30, 0.35)";
-    ctx.fillRect(0, this.cameraY, CONFIG.INTERNAL_WIDTH, CONFIG.INTERNAL_HEIGHT);
-
     ctx.strokeStyle = "rgba(255, 255, 210, 0.9)";
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -3189,6 +3233,7 @@ class Game {
     const drawSize = 56;
     
     for (const weed of this.activeWeeds) {
+      const weedKey = this.getWeedKey(weed);
       const col = weed.spriteIndex % cols;
       const row = Math.floor(weed.spriteIndex / cols);
       
@@ -3214,6 +3259,11 @@ class Game {
         ctx.translate(drawX + drawSize / 2, drawY + drawSize / 2);
         ctx.scale(-1, 1);
         ctx.translate(-(drawX + drawSize / 2), -(drawY + drawSize / 2));
+      }
+
+      if (this.stompedWeeds.has(weedKey)) {
+        // Tint only the sprite draw call to red; avoid rectangular overlay artifacts.
+        ctx.filter = "brightness(0.7) sepia(1) saturate(6) hue-rotate(-35deg)";
       }
       
       ctx.drawImage(
@@ -3254,13 +3304,9 @@ class Game {
     for (const gem of this.droppedGems) {
       if (gem.collected) continue;
 
-      const bobY = Math.sin(this.frameCount * 0.16 + gem.bobOffset) * 1.5;
-      const fadeTimer = gem.fadeTimer ?? 0;
-      const flashing = gem.settled && fadeTimer > 30;
-      const alpha = flashing ? (Math.floor((fadeTimer - 30) / 6) % 2 === 0 ? 0.22 : 0.95) : 1;
+      const bobY = 0;
       ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = "#ffd84a";
+      ctx.fillStyle = gem.isLarge ? "#ffea7a" : "#ffd84a";
       ctx.beginPath();
       ctx.moveTo(gem.x, gem.y - gem.height / 2 + bobY);
       ctx.lineTo(gem.x + gem.width / 2, gem.y + bobY);
@@ -3268,6 +3314,11 @@ class Game {
       ctx.lineTo(gem.x - gem.width / 2, gem.y + bobY);
       ctx.closePath();
       ctx.fill();
+      if (gem.isLarge) {
+        ctx.strokeStyle = "rgba(255, 255, 220, 0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }
