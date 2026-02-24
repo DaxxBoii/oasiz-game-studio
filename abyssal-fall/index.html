@@ -274,12 +274,13 @@
             margin-top: 14px;
             display: grid;
             gap: 8px;
-            min-width: 260px;
+            min-width: 380px;
         }
 
         .score-row {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            column-gap: 14px;
             align-items: center;
             font-size: 0.68rem;
             color: rgba(255, 255, 255, 0.85);
@@ -295,12 +296,16 @@
 
         .score-row .label {
             color: rgba(255, 255, 255, 0.72);
+            white-space: nowrap;
         }
 
         .score-row .value {
             color: #fff;
-            min-width: 88px;
+            min-width: 200px;
             text-align: right;
+            white-space: nowrap;
+            font-size: 0.6rem;
+            letter-spacing: 0;
         }
 
         /* Settings Modal */

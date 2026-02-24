@@ -9,7 +9,7 @@ import { CONFIG } from "./config";
 import { LevelSpawner, Entity, Platform, Gem, BaseEnemy, Weed } from "./world";
 import { PlayerController, InputState } from "./player";
 import { PowerUpManager, PowerUpOrb, POWERUP_INFO, POWERUP_CONSTANTS, PowerUpType } from "./powerups";
-import { EnemyBullet, StaticEnemy } from "./enemies";
+import { EnemyBullet, PufferEnemy, StaticEnemy } from "./enemies";
 
 // ============= TYPES =============
 interface Settings {
@@ -89,6 +89,9 @@ class Game {
   private scoreEnemies: number = 0;
   private scoreGems: number = 0;
   private scoreBreakables: number = 0;
+  private enemyKillCount: number = 0;
+  private gemCollectCount: number = 0;
+  private breakableDestroyCount: number = 0;
   private gameOverTimers: number[] = [];
   private frameCount: number = 0;
   
@@ -108,6 +111,7 @@ class Game {
   private weedsImg: HTMLImageElement | null = null;
   private menuCrabImg: HTMLImageElement | null = null;
   private menuCrabFrame: number = 0;
+  private readonly SUBMARINE_DRAW_SIZE: number = 64;
   
   // Screen shake
   private screenShakeIntensity: number = 0;
@@ -137,7 +141,7 @@ class Game {
     maxFrames: number;
     color: string;
     direction: number;
-    spriteType: "shark" | "crab" | "squid"; // Which hurt sprite to use
+    spriteType: "shark" | "crab" | "squid" | "puffer"; // Which hurt sprite to use
   }[] = [];
   
   // Hurt sprite sheets (loaded once, shared by all hurt animations)
@@ -225,7 +229,7 @@ class Game {
   private enemyCrunchBuffer: AudioBuffer | null = null;
   private blastBuffer: AudioBuffer | null = null;
   private lightningBuffer: AudioBuffer | null = null;
-  private satelliteBuffer: AudioBuffer | null = null;
+  private shieldBuffer: AudioBuffer | null = null;
   private readonly UNIFORM_SFX_VOLUME: number = 0.55;
   private readonly UNIFORM_SYNTH_PEAK_GAIN: number = 0.14;
   private readonly MAGNET_RADIUS: number = 200;
@@ -680,7 +684,7 @@ class Game {
       }
     }
   }
-  
+
   private initDitherPattern(): void {
     // Create an offscreen canvas for processing
     this.ditherCanvas = document.createElement("canvas");
@@ -811,7 +815,7 @@ class Game {
       console.log("[Game] Submarine sprite loaded");
     };
     this.submarineImg.src = "assets/submarine.png";
-    
+
     // Load weeds sprite sheet (4 cols x 2 rows, 7 sprites)
     this.weedsImg = new Image();
     this.weedsImg.onload = () => {
@@ -907,9 +911,9 @@ class Game {
       console.log("[loadAudio]", "Lightning audio decoded");
     });
 
-    this.decodeAudioFile("assets/sfx/satellite-hit.mp3").then((buf) => {
-      this.satelliteBuffer = buf;
-      console.log("[loadAudio]", "Satellite audio decoded");
+    this.decodeAudioFile("assets/sfx/shield-hit.mp3").then((buf) => {
+      this.shieldBuffer = buf;
+      console.log("[loadAudio]", "Shield audio decoded");
     });
   }
   
@@ -1031,6 +1035,7 @@ class Game {
   }
 
   private applyPlayerDamage(killerX: number, killerY: number): void {
+    if (this.powerUpManager.hasPowerUp("SHIELD")) return;
     if (this.playerController.isInvulnerable()) return;
     const player = this.playerController.getPlayer();
     this.playerController.takeDamage();
@@ -1078,9 +1083,9 @@ class Game {
     this.playSfx(this.lightningBuffer, this.UNIFORM_SFX_VOLUME);
   }
 
-  private playSatelliteSound(): void {
+  private playShieldSound(): void {
     if (!this.settings.fx) return;
-    this.playSfx(this.satelliteBuffer, this.UNIFORM_SFX_VOLUME);
+    this.playSfx(this.shieldBuffer, this.UNIFORM_SFX_VOLUME);
   }
 
   private playMagnetPullSound(): void {
@@ -1097,6 +1102,29 @@ class Game {
 
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  private playPufferBoingSound(): void {
+    if (!this.settings.fx) return;
+    const ctx = this.getAudioCtx();
+    const now = ctx.currentTime;
+    const duration = 0.11;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.045);
+    osc.frequency.exponentialRampToValueAtTime(250, now + duration);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(this.UNIFORM_SYNTH_PEAK_GAIN * 1.08, now + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     osc.connect(gain);
@@ -1318,6 +1346,9 @@ class Game {
     this.scoreEnemies = 0;
     this.scoreGems = 0;
     this.scoreBreakables = 0;
+    this.enemyKillCount = 0;
+    this.gemCollectCount = 0;
+    this.breakableDestroyCount = 0;
     this.maxDepth = 0;
     this.frameCount = 0;
     this.cameraY = 0;
@@ -1508,9 +1539,13 @@ class Game {
     for (const enemy of this.activeEnemies) {
       enemy.update(player.x, player.y);
 
+      if (enemy instanceof PufferEnemy && enemy.consumePuffStart()) {
+        this.playPufferBoingSound();
+      }
+
       // Horizontal movers should never enter cave walls.
       // Use actual generated wall geometry at this enemy's Y, not static WALL_WIDTH.
-      if (enemy.type === "HORIZONTAL" || enemy.type === "EXPLODER") {
+      if (enemy.type === "HORIZONTAL" || enemy.type === "EXPLODER" || enemy.type === "PUFFER") {
         this.constrainEnemyInsideWalls(enemy);
       }
       
@@ -1968,6 +2003,7 @@ class Game {
     // Award some score for breaking blocks
     this.score += 2;
     this.scoreBreakables += 2;
+    this.breakableDestroyCount++;
     this.triggerHaptic("light");
   }
   
@@ -2146,8 +2182,32 @@ class Game {
     // Enemy collisions
     for (let i = this.activeEnemies.length - 1; i >= 0; i--) {
       const enemy = this.activeEnemies[i];
-      
-      if (!this.checkCollision(playerRect, enemy)) continue;
+
+      if (enemy instanceof PufferEnemy) {
+        const cx = enemy.x + enemy.width / 2;
+        const cy = enemy.y + enemy.height / 2;
+        const radius = enemy.getVisualRadius();
+        const closestX = Math.max(playerRect.x, Math.min(cx, playerRect.x + playerRect.width));
+        const closestY = Math.max(playerRect.y, Math.min(cy, playerRect.y + playerRect.height));
+        const ddx = cx - closestX;
+        const ddy = cy - closestY;
+        const overlapsVisual = ddx * ddx + ddy * ddy <= radius * radius;
+        if (!overlapsVisual) continue;
+
+        if (enemy.isPuffed()) {
+          if (!this.playerController.isInvulnerable()) {
+            this.applyPlayerDamage(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+            const player = this.playerController.getPlayer();
+            const knock = enemy.getCollisionKnockback(player.x, player.y);
+            this.playerController.setVelocity(knock.vx, knock.vy);
+            this.addScreenShake(6);
+            this.triggerHaptic("error");
+          }
+          continue;
+        }
+      } else if (!this.checkCollision(playerRect, enemy)) {
+        continue;
+      }
       
       // Player bounces if falling downward (vy > 0 means moving down)
       // This is the primary stomp mechanic - if player is falling, they stomp
@@ -2182,7 +2242,7 @@ class Game {
         playerRect.y < weedRect.y + weedRect.height &&
         playerRect.y + playerRect.height > weedRect.y;
       if (overlapsWeed && player.vy > 0 && fromAbove) {
-        this.playerController.bounce();
+        this.playerController.bounce(false);
         this.playEnemyCrunchSound();
         this.triggerHaptic("light");
         this.stompedWeeds.set(weedKey, { weed, timer: 10 });
@@ -2201,6 +2261,7 @@ class Game {
         this.score += points;
         this.scoreGems += points;
         this.gems++;
+        this.gemCollectCount++;
         this.playGemSound();
       }
     }
@@ -2218,6 +2279,7 @@ class Game {
         this.score += points;
         this.scoreGems += points;
         this.gems++;
+        this.gemCollectCount++;
         this.playGemSound();
         this.releaseDroppedGem(i);
       }
@@ -2238,30 +2300,13 @@ class Game {
   
   private bounceOnEnemy(enemy: BaseEnemy, index: number): void {
     // Bounce and restore ammo
-    this.playerController.bounce();
-    
-    const hitX = enemy.x + enemy.width / 2;
-    const hitY = enemy.y + enemy.height / 2;
+    this.playerController.bounce(false);
     
     // Kill enemy instantly when stomped
     this.killEnemy(enemy, index);
     
     // Increment combo
     this.playerController.incrementCombo();
-    
-    // Stomp counts as a "shot" for blast/lightning purposes
-    const effects = this.powerUpManager.onPlayerShoot();
-    if (effects.triggerBlast && this.powerUpManager.hasPowerUp("BLAST")) {
-      this.powerUpManager.spawnBlastExplosion(hitX, hitY);
-      this.playBlastSound();
-      this.addScreenShake(8);
-      this.triggerHaptic("medium");
-    }
-    if (effects.triggerLightning && this.powerUpManager.hasPowerUp("LIGHTNING")) {
-      this.triggerLightningChain(hitX, hitY);
-      this.addScreenShake(5);
-      this.triggerHaptic("light");
-    }
   }
   
   private spawnDeathExplosion(x: number, y: number, color: string): void {
@@ -2542,9 +2587,9 @@ class Game {
     // Update powerup manager (timers, effects)
     this.powerUpManager.update();
     
-    // Process satellite collisions with enemies
-    if (this.powerUpManager.hasPowerUp("SATELLITE")) {
-      this.processSatelliteCollisions();
+    // Process shield collisions with enemies
+    if (this.powerUpManager.hasPowerUp("SHIELD")) {
+      this.processShieldCollisions();
     }
     
     // Process laser beam collisions with enemies
@@ -2570,10 +2615,10 @@ class Game {
     this.powerupAuraFlashColor = info.color;
   }
   
-  private processSatelliteCollisions(): void {
+  private processShieldCollisions(): void {
     const player = this.playerController.getPlayer();
-    const positions = this.powerUpManager.getSatellitePositions(player.x, player.y);
-    const orbSize = POWERUP_CONSTANTS.SATELLITE_ORB_SIZE;
+    const positions = this.powerUpManager.getShieldPositions(player.x, player.y);
+    const orbSize = POWERUP_CONSTANTS.SHIELD_ORB_SIZE;
     
     for (const pos of positions) {
       for (let i = this.activeEnemies.length - 1; i >= 0; i--) {
@@ -2585,10 +2630,10 @@ class Game {
         const dist = Math.sqrt((pos.x - ecx) ** 2 + (pos.y - ecy) ** 2);
         
         if (dist < orbSize + Math.max(enemy.width, enemy.height) / 2) {
-          const isDead = enemy.takeDamage(POWERUP_CONSTANTS.SATELLITE_DAMAGE);
+          const isDead = enemy.takeDamage(POWERUP_CONSTANTS.SHIELD_DAMAGE);
           if (isDead) {
             this.killEnemy(enemy, i);
-            this.playSatelliteSound();
+            this.playShieldSound();
           }
         }
       }
@@ -2729,11 +2774,13 @@ class Game {
     const enemyColor = enemy.getBaseColor();
     
     // Determine which hurt sprite to use based on enemy type
-    let spriteType: "shark" | "crab" | "squid";
+    let spriteType: "shark" | "crab" | "squid" | "puffer";
     if (enemy.type === "HORIZONTAL") {
       spriteType = "shark";
     } else if (enemy.type === "EXPLODER") {
       spriteType = "squid";
+    } else if (enemy.type === "PUFFER") {
+      spriteType = "puffer";
     } else {
       spriteType = "crab";
     }
@@ -2755,6 +2802,7 @@ class Game {
     const points = CONFIG.SCORE_PER_ENEMY * comboMultiplier;
     this.score += points;
     this.scoreEnemies += points;
+    this.enemyKillCount++;
     
     // Small screen shake on enemy death
     this.addScreenShake(3);
@@ -2785,6 +2833,28 @@ class Game {
     this.gameOverTimers.push(intervalId);
   }
 
+  private formatBreakdownMultiplier(multiplier: number): string {
+    if (!Number.isFinite(multiplier)) return "0";
+    if (Math.abs(multiplier - Math.round(multiplier)) < 0.001) {
+      return `${Math.round(multiplier)}`;
+    }
+    return multiplier.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+  }
+
+  private roundUpToNearestFive(value: number): number {
+    if (value <= 0) return 0;
+    return Math.ceil(value / 5) * 5;
+  }
+
+  private formatScoreBreakdown(count: number, score: number): string {
+    const roundedScore = this.roundUpToNearestFive(score);
+    if (count <= 0 || roundedScore <= 0) {
+      return "0 x 0 = 0";
+    }
+    const multiplier = roundedScore / count;
+    return `${count} x ${this.formatBreakdownMultiplier(multiplier)} = ${roundedScore}`;
+  }
+
   private animateGameOverScoreBreakdown(): void {
     this.clearGameOverTimers();
     const finalScoreEl = document.getElementById("final-score");
@@ -2808,33 +2878,35 @@ class Game {
     finalScoreEl.textContent = "0";
     finalDepthEl.textContent = `Depth: ${Math.floor(this.maxDepth)}m`;
     depthValueEl.textContent = "0";
-    enemiesValueEl.textContent = "0";
-    gemsValueEl.textContent = "0";
-    breakablesValueEl.textContent = "0";
+    enemiesValueEl.textContent = this.formatScoreBreakdown(this.enemyKillCount, this.scoreEnemies);
+    gemsValueEl.textContent = this.formatScoreBreakdown(this.gemCollectCount, this.scoreGems);
+    breakablesValueEl.textContent = this.formatScoreBreakdown(this.breakableDestroyCount, this.scoreBreakables);
     depthRow.classList.remove("visible");
     enemiesRow.classList.remove("visible");
     gemsRow.classList.remove("visible");
     breakablesRow.classList.remove("visible");
 
     const steps = [
-      { row: depthRow, el: depthValueEl, value: this.scoreDepth },
-      { row: enemiesRow, el: enemiesValueEl, value: this.scoreEnemies },
-      { row: gemsRow, el: gemsValueEl, value: this.scoreGems },
-      { row: breakablesRow, el: breakablesValueEl, value: this.scoreBreakables },
+      { row: depthRow, el: depthValueEl, value: this.roundUpToNearestFive(this.scoreDepth), animate: true },
+      { row: enemiesRow, el: enemiesValueEl, value: this.roundUpToNearestFive(this.scoreEnemies), animate: false },
+      { row: gemsRow, el: gemsValueEl, value: this.roundUpToNearestFive(this.scoreGems), animate: false },
+      { row: breakablesRow, el: breakablesValueEl, value: this.roundUpToNearestFive(this.scoreBreakables), animate: false },
     ];
 
     let delay = 120;
     for (const step of steps) {
       const showId = window.setTimeout(() => {
         step.row.classList.add("visible");
-        this.animateValue(step.el, 0, step.value, 420);
+        if (step.animate) {
+          this.animateValue(step.el, 0, step.value, 420);
+        }
       }, delay);
       this.gameOverTimers.push(showId);
       delay += 460;
     }
 
     const totalId = window.setTimeout(() => {
-      this.animateValue(finalScoreEl, 0, this.score, 550);
+      this.animateValue(finalScoreEl, 0, this.roundUpToNearestFive(this.score), 550);
     }, delay + 120);
     this.gameOverTimers.push(totalId);
   }
@@ -2875,7 +2947,7 @@ class Game {
     }
   }
   
-  private spawnHurtAnimation(x: number, y: number, width: number, height: number, color: string, direction: number, spriteType: "shark" | "crab" | "squid"): void {
+  private spawnHurtAnimation(x: number, y: number, width: number, height: number, color: string, direction: number, spriteType: "shark" | "crab" | "squid" | "puffer"): void {
     this.hurtAnimations.push({
       x,
       y,
@@ -2929,6 +3001,10 @@ class Game {
       } else if (anim.spriteType === "squid") {
         sprite = this.hurtSpriteSquid;
         spriteLoaded = this.hurtSpriteSquidLoaded;
+      } else if (anim.spriteType === "puffer") {
+        // Puffer deaths should not briefly show the crab hurt sprite.
+        sprite = null;
+        spriteLoaded = false;
       } else {
         sprite = this.hurtSpriteCrab;
         spriteLoaded = this.hurtSpriteCrabLoaded;
@@ -3237,7 +3313,7 @@ class Game {
       }
       
       // Draw powerup effects (on top of player)
-      this.drawSatellites();
+      this.drawShields();
       this.drawBlastExplosions();
       this.drawLightningChains();
       this.drawLaserBeams();
@@ -3291,17 +3367,9 @@ class Game {
     if (this.submarineImg && this.submarineImg.complete) {
       const subX = CONFIG.INTERNAL_WIDTH / 2;
       const bobY = crabY - 18 + Math.sin(this.frameCount * 0.03) * 4;
-      const subSize = 64;
-      
-      ctx.save();
-      
       // Gentle tilt with the bob
       const tilt = Math.sin(this.frameCount * 0.03 + 0.5) * 0.08;
-      ctx.translate(subX, bobY);
-      ctx.rotate(tilt);
-      
-      ctx.drawImage(this.submarineImg, -subSize / 2, -subSize / 2, subSize, subSize);
-      ctx.restore();
+      this.drawSharedSubmarine(ctx, subX, bobY, { tilt, faceRight: true, scale: 1 });
     }
     
     // Draw animated crab near the bottom of the start screen
@@ -3331,6 +3399,28 @@ class Game {
     
     // Draw title weeds (once, after sprite sheet loads)
     this.drawTitleWeeds();
+  }
+
+  private drawSharedSubmarine(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    opts?: { tilt?: number; faceRight?: boolean; scale?: number }
+  ): void {
+    if (!this.submarineImg || !this.submarineImg.complete) return;
+    const tilt = opts?.tilt ?? 0;
+    const faceRight = opts?.faceRight ?? false;
+    const scale = opts?.scale ?? 1;
+    const drawSize = this.SUBMARINE_DRAW_SIZE * scale;
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(tilt);
+    if (!faceRight) {
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(this.submarineImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+    ctx.restore();
   }
   
   private drawPlatforms(): void {
@@ -4019,7 +4109,7 @@ class Game {
       ctx.restore();
     }
   }
-  
+
   private drawPlayer(): void {
     const ctx = this.ctx;
     const p = this.playerController.getPlayer();
@@ -4035,23 +4125,10 @@ class Game {
     
     // Draw submarine sprite
     if (this.submarineImg && this.submarineImg.complete) {
-      const spriteWidth = 72;  // Display size (1.5x bigger: 48 * 1.5 = 72)
-      const spriteHeight = 72;
-      const x = p.x - spriteWidth / 2;
-      // Center on physics body with slight upward bias to avoid sinking into tiles.
-      const y = p.y - spriteHeight / 2 - 3;
-      
-      ctx.save();
-      
-      // Flip horizontally if facing right (fixed: was backwards)
-      if (p.facingRight) {
-        ctx.translate(p.x, p.y);
-        ctx.scale(-1, 1);
-        ctx.translate(-p.x, -p.y);
-      }
-      
-      ctx.drawImage(this.submarineImg, x, y, spriteWidth, spriteHeight);
-      ctx.restore();
+      this.drawSharedSubmarine(ctx, p.x, p.y + 7, {
+        faceRight: p.facingRight,
+        scale: 1,
+      });
     } else {
       // Fallback rectangle if image not loaded
       const x = p.x - p.width / 2;
@@ -4286,23 +4363,23 @@ class Game {
     }
   }
   
-  private drawSatellites(): void {
-    if (!this.powerUpManager.hasPowerUp("SATELLITE")) return;
+  private drawShields(): void {
+    if (!this.powerUpManager.hasPowerUp("SHIELD")) return;
     
     const ctx = this.ctx;
     const player = this.playerController.getPlayer();
-    const positions = this.powerUpManager.getSatellitePositions(player.x, player.y);
-    const orbSize = POWERUP_CONSTANTS.SATELLITE_ORB_SIZE;
-    const info = POWERUP_INFO["SATELLITE"];
+    const positions = this.powerUpManager.getShieldPositions(player.x, player.y);
+    const orbSize = POWERUP_CONSTANTS.SHIELD_ORB_SIZE;
+    const info = POWERUP_INFO["SHIELD"];
     
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
       
       // Trail effect
-      const satellites = this.powerUpManager.getSatellites();
-      const trailAngle = satellites[i].angle - POWERUP_CONSTANTS.SATELLITE_SPEED * 5;
-      const trailX = player.x + Math.cos(trailAngle) * satellites[i].radius;
-      const trailY = player.y + Math.sin(trailAngle) * satellites[i].radius;
+      const shields = this.powerUpManager.getShields();
+      const trailAngle = shields[i].angle - POWERUP_CONSTANTS.SHIELD_SPEED * 5;
+      const trailX = player.x + Math.cos(trailAngle) * shields[i].radius;
+      const trailY = player.y + Math.sin(trailAngle) * shields[i].radius;
       
       ctx.fillStyle = info.glowColor.replace("0.6", "0.15");
       ctx.beginPath();
@@ -4343,7 +4420,7 @@ class Game {
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.arc(player.x, player.y, POWERUP_CONSTANTS.SATELLITE_RADIUS, 0, Math.PI * 2);
+    ctx.arc(player.x, player.y, POWERUP_CONSTANTS.SHIELD_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
   }

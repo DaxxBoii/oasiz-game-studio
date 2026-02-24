@@ -6,7 +6,7 @@
  */
 
 import { CONFIG } from "./config";
-import { BaseEnemy, EnemyFactory, EnemyType } from "./enemies";
+import { BaseEnemy, EnemyFactory, EnemyType, StaticEnemy } from "./enemies";
 
 // ============= SEEDED RNG =============
 export class SeededRNG {
@@ -1456,18 +1456,31 @@ export class LevelSpawner {
     // Weighted spawn chances for enemy types (STATIC is rarer since it shoots)
     const getWeightedEnemyType = (): EnemyType => {
       const roll = rng.range(0, 1);
-      
-      // If EXPLODER is available (chunk >= 5): 20% STATIC, 50% HORIZONTAL, 30% EXPLODER
-      // Otherwise: 25% STATIC, 75% HORIZONTAL
-      if (enemyTypes.includes("EXPLODER")) {
-        if (roll < 0.20) return "STATIC";
-        if (roll < 0.70) return "HORIZONTAL";
+
+      // With PUFFER + EXPLODER available:
+      // 18% STATIC, 42% HORIZONTAL, 20% PUFFER, 20% EXPLODER
+      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("EXPLODER")) {
+        if (roll < 0.18) return "STATIC";
+        if (roll < 0.60) return "HORIZONTAL";
+        if (roll < 0.80) return "PUFFER";
         return "EXPLODER";
-      } else if (enemyTypes.includes("HORIZONTAL")) {
+      }
+
+      // With PUFFER available, before EXPLODER depth:
+      // 22% STATIC, 58% HORIZONTAL, 20% PUFFER
+      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("HORIZONTAL")) {
+        if (roll < 0.22) return "STATIC";
+        if (roll < 0.80) return "HORIZONTAL";
+        return "PUFFER";
+      }
+
+      // Legacy pool: 25% STATIC, 75% HORIZONTAL
+      if (enemyTypes.includes("HORIZONTAL")) {
         if (roll < 0.25) return "STATIC";
         return "HORIZONTAL";
       }
-      return "STATIC"; // Fallback if only STATIC is available
+
+      return "STATIC";
     };
     
     // Collect all non-wall platforms in this chunk for overlap checking
@@ -1488,6 +1501,7 @@ export class LevelSpawner {
       let enemyX = 0;
       let enemyY = 0;
       let placed = false;
+      let selectedStaticSurface: { x: number; y: number; width: number } | null = null;
       const maxAttempts = 15;
       
       // STATIC enemies must be placed on standable surfaces (platforms + wall ledges)
@@ -1530,6 +1544,11 @@ export class LevelSpawner {
           );
 
           if (!tooCloseToOther && hasHeadroom) {
+            selectedStaticSurface = {
+              x: surface.x,
+              y: surface.y,
+              width: surface.width,
+            };
             placed = true;
             break;
           }
@@ -1601,6 +1620,13 @@ export class LevelSpawner {
         BLOCK_SIZE
       );
       if (!hasHeadroom) continue;
+
+      if (type === "STATIC" && enemy instanceof StaticEnemy && selectedStaticSurface) {
+        const margin = 2;
+        const minX = selectedStaticSurface.x + margin;
+        const maxX = selectedStaticSurface.x + selectedStaticSurface.width - enemy.width - margin;
+        enemy.setMovementBounds(minX, maxX);
+      }
 
       enemy.chunkIndex = chunk.index;
       chunk.enemies.push(enemy);
@@ -1720,6 +1746,46 @@ export class LevelSpawner {
     const rows = wallProfile.leftWidths.length;
     const weedBodyWidth = 20;
     const weedBodyHeight = 20;
+    const trySpawnLedgeEntity = (
+      ledgeX: number,
+      ledgeY: number,
+      isLeft: boolean,
+    ): void => {
+      const bodyX = ledgeX - weedBodyWidth / 2;
+      const bodyY = ledgeY - weedBodyHeight;
+      const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
+      const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
+      const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
+      if (!insideLane || overlapsSolid || !hasHeadroom) return;
+
+      // Promote pufferfish from decorative weeds to an active enemy.
+      if (rng.chance(0.26)) {
+        const puffer = EnemyFactory.create("PUFFER", bodyX, bodyY, rng);
+        const pufferInsideLane = this.isRectInsideLane(chunk, wallProfile, puffer.x, puffer.y, puffer.width, puffer.height, 2);
+        const pufferOverlapsSolid = this.overlapsSolidPlatforms(chunk.platforms, puffer.x, puffer.y, puffer.width, puffer.height, 1);
+        const pufferHasHeadroom = this.hasSpawnHeadroom(chunk.platforms, puffer.x, puffer.y, puffer.width, BLOCK);
+        const tooCloseToOtherEnemy = chunk.enemies.some((e) => {
+          const dx = (e.x + e.width / 2) - (puffer.x + puffer.width / 2);
+          const dy = (e.y + e.height / 2) - (puffer.y + puffer.height / 2);
+          return dx * dx + dy * dy < 42 * 42;
+        });
+        if (pufferInsideLane && !pufferOverlapsSolid && pufferHasHeadroom && !tooCloseToOtherEnemy) {
+          puffer.chunkIndex = chunk.index;
+          chunk.enemies.push(puffer);
+          return;
+        }
+      }
+
+      // Non-puffer decorative weeds only.
+      const weedSpriteChoices = [0, 1, 3, 4, 6];
+      chunk.weeds.push({
+        x: ledgeX,
+        y: ledgeY,
+        spriteIndex: rng.pick(weedSpriteChoices),
+        flipX: rng.chance(0.5),
+        isLeft,
+      });
+    };
     
     // A ledge forms when the row BELOW is wider than the row above.
     // The wider lower row protrudes further into the well, creating a shelf.
@@ -1738,20 +1804,7 @@ export class LevelSpawner {
           const ledgeX = (narrowEdge + wideEdge) / 2;
           // Top of the wider row = shelf surface
           const ledgeY = chunk.y + (r + 1) * BLOCK;
-          const bodyX = ledgeX - weedBodyWidth / 2;
-          const bodyY = ledgeY - weedBodyHeight;
-          const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
-          const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
-          const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
-          if (insideLane && !overlapsSolid && hasHeadroom) {
-            chunk.weeds.push({
-              x: ledgeX,
-              y: ledgeY,
-              spriteIndex: rng.int(0, 6),
-              flipX: rng.chance(0.5),
-              isLeft: true,
-            });
-          }
+          trySpawnLedgeEntity(ledgeX, ledgeY, true);
         }
       }
     }
@@ -1764,20 +1817,7 @@ export class LevelSpawner {
           const wideEdge = CONFIG.INTERNAL_WIDTH - wallProfile.rightWidths[r + 1] * BLOCK;
           const ledgeX = (narrowEdge + wideEdge) / 2;
           const ledgeY = chunk.y + (r + 1) * BLOCK;
-          const bodyX = ledgeX - weedBodyWidth / 2;
-          const bodyY = ledgeY - weedBodyHeight;
-          const insideLane = this.isRectInsideLane(chunk, wallProfile, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 1);
-          const overlapsSolid = this.overlapsAnyPlatform(chunk.platforms, bodyX, bodyY, weedBodyWidth, weedBodyHeight, 0);
-          const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, bodyX, bodyY, weedBodyWidth, BLOCK);
-          if (insideLane && !overlapsSolid && hasHeadroom) {
-            chunk.weeds.push({
-              x: ledgeX,
-              y: ledgeY,
-              spriteIndex: rng.int(0, 6),
-              flipX: rng.chance(0.5),
-              isLeft: false,
-            });
-          }
+          trySpawnLedgeEntity(ledgeX, ledgeY, false);
         }
       }
     }

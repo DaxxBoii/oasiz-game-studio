@@ -276,9 +276,11 @@ export class PlayerController {
   }
   
   // ============= COMBAT =============
-  bounce(): void {
+  bounce(restoreAmmo: boolean = true): void {
     this.player.vy = CONFIG.PLAYER_BOUNCE_FORCE;
-    this.restoreAmmo();
+    if (restoreAmmo) {
+      this.restoreAmmo();
+    }
   }
   
   restoreAmmo(): void {
