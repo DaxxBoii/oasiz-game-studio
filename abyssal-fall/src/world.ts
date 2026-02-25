@@ -1341,6 +1341,58 @@ export class LevelSpawner {
     return false;
   }
 
+  // Avoid spawning collectibles inside small cavities formed by breakable blocks.
+  private isInsideBreakablePocket(
+    platforms: Platform[],
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): boolean {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const maxSideGap = BLOCK * 1.1;
+    const maxFloorGap = BLOCK * 1.4;
+    const rectLeft = x;
+    const rectTop = y;
+    const rectRight = x + width;
+    const rectBottom = y + height;
+
+    let hasLeftBreakable = false;
+    let hasRightBreakable = false;
+    let hasFloorBreakable = false;
+
+    for (const p of platforms) {
+      if (!p.breakable) continue;
+
+      const verticalOverlap = rectTop < p.y + p.height && rectBottom > p.y;
+      if (verticalOverlap) {
+        const rightEdgeGap = rectLeft - (p.x + p.width);
+        if (rightEdgeGap >= -2 && rightEdgeGap <= maxSideGap) {
+          hasLeftBreakable = true;
+        }
+
+        const leftEdgeGap = p.x - rectRight;
+        if (leftEdgeGap >= -2 && leftEdgeGap <= maxSideGap) {
+          hasRightBreakable = true;
+        }
+      }
+
+      const horizontalOverlap = rectRight > p.x && rectLeft < p.x + p.width;
+      if (horizontalOverlap) {
+        const floorGap = p.y - rectBottom;
+        if (floorGap >= -2 && floorGap <= maxFloorGap) {
+          hasFloorBreakable = true;
+        }
+      }
+
+      if (hasLeftBreakable && hasRightBreakable && hasFloorBreakable) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   // Require at least one clear block above the entity's central body area.
   // This avoids spawns inside 1-block-high tunnels while still allowing
   // natural cave overhangs near edges.
@@ -1665,7 +1717,8 @@ export class LevelSpawner {
         const validLane = this.isRectInsideLane(chunk, wallProfile, rectX, rectY, gemW, gemH, 2);
         const insideSolid = this.overlapsSolidPlatforms(chunk.platforms, rectX, rectY, gemW, gemH, 2);
         const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, rectX, rectY, gemW, BLOCK_SIZE);
-        if (!validLane || insideSolid || !hasHeadroom) continue;
+        const insideBreakablePocket = this.isInsideBreakablePocket(chunk.platforms, rectX, rectY, gemW, gemH);
+        if (!validLane || insideSolid || !hasHeadroom || insideBreakablePocket) continue;
 
         chunk.gems.push({
           x: gemX,

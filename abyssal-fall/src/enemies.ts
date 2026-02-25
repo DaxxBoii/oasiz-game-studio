@@ -398,9 +398,11 @@ export class StaticEnemy extends BaseEnemy {
     const dx = playerX - cx;
     const dy = playerY - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 0.001) return;
     
     // Only shoot if player is within reasonable range (not too far)
-    if (dist > 400) return;
+    if (dist > 720) return;
     
     // Start attack animation
     this.isAttacking = true;
@@ -413,10 +415,13 @@ export class StaticEnemy extends BaseEnemy {
     // Normalize and apply speed
     const vx = (dx / dist) * this.BULLET_SPEED;
     const vy = (dy / dist) * this.BULLET_SPEED;
+    const muzzleOffset = Math.max(this.width, this.height) * 0.45 + 6;
+    const spawnX = cx + (dx / dist) * muzzleOffset;
+    const spawnY = cy + (dy / dist) * muzzleOffset;
     
     this.pendingBullet = {
-      x: cx,
-      y: cy,
+      x: spawnX,
+      y: spawnY,
       vx,
       vy,
       size: 5,

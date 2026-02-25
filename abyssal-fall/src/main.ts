@@ -107,11 +107,11 @@ class Game {
   // Textures
   private breakableGroundImg: HTMLImageElement | null = null;
   private breakableGroundPattern: CanvasPattern | null = null;
-  private submarineImg: HTMLImageElement | null = null;
+  private diverImg: HTMLImageElement | null = null;
   private weedsImg: HTMLImageElement | null = null;
   private menuCrabImg: HTMLImageElement | null = null;
   private menuCrabFrame: number = 0;
-  private readonly SUBMARINE_DRAW_SIZE: number = 64;
+  private readonly DIVER_DRAW_SIZE: number = 64;
   
   // Screen shake
   private screenShakeIntensity: number = 0;
@@ -313,8 +313,14 @@ class Game {
       if (this.gameState !== "playing") return;
       const isLeftKey = e.code === "ArrowLeft" || e.code === "KeyA";
       const isRightKey = e.code === "ArrowRight" || e.code === "KeyD";
-      const isShootKey = e.code === "Space" || e.code === "ArrowDown" || e.code === "KeyS" || e.code === "ShiftLeft" || e.code === "ShiftRight";
-      const isJumpKey = e.code === "ArrowUp" || e.code === "KeyW";
+      const isActionKey =
+        e.code === "Space" ||
+        e.code === "ArrowDown" ||
+        e.code === "KeyS" ||
+        e.code === "ShiftLeft" ||
+        e.code === "ShiftRight" ||
+        e.code === "ArrowUp" ||
+        e.code === "KeyW";
       
       if (isLeftKey) {
         this.input.left = true;
@@ -324,15 +330,13 @@ class Game {
         this.input.right = true;
         e.preventDefault();
       }
-      if (isShootKey) {
+      if (isActionKey) {
+        // Unified action: jump when grounded, shoot when airborne.
         this.input.shoot = true;
+        this.input.jump = true;
         if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) {
           console.log("[Keyboard]", "Shift pressed for shoot");
         }
-        e.preventDefault();
-      }
-      if (isJumpKey) {
-        this.input.jump = true;
         e.preventDefault();
       }
     });
@@ -340,8 +344,14 @@ class Game {
     window.addEventListener("keyup", (e) => {
       const isLeftKey = e.code === "ArrowLeft" || e.code === "KeyA";
       const isRightKey = e.code === "ArrowRight" || e.code === "KeyD";
-      const isShootKey = e.code === "Space" || e.code === "ArrowDown" || e.code === "KeyS" || e.code === "ShiftLeft" || e.code === "ShiftRight";
-      const isJumpKey = e.code === "ArrowUp" || e.code === "KeyW";
+      const isActionKey =
+        e.code === "Space" ||
+        e.code === "ArrowDown" ||
+        e.code === "KeyS" ||
+        e.code === "ShiftLeft" ||
+        e.code === "ShiftRight" ||
+        e.code === "ArrowUp" ||
+        e.code === "KeyW";
 
       if (isLeftKey) {
         this.input.left = false;
@@ -349,10 +359,8 @@ class Game {
       if (isRightKey) {
         this.input.right = false;
       }
-      if (isShootKey) {
+      if (isActionKey) {
         this.input.shoot = false;
-      }
-      if (isJumpKey) {
         this.input.jump = false;
       }
     });
@@ -809,12 +817,12 @@ class Game {
     };
     this.breakableGroundImg.src = "assets/breakable_ground.png";
     
-    // Load submarine sprite
-    this.submarineImg = new Image();
-    this.submarineImg.onload = () => {
-      console.log("[Game] Submarine sprite loaded");
+    // Load diver sprite.
+    this.diverImg = new Image();
+    this.diverImg.onload = () => {
+      console.log("[Game] Diver sprite loaded");
     };
-    this.submarineImg.src = "assets/submarine.png";
+    this.diverImg.src = "assets/diver.png";
 
     // Load weeds sprite sheet (4 cols x 2 rows, 7 sprites)
     this.weedsImg = new Image();
@@ -1652,20 +1660,125 @@ class Game {
     }
   }
 
-  private updateDroppedGems(): void {
-    const overlapsRect = (
-      ax: number,
-      ay: number,
-      aw: number,
-      ah: number,
-      bx: number,
-      by: number,
-      bw: number,
-      bh: number
-    ): boolean => {
-      return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-    };
+  private overlapsRect(
+    ax: number,
+    ay: number,
+    aw: number,
+    ah: number,
+    bx: number,
+    by: number,
+    bw: number,
+    bh: number
+  ): boolean {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
 
+  private isInsideBreakablePocket(x: number, y: number, width: number, height: number): boolean {
+    const block = CONFIG.WALL_BLOCK_SIZE;
+    const maxSideGap = block * 1.1;
+    const maxFloorGap = block * 1.4;
+    const rectLeft = x - width / 2;
+    const rectTop = y - height / 2;
+    const rectRight = rectLeft + width;
+    const rectBottom = rectTop + height;
+
+    let hasLeftBreakable = false;
+    let hasRightBreakable = false;
+    let hasFloorBreakable = false;
+
+    const nearby = this.getPlatformsNearRect(rectLeft, rectTop, width, height, block * 2);
+    for (const platform of nearby) {
+      if (!platform.breakable) continue;
+
+      const verticalOverlap = rectTop < platform.y + platform.height && rectBottom > platform.y;
+      if (verticalOverlap) {
+        const rightEdgeGap = rectLeft - (platform.x + platform.width);
+        if (rightEdgeGap >= -2 && rightEdgeGap <= maxSideGap) {
+          hasLeftBreakable = true;
+        }
+
+        const leftEdgeGap = platform.x - rectRight;
+        if (leftEdgeGap >= -2 && leftEdgeGap <= maxSideGap) {
+          hasRightBreakable = true;
+        }
+      }
+
+      const horizontalOverlap = rectRight > platform.x && rectLeft < platform.x + platform.width;
+      if (horizontalOverlap) {
+        const floorGap = platform.y - rectBottom;
+        if (floorGap >= -2 && floorGap <= maxFloorGap) {
+          hasFloorBreakable = true;
+        }
+      }
+
+      if (hasLeftBreakable && hasRightBreakable && hasFloorBreakable) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private pushDroppedGemOutOfBreakablePocket(gem: Gem): void {
+    const halfW = gem.width / 2;
+    const halfH = gem.height / 2;
+    const rectLeft = gem.x - halfW;
+    const rectTop = gem.y - halfH;
+    const rectRight = rectLeft + gem.width;
+    const rectBottom = rectTop + gem.height;
+    const nearby = this.getPlatformsNearRect(rectLeft, rectTop, gem.width, gem.height, CONFIG.WALL_BLOCK_SIZE * 2);
+
+    let nearestFloor: Platform | null = null;
+    let nearestLeftWall: Platform | null = null;
+    let nearestRightWall: Platform | null = null;
+    let nearestFloorGap = Number.POSITIVE_INFINITY;
+    let nearestLeftGap = Number.POSITIVE_INFINITY;
+    let nearestRightGap = Number.POSITIVE_INFINITY;
+
+    for (const platform of nearby) {
+      if (!platform.breakable) continue;
+
+      const horizontalOverlap = rectRight > platform.x && rectLeft < platform.x + platform.width;
+      if (horizontalOverlap) {
+        const floorGap = platform.y - rectBottom;
+        if (floorGap >= -2 && floorGap < nearestFloorGap) {
+          nearestFloorGap = floorGap;
+          nearestFloor = platform;
+        }
+      }
+
+      const verticalOverlap = rectTop < platform.y + platform.height && rectBottom > platform.y;
+      if (verticalOverlap) {
+        const leftGap = rectLeft - (platform.x + platform.width);
+        if (leftGap >= -2 && leftGap < nearestLeftGap) {
+          nearestLeftGap = leftGap;
+          nearestLeftWall = platform;
+        }
+
+        const rightGap = platform.x - rectRight;
+        if (rightGap >= -2 && rightGap < nearestRightGap) {
+          nearestRightGap = rightGap;
+          nearestRightWall = platform;
+        }
+      }
+    }
+
+    if (nearestFloor) {
+      gem.y = nearestFloor.y - halfH - 4;
+      gem.vy = Math.min(gem.vy, -3.2);
+    }
+
+    const pushRight = nearestLeftGap <= nearestRightGap;
+    if (nearestLeftWall || nearestRightWall) {
+      const direction = pushRight ? 1 : -1;
+      gem.x += direction * (CONFIG.WALL_BLOCK_SIZE * 0.65);
+      gem.vx = direction * Math.max(Math.abs(gem.vx ?? 0), 1.8);
+    }
+
+    gem.x = Math.max(halfW, Math.min(CONFIG.INTERNAL_WIDTH - halfW, gem.x));
+  }
+
+  private updateDroppedGems(): void {
     for (let i = this.droppedGems.length - 1; i >= 0; i--) {
       const gem = this.droppedGems[i];
 
@@ -1691,7 +1804,7 @@ class Game {
         const testLeftX = nextX - halfW;
         const testTopY = gem.y - halfH;
         for (const platform of this.activePlatforms) {
-          if (!overlapsRect(testLeftX, testTopY, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
+          if (!this.overlapsRect(testLeftX, testTopY, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
           if (gem.vx > 0) {
             nextX = Math.min(nextX, platform.x - halfW);
             gem.vx = -Math.abs(gem.vx) * 0.6;
@@ -1707,7 +1820,7 @@ class Game {
         const testLeft = gem.x - halfW;
         const testTop = nextY - halfH;
         for (const platform of this.activePlatforms) {
-          if (!overlapsRect(testLeft, testTop, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
+          if (!this.overlapsRect(testLeft, testTop, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
 
           if (gem.vy >= 0) {
             // Falling or resting onto top face.
@@ -1746,7 +1859,7 @@ class Game {
         const gemTop = gem.y - halfH;
         const nearbyPlatforms = this.getPlatformsNearRect(gemLeft, gemTop, gem.width, gem.height, 6);
         for (const platform of nearbyPlatforms) {
-          if (!overlapsRect(gemLeft, gemTop, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
+          if (!this.overlapsRect(gemLeft, gemTop, gem.width, gem.height, platform.x, platform.y, platform.width, platform.height)) continue;
           const overlapLeft = gemLeft + gem.width - platform.x;
           const overlapRight = platform.x + platform.width - gemLeft;
           const overlapTop = gemTop + gem.height - platform.y;
@@ -1771,6 +1884,10 @@ class Game {
               gem.vy = Math.abs(gem.vy) * 0.35;
             }
           }
+        }
+
+        if (this.isInsideBreakablePocket(gem.x, gem.y, gem.width, gem.height)) {
+          this.pushDroppedGemOutOfBreakablePocket(gem);
         }
 
         // Keep dropped gems dynamic; despawn is time-based (not settle/flash-based).
@@ -2579,7 +2696,7 @@ class Game {
     );
     
     if (collected) {
-      // Trigger aura flash effect around submarine
+      // Trigger aura flash effect around diver
       this.triggerPowerUpAnnouncement(collected);
       this.triggerHaptic("success");
     }
@@ -2609,7 +2726,7 @@ class Game {
   
   private triggerPowerUpAnnouncement(type: PowerUpType): void {
     // Instead of pausing the game with a title screen,
-    // trigger a brief bright aura flash around the submarine
+    // trigger a brief bright aura flash around the diver
     const info = POWERUP_INFO[type];
     this.powerupAuraFlash = 30; // 0.5 second bright flash
     this.powerupAuraFlashColor = info.color;
@@ -2916,14 +3033,35 @@ class Game {
     const hasLargeGem = Math.random() < 0.2;
     const largeGemIndex = hasLargeGem ? Math.floor(Math.random() * count) : -1;
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 1.2 + Math.random() * 2.8;
-      const spawnRadius = 12 + Math.random() * 10;
-      const spawnX = x + Math.cos(angle) * spawnRadius;
-      const spawnY = y + Math.sin(angle) * (spawnRadius * 0.6);
       const isLargeGem = i === largeGemIndex;
       const gemSize = isLargeGem ? 20 : 14;
       const gemValue = isLargeGem ? CONFIG.SCORE_PER_GEM * 2 : CONFIG.SCORE_PER_GEM;
+      let angle = Math.random() * Math.PI * 2;
+      let speed = 1.2 + Math.random() * 2.8;
+      let spawnX = x;
+      let spawnY = y;
+      let foundSafeSpawn = false;
+
+      for (let attempt = 0; attempt < 14; attempt++) {
+        angle = Math.random() * Math.PI * 2;
+        speed = 1.2 + Math.random() * 2.8;
+        const spawnRadius = 12 + Math.random() * 10 + attempt * 2;
+        spawnX = x + Math.cos(angle) * spawnRadius;
+        spawnY = y + Math.sin(angle) * (spawnRadius * 0.6);
+        const rectX = spawnX - gemSize / 2;
+        const rectY = spawnY - gemSize / 2;
+        const overlapsPlatform = this.getPlatformsNearRect(rectX, rectY, gemSize, gemSize, 2).some((platform) => {
+          return this.overlapsRect(rectX, rectY, gemSize, gemSize, platform.x, platform.y, platform.width, platform.height);
+        });
+        if (overlapsPlatform) continue;
+        if (this.isInsideBreakablePocket(spawnX, spawnY, gemSize, gemSize)) continue;
+        foundSafeSpawn = true;
+        break;
+      }
+
+      if (!foundSafeSpawn) {
+        continue;
+      }
 
       this.droppedGems.push({
         x: spawnX,
@@ -3336,21 +3474,63 @@ class Game {
     const ctx = this.ctx;
     const p = this.playerController.getPlayer();
     const k = this.deathFreezeKiller;
+    const freezeProgress =
+      (this.DEATH_FREEZE_DURATION_FRAMES - this.deathFreezeFrames) /
+      this.DEATH_FREEZE_DURATION_FRAMES;
+    const pulse = 0.65 + Math.sin(this.frameCount * 0.2) * 0.35;
+    const viewTop = this.cameraY - 32;
+    const viewHeight = CONFIG.INTERNAL_HEIGHT + 64;
+    const viewLeft = -32;
+    const viewWidth = CONFIG.INTERNAL_WIDTH + 64;
 
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 255, 210, 0.9)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 26, 0, Math.PI * 2);
-    ctx.stroke();
+
+    const diverRadius = Math.max(this.DIVER_DRAW_SIZE * 0.46, Math.max(p.width, p.height) + 16);
+    const threatRadius = 36;
+    let focusX = p.x;
+    let focusY = p.y;
+    let focusRadius = diverRadius + 26;
 
     if (k) {
-      ctx.strokeStyle = "rgba(255, 90, 90, 0.95)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(k.x, k.y, 24, 0, Math.PI * 2);
-      ctx.stroke();
+      const dx = k.x - p.x;
+      const dy = k.y - p.y;
+      const dist = Math.hypot(dx, dy);
+      focusX = (p.x + k.x) * 0.5;
+      focusY = (p.y + k.y) * 0.5;
+      focusRadius = Math.max(52, dist * 0.5 + Math.max(diverRadius, threatRadius) + 16);
     }
+
+    ctx.fillStyle = `rgba(4, 12, 22, ${0.32 + freezeProgress * 0.12})`;
+    ctx.beginPath();
+    ctx.rect(viewLeft, viewTop, viewWidth, viewHeight);
+    ctx.moveTo(focusX + focusRadius, focusY);
+    ctx.arc(focusX, focusY, focusRadius, 0, Math.PI * 2);
+    ctx.fill("evenodd");
+
+    // Single circular boundary around the hit event focus.
+    const outlineRadius = focusRadius + pulse * 2.1;
+    const dash = 5;
+    const gap = 7;
+    const pattern = dash + gap;
+    const dashOffset = -((this.frameCount * 0.8) % pattern);
+    ctx.strokeStyle = "rgba(255, 235, 190, 0.92)";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.setLineDash([dash, gap]);
+    ctx.lineDashOffset = dashOffset;
+    ctx.beginPath();
+    ctx.arc(focusX, focusY, outlineRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    // Second phase-shifted pass hides the visible seam on one side of the loop.
+    ctx.strokeStyle = "rgba(255, 245, 210, 0.42)";
+    ctx.lineDashOffset = dashOffset - pattern * 0.5;
+    ctx.beginPath();
+    ctx.arc(focusX, focusY, outlineRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    ctx.lineCap = "butt";
+
     ctx.restore();
   }
   
@@ -3360,16 +3540,16 @@ class Game {
     const crabW = 96 * crabScale;
     const crabH = 96 * crabScale;
     const crabX = CONFIG.INTERNAL_WIDTH / 2 - crabW / 2;
-    // Keep crab and submarine below the instruction block area
+    // Keep crab and diver below the instruction block area
     const crabY = CONFIG.INTERNAL_HEIGHT - crabH - 20;
     
-    // Draw bobbing submarine above the crab
-    if (this.submarineImg && this.submarineImg.complete) {
-      const subX = CONFIG.INTERNAL_WIDTH / 2;
+    // Draw bobbing diver above the crab
+    if (this.diverImg && this.diverImg.complete) {
+      const diverX = CONFIG.INTERNAL_WIDTH / 2;
       const bobY = crabY - 18 + Math.sin(this.frameCount * 0.03) * 4;
       // Gentle tilt with the bob
       const tilt = Math.sin(this.frameCount * 0.03 + 0.5) * 0.08;
-      this.drawSharedSubmarine(ctx, subX, bobY, { tilt, faceRight: true, scale: 1 });
+      this.drawSharedDiver(ctx, diverX, bobY, { tilt, faceRight: true, scale: 1 });
     }
     
     // Draw animated crab near the bottom of the start screen
@@ -3401,17 +3581,17 @@ class Game {
     this.drawTitleWeeds();
   }
 
-  private drawSharedSubmarine(
+  private drawSharedDiver(
     ctx: CanvasRenderingContext2D,
     centerX: number,
     centerY: number,
     opts?: { tilt?: number; faceRight?: boolean; scale?: number }
   ): void {
-    if (!this.submarineImg || !this.submarineImg.complete) return;
+    if (!this.diverImg || !this.diverImg.complete) return;
     const tilt = opts?.tilt ?? 0;
     const faceRight = opts?.faceRight ?? false;
     const scale = opts?.scale ?? 1;
-    const drawSize = this.SUBMARINE_DRAW_SIZE * scale;
+    const drawSize = this.DIVER_DRAW_SIZE * scale;
 
     ctx.save();
     ctx.translate(centerX, centerY);
@@ -3419,7 +3599,7 @@ class Game {
     if (!faceRight) {
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(this.submarineImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+    ctx.drawImage(this.diverImg, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
     ctx.restore();
   }
   
@@ -4119,13 +4299,13 @@ class Game {
       return;
     }
     
-    // Draw powerup aura(s) behind the submarine
+    // Draw powerup aura(s) behind the diver
     this.drawPowerUpAura(ctx, p.x, p.y);
     this.drawMagnetRadiusIndicator(p.x, p.y);
     
-    // Draw submarine sprite
-    if (this.submarineImg && this.submarineImg.complete) {
-      this.drawSharedSubmarine(ctx, p.x, p.y + 7, {
+    // Draw diver sprite
+    if (this.diverImg && this.diverImg.complete) {
+      this.drawSharedDiver(ctx, p.x, p.y + 7, {
         faceRight: p.facingRight,
         scale: 1,
       });
@@ -4150,7 +4330,7 @@ class Game {
     }
   }
   
-  /** Draw a colored aura around the submarine for each active powerup */
+  /** Draw a colored aura around the diver for each active powerup */
   private drawPowerUpAura(ctx: CanvasRenderingContext2D, px: number, py: number): void {
     const activePowerUps = this.powerUpManager.getActivePowerUps();
     if (activePowerUps.length === 0 && this.powerupAuraFlash <= 0) return;

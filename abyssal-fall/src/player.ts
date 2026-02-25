@@ -47,6 +47,7 @@ export class PlayerController {
   private shootCooldown: number = 0;
   private isShooting: boolean = false; // Track if currently shooting (for hover effect)
   private recoilHoverFrames: number = 0; // Frames of hover damping remaining after last shot
+  private wasActionPressed: boolean = false;
   
   // Callback for haptic feedback
   private onHaptic: ((type: "light" | "medium" | "heavy" | "success" | "error") => void) | null = null;
@@ -86,6 +87,7 @@ export class PlayerController {
     this.bullets = [];
     this.shootCooldown = 0;
     this.recoilHoverFrames = 0;
+    this.wasActionPressed = false;
     console.log("[PlayerController] Reset player state");
   }
   
@@ -128,9 +130,11 @@ export class PlayerController {
   // ============= INPUT HANDLING =============
   handleInput(input: InputState): void {
     // Unified tap action: jump when grounded, shoot when airborne
-    const tapping = input.jump || input.shoot;
+    const actionPressed = input.jump || input.shoot;
+    const justPressed = actionPressed && !this.wasActionPressed;
+    let firedShotThisFrame = false;
     
-    if (tapping) {
+    if (justPressed) {
       if (this.player.grounded) {
         // Jump when grounded
         this.player.vy = CONFIG.PLAYER_JUMP_FORCE;
@@ -138,13 +142,13 @@ export class PlayerController {
         this.triggerHaptic("light");
       } else {
         // Shoot when airborne
-        this.shoot();
+        firedShotThisFrame = this.shoot();
       }
     }
     
     // Track shooting state for hover effect
     // Keep hover active during recoil frames even if ammo is 0
-    this.isShooting = (tapping && !this.player.grounded && this.player.ammo > 0) || this.recoilHoverFrames > 0;
+    this.isShooting = firedShotThisFrame || this.recoilHoverFrames > 0;
     
     // Tick down recoil hover
     if (this.recoilHoverFrames > 0) {
@@ -155,6 +159,8 @@ export class PlayerController {
     if (this.shootCooldown > 0) {
       this.shootCooldown--;
     }
+
+    this.wasActionPressed = actionPressed;
   }
   
   // Check if player is currently shooting (for hover effect)
@@ -212,9 +218,9 @@ export class PlayerController {
   }
   
   // ============= SHOOTING =============
-  private shoot(): void {
-    if (this.shootCooldown > 0 || this.player.ammo <= 0) return;
-    if (this.player.grounded) return; // Can only shoot while airborne
+  private shoot(): boolean {
+    if (this.shootCooldown > 0 || this.player.ammo <= 0) return false;
+    if (this.player.grounded) return false; // Can only shoot while airborne
     
     this.shootCooldown = CONFIG.SHOOT_COOLDOWN;
     this.player.ammo--;
@@ -242,6 +248,8 @@ export class PlayerController {
     if (this.onShoot) {
       this.onShoot();
     }
+    
+    return true;
   }
   
   // ============= BULLET MANAGEMENT =============
