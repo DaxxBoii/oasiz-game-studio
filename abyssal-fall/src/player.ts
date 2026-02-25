@@ -49,6 +49,10 @@ export class PlayerController {
   private recoilHoverFrames: number = 0; // Frames of hover damping remaining after last shot
   private wasActionPressed: boolean = false;
   private autoFireActive: boolean = false;
+  private baseWidth: number = 30;
+  private baseHeight: number = 40;
+  private horizontalWidth: number = 38;
+  private horizontalHeight: number = 28;
   
   // Callback for haptic feedback
   private onHaptic: ((type: "light" | "medium" | "heavy" | "success" | "error") => void) | null = null;
@@ -69,8 +73,8 @@ export class PlayerController {
       y: 100,
       vx: 0,
       vy: 0,
-      width: CONFIG.PLAYER_WIDTH,
-      height: CONFIG.PLAYER_HEIGHT,
+      width: this.baseWidth,
+      height: this.baseHeight,
       hp: CONFIG.PLAYER_MAX_HP,
       maxHp: CONFIG.PLAYER_MAX_HP,
       ammo: CONFIG.PLAYER_MAX_AMMO,
@@ -127,6 +131,28 @@ export class PlayerController {
   
   getShootCooldown(): number {
     return this.shootCooldown;
+  }
+
+  addMaxHp(amount: number): void {
+    this.player.maxHp += amount;
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + amount);
+  }
+
+  addMaxAmmo(amount: number): void {
+    this.player.maxAmmo += amount;
+    this.player.ammo = Math.min(this.player.maxAmmo, this.player.ammo + amount);
+  }
+
+  addAmmo(amount: number): void {
+    this.player.ammo = Math.min(this.player.maxAmmo, this.player.ammo + amount);
+  }
+
+  setHitboxSizes(baseWidth: number, baseHeight: number, horizontalWidth: number, horizontalHeight: number): void {
+    this.baseWidth = Math.max(8, Math.round(baseWidth));
+    this.baseHeight = Math.max(8, Math.round(baseHeight));
+    this.horizontalWidth = Math.max(8, Math.round(horizontalWidth));
+    this.horizontalHeight = Math.max(8, Math.round(horizontalHeight));
+    this.updateHitboxForPose();
   }
   
   // ============= INPUT HANDLING =============
@@ -192,6 +218,8 @@ export class PlayerController {
       this.player.vx = CONFIG.PLAYER_SPEED;
       this.player.facingRight = true;
     }
+
+    this.updateHitboxForPose();
     
     // Hover effect when shooting - player stays in place
     // Also hover during recoilHoverFrames so the last bullet doesn't catapult the player
@@ -217,6 +245,21 @@ export class PlayerController {
     // Invulnerability countdown
     if (this.player.invulnerable > 0) {
       this.player.invulnerable--;
+    }
+  }
+
+  private updateHitboxForPose(): void {
+    // Keep a stable hitbox across all animation frames/poses.
+    const targetWidth = this.baseWidth;
+    const targetHeight = this.baseHeight;
+    if (this.player.width === targetWidth && this.player.height === targetHeight) return;
+
+    const footY = this.player.y + this.player.height / 2;
+    this.player.width = targetWidth;
+    this.player.height = targetHeight;
+    if (this.player.grounded) {
+      // Keep feet planted when shape changes on/near platforms.
+      this.player.y = footY - this.player.height / 2;
     }
   }
   

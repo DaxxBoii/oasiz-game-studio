@@ -186,6 +186,22 @@ export abstract class BaseEnemy implements EnemyData {
     return this.sprite !== null && this.spriteLoaded && this.spriteConfig !== null;
   }
 
+  getSpriteDrawRect(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.spriteConfig) return null;
+    const scale = this.spriteConfig.scale ?? 1;
+    return {
+      x: this.x + this.spriteConfig.offsetX,
+      y: this.y + this.spriteConfig.offsetY,
+      width: this.spriteConfig.frameWidth * scale,
+      height: this.spriteConfig.frameHeight * scale,
+    };
+  }
+
+  getSpriteFrameSize(): { width: number; height: number } | null {
+    if (!this.spriteConfig) return null;
+    return { width: this.spriteConfig.frameWidth, height: this.spriteConfig.frameHeight };
+  }
+
   /**
    * Update enemy behavior each frame
    * @param playerX Player's x position
@@ -245,6 +261,10 @@ export abstract class BaseEnemy implements EnemyData {
    */
   isDead(): boolean {
     return this.hp <= 0;
+  }
+
+  getAnimationFrameIndex(): number {
+    return this.currentFrame;
   }
 }
 
@@ -574,9 +594,9 @@ export class ExploderEnemy extends BaseEnemy {
     super(x, y, rng);
     this.speed = CONFIG.ENEMY_SPEED_EXPLODER;
     
-    // Squid enemy - expand hitbox to better cover visible sprite body.
-    this.width = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.9;
-    this.height = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.9;
+    // Squid enemy - use a larger box so collisions better match the wide body sprite.
+    this.width = BaseEnemy.BASE_SIZE * this.sizeVariance * 2.4;
+    this.height = BaseEnemy.BASE_SIZE * this.sizeVariance * 2.2;
     
     // Squid walk sprite sheet: 6 frames, 96×96 per frame (576x96 total)
     const scale = 0.75;
@@ -895,11 +915,13 @@ export class EnemyFactory {
    * Get available enemy types based on depth/chunk index
    */
   static getAvailableTypes(chunkIndex: number): EnemyType[] {
-    const types: EnemyType[] = ["STATIC", "HORIZONTAL"];
-    
-    if (chunkIndex >= 2) types.push("PUFFER");
-    if (chunkIndex >= 5) types.push("EXPLODER");
-    
+    const depthMeters = Math.floor((chunkIndex * CONFIG.CHUNK_HEIGHT) / 10);
+    const types: EnemyType[] = ["HORIZONTAL"];
+
+    if (depthMeters >= 100) types.push("PUFFER");
+    if (depthMeters >= 200) types.push("STATIC");
+    if (depthMeters >= 300) types.push("EXPLODER");
+
     return types;
   }
 }
