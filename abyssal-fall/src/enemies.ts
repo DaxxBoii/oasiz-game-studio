@@ -186,6 +186,22 @@ export abstract class BaseEnemy implements EnemyData {
     return this.sprite !== null && this.spriteLoaded && this.spriteConfig !== null;
   }
 
+  getSpriteDrawRect(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.spriteConfig) return null;
+    const scale = this.spriteConfig.scale ?? 1;
+    return {
+      x: this.x + this.spriteConfig.offsetX,
+      y: this.y + this.spriteConfig.offsetY,
+      width: this.spriteConfig.frameWidth * scale,
+      height: this.spriteConfig.frameHeight * scale,
+    };
+  }
+
+  getSpriteFrameSize(): { width: number; height: number } | null {
+    if (!this.spriteConfig) return null;
+    return { width: this.spriteConfig.frameWidth, height: this.spriteConfig.frameHeight };
+  }
+
   /**
    * Update enemy behavior each frame
    * @param playerX Player's x position
@@ -246,6 +262,10 @@ export abstract class BaseEnemy implements EnemyData {
   isDead(): boolean {
     return this.hp <= 0;
   }
+
+  getAnimationFrameIndex(): number {
+    return this.currentFrame;
+  }
 }
 
 // ============= STATIC ENEMY =============
@@ -257,7 +277,7 @@ export class StaticEnemy extends BaseEnemy {
   private readonly SHOOT_INTERVAL: number = 120; // 2 seconds at 60fps
   private readonly BULLET_SPEED: number = 3;
   private pendingBullet: EnemyBullet | null = null;
-  private canShoot: boolean = false; // Only 30% of static enemies can shoot
+  private canShoot: boolean = true;
   
   // Attack animation properties
   private attackSprite: HTMLImageElement | null = null;
@@ -288,8 +308,7 @@ export class StaticEnemy extends BaseEnemy {
     this.width = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.8;
     this.height = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.35;
     
-    // 30% chance this crab can shoot
-    this.canShoot = rng.chance(0.3);
+    this.canShoot = true;
     
     // Randomize initial shoot timer so all crabs don't fire at once
     this.shootTimer = Math.floor(rng.range(0, this.SHOOT_INTERVAL));
@@ -398,9 +417,11 @@ export class StaticEnemy extends BaseEnemy {
     const dx = playerX - cx;
     const dy = playerY - cy;
     const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 0.001) return;
     
     // Only shoot if player is within reasonable range (not too far)
-    if (dist > 400) return;
+    if (dist > 720) return;
     
     // Start attack animation
     this.isAttacking = true;
@@ -413,10 +434,13 @@ export class StaticEnemy extends BaseEnemy {
     // Normalize and apply speed
     const vx = (dx / dist) * this.BULLET_SPEED;
     const vy = (dy / dist) * this.BULLET_SPEED;
+    const muzzleOffset = Math.max(this.width, this.height) * 0.45 + 6;
+    const spawnX = cx + (dx / dist) * muzzleOffset;
+    const spawnY = cy + (dy / dist) * muzzleOffset;
     
     this.pendingBullet = {
-      x: cx,
-      y: cy,
+      x: spawnX,
+      y: spawnY,
       vx,
       vy,
       size: 5,
@@ -509,7 +533,7 @@ export class HorizontalEnemy extends BaseEnemy {
     // Scale to fit hitbox nicely
     const scale = 0.8;
     this.setupSprite({
-      src: "assets/Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/1/Walk.png",
+      src: getAssetUrl("Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/1/Walk.png"),
       frameWidth: 96,
       frameHeight: 96,
       frameCount: 6,
@@ -570,14 +594,14 @@ export class ExploderEnemy extends BaseEnemy {
     super(x, y, rng);
     this.speed = CONFIG.ENEMY_SPEED_EXPLODER;
     
-    // Squid enemy - expand hitbox to better cover visible sprite body.
-    this.width = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.9;
-    this.height = BaseEnemy.BASE_SIZE * this.sizeVariance * 1.9;
+    // Squid enemy - use a larger box so collisions better match the wide body sprite.
+    this.width = BaseEnemy.BASE_SIZE * this.sizeVariance * 2.4;
+    this.height = BaseEnemy.BASE_SIZE * this.sizeVariance * 2.2;
     
     // Squid walk sprite sheet: 6 frames, 96×96 per frame (576x96 total)
     const scale = 0.75;
     this.setupSprite({
-      src: "assets/Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/2/Walk.png",
+      src: getAssetUrl("Water-Monsters-Pixel-Art-Sprite-Sheet-Pack/2/Walk.png"),
       frameWidth: 96,
       frameHeight: 96,
       frameCount: 6,
@@ -891,11 +915,13 @@ export class EnemyFactory {
    * Get available enemy types based on depth/chunk index
    */
   static getAvailableTypes(chunkIndex: number): EnemyType[] {
-    const types: EnemyType[] = ["STATIC", "HORIZONTAL"];
-    
-    if (chunkIndex >= 2) types.push("PUFFER");
-    if (chunkIndex >= 5) types.push("EXPLODER");
-    
+    const depthMeters = Math.floor((chunkIndex * CONFIG.CHUNK_HEIGHT) / 10);
+    const types: EnemyType[] = ["HORIZONTAL"];
+
+    if (depthMeters >= 100) types.push("PUFFER");
+    if (depthMeters >= 200) types.push("STATIC");
+    if (depthMeters >= 300) types.push("EXPLODER");
+
     return types;
   }
 }

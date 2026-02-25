@@ -293,6 +293,11 @@ export class PowerUpManager {
     console.log(`[PowerUpManager] Activated ${type} powerup`);
   }
 
+  /** Grant a powerup directly (used by room rewards). */
+  grantPowerUp(type: PowerUpType): void {
+    this.activatePowerUp(type);
+  }
+
   private getPowerUpDurationFrames(type: PowerUpType): number {
     // Shield is intentionally shorter than other powerups.
     if (type === "SHIELD") return 360;
@@ -326,7 +331,19 @@ export class PowerUpManager {
         }
       }
     }
+
+    this.updateVisualEffectsAndAnnouncement();
     
+    // Clean up collected orbs that are far away (3 chunks above camera)
+    // This is handled externally via getVisibleOrbs
+  }
+
+  /** Update non-timer animations/effects while keeping active durations frozen. */
+  updateVisualsOnly(): void {
+    this.updateVisualEffectsAndAnnouncement();
+  }
+
+  private updateVisualEffectsAndAnnouncement(): void {
     // Update shield positions
     if (this.hasPowerUp("SHIELD")) {
       for (const sat of this.shields) {
@@ -348,9 +365,6 @@ export class PowerUpManager {
         this.announceFrame = 0;
       }
     }
-    
-    // Clean up collected orbs that are far away (3 chunks above camera)
-    // This is handled externally via getVisibleOrbs
   }
   
   private updateBlastExplosions(): void {

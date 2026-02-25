@@ -1372,6 +1372,58 @@ export class LevelSpawner {
     return false;
   }
 
+  // Avoid spawning collectibles inside small cavities formed by breakable blocks.
+  private isInsideBreakablePocket(
+    platforms: Platform[],
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): boolean {
+    const BLOCK = CONFIG.WALL_BLOCK_SIZE;
+    const maxSideGap = BLOCK * 1.1;
+    const maxFloorGap = BLOCK * 1.4;
+    const rectLeft = x;
+    const rectTop = y;
+    const rectRight = x + width;
+    const rectBottom = y + height;
+
+    let hasLeftBreakable = false;
+    let hasRightBreakable = false;
+    let hasFloorBreakable = false;
+
+    for (const p of platforms) {
+      if (!p.breakable) continue;
+
+      const verticalOverlap = rectTop < p.y + p.height && rectBottom > p.y;
+      if (verticalOverlap) {
+        const rightEdgeGap = rectLeft - (p.x + p.width);
+        if (rightEdgeGap >= -2 && rightEdgeGap <= maxSideGap) {
+          hasLeftBreakable = true;
+        }
+
+        const leftEdgeGap = p.x - rectRight;
+        if (leftEdgeGap >= -2 && leftEdgeGap <= maxSideGap) {
+          hasRightBreakable = true;
+        }
+      }
+
+      const horizontalOverlap = rectRight > p.x && rectLeft < p.x + p.width;
+      if (horizontalOverlap) {
+        const floorGap = p.y - rectBottom;
+        if (floorGap >= -2 && floorGap <= maxFloorGap) {
+          hasFloorBreakable = true;
+        }
+      }
+
+      if (hasLeftBreakable && hasRightBreakable && hasFloorBreakable) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   // Require at least one clear block above the entity's central body area.
   // This avoids spawns inside 1-block-high tunnels while still allowing
   // natural cave overhangs near edges.
@@ -1476,42 +1528,26 @@ export class LevelSpawner {
     // Get available enemy types based on depth
     let enemyTypes = EnemyFactory.getAvailableTypes(chunk.index);
     
-    // Don't spawn horizontal enemies in chunk 1 (ground level)
-    if (chunk.index === 1) {
-      enemyTypes = enemyTypes.filter(type => type !== "HORIZONTAL");
-    }
-    
     // Skip if no enemy types available
     if (enemyTypes.length === 0) return;
     
-    // Weighted spawn chances for enemy types (STATIC is rarer since it shoots)
+    // Weighted spawn chances only among currently unlocked enemy types.
     const getWeightedEnemyType = (): EnemyType => {
-      const roll = rng.range(0, 1);
+      const weights: Partial<Record<EnemyType, number>> = {};
+      if (enemyTypes.includes("HORIZONTAL")) weights.HORIZONTAL = 1.0;
+      if (enemyTypes.includes("PUFFER")) weights.PUFFER = 0.45;
+      if (enemyTypes.includes("STATIC")) weights.STATIC = 0.4;
+      if (enemyTypes.includes("EXPLODER")) weights.EXPLODER = 0.35;
 
-      // With PUFFER + EXPLODER available:
-      // 18% STATIC, 42% HORIZONTAL, 20% PUFFER, 20% EXPLODER
-      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("EXPLODER")) {
-        if (roll < 0.18) return "STATIC";
-        if (roll < 0.60) return "HORIZONTAL";
-        if (roll < 0.80) return "PUFFER";
-        return "EXPLODER";
+      const entries = Object.entries(weights) as [EnemyType, number][];
+      if (entries.length === 0) return "HORIZONTAL";
+      const total = entries.reduce((sum, [, w]) => sum + w, 0);
+      let roll = rng.range(0, total);
+      for (const [type, weight] of entries) {
+        roll -= weight;
+        if (roll <= 0) return type;
       }
-
-      // With PUFFER available, before EXPLODER depth:
-      // 22% STATIC, 58% HORIZONTAL, 20% PUFFER
-      if (enemyTypes.includes("PUFFER") && enemyTypes.includes("HORIZONTAL")) {
-        if (roll < 0.22) return "STATIC";
-        if (roll < 0.80) return "HORIZONTAL";
-        return "PUFFER";
-      }
-
-      // Legacy pool: 25% STATIC, 75% HORIZONTAL
-      if (enemyTypes.includes("HORIZONTAL")) {
-        if (roll < 0.25) return "STATIC";
-        return "HORIZONTAL";
-      }
-
-      return "STATIC";
+      return entries[entries.length - 1][0];
     };
     
     // Collect all non-wall platforms in this chunk for overlap checking
@@ -1665,54 +1701,11 @@ export class LevelSpawner {
   }
   
   private generateGems(chunk: Chunk, rng: SeededRNG, wallProfile: WallProfile): void {
-    const BLOCK_SIZE = CONFIG.WALL_BLOCK_SIZE;
-    
-    const numGems = CONFIG.GEMS_PER_CHUNK + rng.int(-1, 1);
-    
-    for (let i = 0; i < numGems; i++) {
-      let spawned = false;
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const gemY = chunk.y + rng.range(50, CONFIG.CHUNK_HEIGHT - 50);
-
-        // Get actual wall width at the gem's Y position
-        const row = Math.min(
-          Math.floor((gemY - chunk.y) / BLOCK_SIZE),
-          wallProfile.leftWidths.length - 1
-        );
-        const leftWallWidth = wallProfile.leftWidths[Math.max(0, row)] * BLOCK_SIZE;
-        const rightWallWidth = wallProfile.rightWidths[Math.max(0, row)] * BLOCK_SIZE;
-        const playableLeft = leftWallWidth + 10;
-        const playableRight = CONFIG.INTERNAL_WIDTH - rightWallWidth - 10;
-        const playableWidth = playableRight - playableLeft;
-
-        if (playableWidth < 30) continue;
-
-        const gemX = playableLeft + rng.range(10, playableWidth - 10);
-        const gemW = 12;
-        const gemH = 12;
-        const rectX = gemX - gemW / 2;
-        const rectY = gemY - gemH / 2;
-
-        const validLane = this.isRectInsideLane(chunk, wallProfile, rectX, rectY, gemW, gemH, 2);
-        const insideSolid = this.overlapsSolidPlatforms(chunk.platforms, rectX, rectY, gemW, gemH, 2);
-        const hasHeadroom = this.hasSpawnHeadroom(chunk.platforms, rectX, rectY, gemW, BLOCK_SIZE);
-        if (!validLane || insideSolid || !hasHeadroom) continue;
-
-        chunk.gems.push({
-          x: gemX,
-          y: gemY,
-          width: gemW,
-          height: gemH,
-          value: rng.int(1, 3) * CONFIG.SCORE_PER_GEM,
-          collected: false,
-          chunkIndex: chunk.index,
-          bobOffset: rng.range(0, Math.PI * 2),
-        });
-        spawned = true;
-        break;
-      }
-      if (!spawned) continue;
-    }
+    // World gems are intentionally disabled.
+    // Gems now come only from enemies and weeds (dropped gems at runtime).
+    void chunk;
+    void rng;
+    void wallProfile;
   }
 
   // Runtime helper for systems that need a safe X at a specific world Y (e.g., powerup orbs).
@@ -1775,6 +1768,8 @@ export class LevelSpawner {
   private generateWeeds(chunk: Chunk, rng: SeededRNG, wallProfile: WallProfile): void {
     const BLOCK = CONFIG.WALL_BLOCK_SIZE;
     const rows = wallProfile.leftWidths.length;
+    const depthMeters = Math.floor(chunk.y / 10);
+    const pufferUnlocked = depthMeters >= 100;
     const weedBodyWidth = 20;
     const weedBodyHeight = 20;
     const trySpawnLedgeEntity = (
@@ -1790,7 +1785,7 @@ export class LevelSpawner {
       if (!insideLane || overlapsSolid || !hasHeadroom) return;
 
       // Promote pufferfish from decorative weeds to an active enemy.
-      if (rng.chance(0.26)) {
+      if (pufferUnlocked && rng.chance(0.26)) {
         const puffer = EnemyFactory.create("PUFFER", bodyX, bodyY, rng);
         const pufferInsideLane = this.isRectInsideLane(chunk, wallProfile, puffer.x, puffer.y, puffer.width, puffer.height, 2);
         const pufferOverlapsSolid = this.overlapsSolidPlatforms(chunk.platforms, puffer.x, puffer.y, puffer.width, puffer.height, 1);
@@ -1808,7 +1803,8 @@ export class LevelSpawner {
       }
 
       // Non-puffer decorative weeds only.
-      const weedSpriteChoices = [0, 1, 3, 4, 6];
+      // Keep only the two coral/plant variants and exclude fish-like entries.
+      const weedSpriteChoices = [0, 1];
       chunk.weeds.push({
         x: ledgeX,
         y: ledgeY,
