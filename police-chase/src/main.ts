@@ -342,12 +342,12 @@ const COLORS = {
   skidMark: "#3a3a3a",
 };
 
-// Vehicle definitions
+// Vehicle definitions — purely cosmetic skins
 const VEHICLES: VehicleType[] = [
   {
     id: "sedan",
     name: "Street Sedan",
-    description: "Your everyday getaway car. Nothing special, but reliable.",
+    description: "Clean silver finish. The classic getaway look.",
     width: 34,
     height: 58,
     maxSpeed: 22,
@@ -360,65 +360,65 @@ const VEHICLES: VehicleType[] = [
   {
     id: "sports",
     name: "Viper X",
-    description: "Low, fast, and impossible to control. Good luck!",
-    width: 30,
-    height: 52,
-    maxSpeed: 30,
-    acceleration: 0.48,
-    turnSpeed: 0.055,
-    grip: 0.08,
+    description: "Racing red with gold trim. A head-turner.",
+    width: 33,
+    height: 56,
+    maxSpeed: 22,
+    acceleration: 0.35,
+    turnSpeed: 0.08,
+    grip: 0.14,
     cost: 100,
     colors: { main: "#ff2233", dark: "#990011", accent: "#ffdd00" },
   },
   {
     id: "muscle",
     name: "69 Charger",
-    description: "Classic American muscle. Drifts like butter on a hot pan.",
-    width: 38,
-    height: 66,
-    maxSpeed: 24,
-    acceleration: 0.30,
-    turnSpeed: 0.065,
-    grip: 0.10,
+    description: "Matte black with orange stripes. Old school cool.",
+    width: 35,
+    height: 60,
+    maxSpeed: 22,
+    acceleration: 0.35,
+    turnSpeed: 0.08,
+    grip: 0.14,
     cost: 200,
     colors: { main: "#1a1a2a", dark: "#0a0a12", accent: "#ff6600" },
   },
   {
     id: "buggy",
     name: "Dune Rat",
-    description: "Tiny terror. Bounces off everything and keeps going.",
-    width: 30,
-    height: 42,
-    maxSpeed: 20,
-    acceleration: 0.55,
-    turnSpeed: 0.14,
-    grip: 0.16,
+    description: "Lime green with exposed roll cage. Stands out anywhere.",
+    width: 33,
+    height: 54,
+    maxSpeed: 22,
+    acceleration: 0.35,
+    turnSpeed: 0.08,
+    grip: 0.14,
     cost: 150,
     colors: { main: "#44cc66", dark: "#228844", accent: "#ffff44" },
   },
   {
     id: "tank",
     name: "Iron Beast",
-    description: "Slow but UNSTOPPABLE. Crushes police on contact!",
-    width: 48,
-    height: 70,
-    maxSpeed: 14,
-    acceleration: 0.18,
-    turnSpeed: 0.04,
-    grip: 0.25,
+    description: "Military olive drab with steel plating. Looks tough.",
+    width: 36,
+    height: 60,
+    maxSpeed: 22,
+    acceleration: 0.35,
+    turnSpeed: 0.08,
+    grip: 0.14,
     cost: 350,
     colors: { main: "#556655", dark: "#334433", accent: "#aabbaa" },
   },
   {
     id: "hotrod",
     name: "Devil Rod",
-    description: "Flames shoot out. You slide everywhere. Pure chaos.",
-    width: 32,
-    height: 62,
-    maxSpeed: 26,
-    acceleration: 0.60,
-    turnSpeed: 0.07,
-    grip: 0.07,
+    description: "Deep crimson with flame decals. All attitude.",
+    width: 34,
+    height: 58,
+    maxSpeed: 22,
+    acceleration: 0.35,
+    turnSpeed: 0.08,
+    grip: 0.14,
     cost: 500,
     colors: { main: "#880000", dark: "#550000", accent: "#ff4400" },
   },
@@ -1461,37 +1461,54 @@ function setupUIHandlers(): void {
     openShop();
   });
   
-  // Settings button + modal
+  // Settings button + modal (does NOT trigger pause UI)
+  let settingsWasPlaying = false;
   document.getElementById("settings-btn")!.addEventListener("click", () => {
     triggerHaptic("light");
-    if (gamePhase === "playing") pauseGame();
+    settingsWasPlaying = gamePhase === "playing";
+    if (settingsWasPlaying) {
+      gamePhase = "paused";
+      pauseMusic();
+      gameplayStop();
+    }
     document.getElementById("settings-modal")!.classList.remove("hidden");
     updateSettingsToggles();
   });
   document.getElementById("settings-close")!.addEventListener("click", () => {
     document.getElementById("settings-modal")!.classList.add("hidden");
+    if (settingsWasPlaying && gamePhase === "paused") {
+      gamePhase = "playing";
+      lastTime = performance.now();
+      if (settings.music) playMusic();
+      gameplayStart();
+    }
   });
   
-  document.getElementById("toggle-music")!.addEventListener("click", () => {
+  let lastToggle = 0;
+  function settingsToggle(cb: () => void): (e: Event) => void {
+    return (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (Date.now() - lastToggle < 300) return;
+      lastToggle = Date.now();
+      cb();
+      saveSettings();
+      updateSettingsToggles();
+      triggerHaptic("light");
+    };
+  }
+
+  document.getElementById("toggle-music")!.addEventListener("click", settingsToggle(() => {
     settings.music = !settings.music;
     if (!settings.music) pauseMusic();
     else if (gamePhase === "playing") playMusic();
-    saveSettings();
-    updateSettingsToggles();
-    triggerHaptic("light");
-  });
-  document.getElementById("toggle-fx")!.addEventListener("click", () => {
+  }));
+  document.getElementById("toggle-fx")!.addEventListener("click", settingsToggle(() => {
     settings.fx = !settings.fx;
-    saveSettings();
-    updateSettingsToggles();
-    triggerHaptic("light");
-  });
-  document.getElementById("toggle-haptics")!.addEventListener("click", () => {
+  }));
+  document.getElementById("toggle-haptics")!.addEventListener("click", settingsToggle(() => {
     settings.haptics = !settings.haptics;
-    saveSettings();
-    updateSettingsToggles();
-    triggerHaptic("light");
-  });
+  }));
   
   // Pause button + modal
   document.getElementById("pause-btn")!.addEventListener("click", () => {
@@ -2157,20 +2174,74 @@ function updatePolice(dt: number): void {
         const odx = police.x - rock.x;
         const ody = police.y - rock.y;
         const odist = Math.sqrt(odx * odx + ody * ody);
-        const minDist = rock.radius + police.width / 2 + 25;
-        
+        const minDist = rock.radius + police.width / 2;
+
         if (odist < minDist) {
-          const nx = odx / odist || 0;
-          const ny = ody / odist || 0;
-          police.x += nx * 10;
-          police.y += ny * 10;
-          police.speed *= 0.65;
+          police.health = 0;
+          createExplosion(police.x, police.y);
+          police.state = "crashed";
+          crashCount++;
+
+          if (gameTime - lastCrashTime < COMBO_TIMEOUT) {
+            combo++;
+          } else {
+            combo = 1;
+          }
+          lastCrashTime = gameTime;
+
+          const pts = ENEMY_STATS[police.enemyType].points;
+          score += pts * Math.max(1, combo);
+          scorePopups.push({
+            x: 0, y: 0,
+            worldX: police.x,
+            worldY: police.y - 50,
+            text: "+" + pts,
+            time: 0,
+            color: "#ff9944",
+          });
+          triggerHaptic("medium");
+          screenShake = SHAKE_INTENSITY * 0.5;
+          break;
+        }
+      }
+      if (police.state === "crashed") break;
+
+      for (const lake of chunk.lakes) {
+        const ldx = (police.x - lake.x) / lake.radiusX;
+        const ldy = (police.y - lake.y) / lake.radiusY;
+        if (ldx * ldx + ldy * ldy < 0.85) {
+          police.health = 0;
+          createExplosion(police.x, police.y);
+          police.state = "crashed";
+          crashCount++;
+
+          if (gameTime - lastCrashTime < COMBO_TIMEOUT) {
+            combo++;
+          } else {
+            combo = 1;
+          }
+          lastCrashTime = gameTime;
+
+          const pts = ENEMY_STATS[police.enemyType].points;
+          score += pts * Math.max(1, combo);
+          scorePopups.push({
+            x: 0, y: 0,
+            worldX: police.x,
+            worldY: police.y - 50,
+            text: "+" + pts,
+            time: 0,
+            color: "#44aaff",
+          });
+          triggerHaptic("medium");
+          screenShake = SHAKE_INTENSITY * 0.4;
+          break;
         }
       }
     }
   }
 
   policeCars = policeCars.filter((p) => {
+    if (p.state === "crashed") return false;
     const dx = p.x - player.x;
     const dy = p.y - player.y;
     return Math.sqrt(dx * dx + dy * dy) < 2500;
@@ -2280,48 +2351,9 @@ function checkCollisions(): void {
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist < (player.width + police.width) / 2 * 0.75) {
-      if (vehicle.id === "tank") {
-        police.health--;
-        if (police.health <= 0) {
-          createExplosion(police.x, police.y);
-          police.state = "crashed";
-          crashCount++;
-          
-          if (gameTime - lastCrashTime < COMBO_TIMEOUT) {
-            combo++;
-          } else {
-            combo = 1;
-          }
-          lastCrashTime = gameTime;
-          
-          const pts = ENEMY_STATS[police.enemyType].points;
-          score += pts * Math.max(1, combo);
-          scorePopups.push({
-            x: 0, y: 0,
-            worldX: police.x,
-            worldY: police.y - 50,
-            text: "CRUSHED! +" + pts,
-            time: 0,
-            color: "#ff6600",
-          });
-        } else {
-          const nx = (dx / dist) || 0;
-          const ny = (dy / dist) || 0;
-          police.x += nx * 20;
-          police.y += ny * 20;
-          police.speed *= 0.3;
-          triggerHaptic("medium");
-        }
-        
-        triggerHaptic("heavy");
-        screenShake = SHAKE_INTENSITY * 0.8;
-        
-        console.log("[checkCollisions] Tank hit", police.enemyType, "hp:", police.health);
-      } else {
-        createExplosion(player.x, player.y);
-        endGame();
-        return;
-      }
+      createExplosion(player.x, player.y);
+      endGame();
+      return;
     }
   }
   

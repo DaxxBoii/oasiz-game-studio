@@ -194,6 +194,38 @@ if (oasiz.playerName) {
       localStorage.setItem("gameSettings", JSON.stringify(this.settings));
     }
     ```
+  - **Toggle Event Handler Pattern (CRITICAL for mobile)**:
+    - On touch devices, a single tap fires both `touchend` and a synthetic `click`, causing toggles to flip twice (back to the original state).
+    - **ALWAYS** use `e.preventDefault()`, `e.stopPropagation()`, and a **300ms debounce** on every settings toggle handler.
+    - Use a shared wrapper function so every toggle gets the same protection:
+    ```typescript
+    let lastToggle = 0;
+    function settingsToggle(cb: () => void): (e: Event) => void {
+      return (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (Date.now() - lastToggle < 300) return;
+        lastToggle = Date.now();
+        cb();
+        saveSettings();
+        updateSettingsToggles();
+        triggerHaptic("light");
+      };
+    }
+
+    document.getElementById("toggle-music")!.addEventListener("click", settingsToggle(() => {
+      settings.music = !settings.music;
+      if (!settings.music) pauseMusic();
+      else if (gamePhase === "playing") playMusic();
+    }));
+    document.getElementById("toggle-fx")!.addEventListener("click", settingsToggle(() => {
+      settings.fx = !settings.fx;
+    }));
+    document.getElementById("toggle-haptics")!.addEventListener("click", settingsToggle(() => {
+      settings.haptics = !settings.haptics;
+    }));
+    ```
+    - This same debounce pattern should also be applied to **shop carousel arrows** and any other button that users report as "double-firing" on mobile.
   - **Best Practices**:
     1. **Separation**: Do not bundle FX and haptics into a single toggle. A user may want to feel the game without hearing it.
     2. **Coupling**: While toggled separately, FX and haptics should be triggered at the same point in code to maintain synchronization.
@@ -246,6 +278,55 @@ if (oasiz.playerName) {
 
 
 ### 5. Performance & Code Quality
+
+- **Game Loop Must Stop When Not Playing (CRITICAL)**:
+  - The `requestAnimationFrame` loop **must never run in the background**. If the tab is hidden or the platform backgrounds the app, the loop must be fully cancelled with `cancelAnimationFrame`.
+  - Track the RAF handle and expose `startLoop` / `stopLoop` helpers. Reset `lastFrameTime` on restart to prevent a huge delta-time spike on the first resumed frame.
+  - Wire `stopLoop` to both `document.visibilitychange` (tab hidden) and `oasiz.onPause` (platform backgrounding). Wire `startLoop` to `visibilitychange` (tab visible) and `oasiz.onResume`.
+  - **User-pause via the pause button should NOT stop the loop** — the loop must keep running to render the pause screen. Only background/platform events kill it entirely.
+  - **Required pattern (use this in every game)**:
+  ```typescript
+  let rafId = 0;
+
+  function startLoop(): void {
+    if (rafId) return;             // already running — guard against double-start
+    lastFrameTime = 0;             // reset so first frame dt is 0, not a huge spike
+    rafId = requestAnimationFrame(gameLoop);
+  }
+
+  function stopLoop(): void {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  }
+
+  // Inside gameLoop — store the handle on every frame
+  function gameLoop(timestamp: number): void {
+    // ... update & draw ...
+    rafId = requestAnimationFrame(gameLoop);
+  }
+
+  // In init()
+  oasiz.onPause(() => {
+    if (gameState === "PLAYING") pauseGame(); // update game state
+    stopLoop();                               // kill the RAF
+  });
+
+  oasiz.onResume(() => {
+    startLoop();                              // restart RAF; game state stays PAUSED until user taps Resume
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopLoop();
+    } else {
+      startLoop();
+    }
+  });
+
+  startLoop();   // kick off the loop once on init
+  ```
 
 - **No Random Values in Render Loops (CRITICAL)**:
   - NEVER use `Math.random()` or `randomRange()` inside `draw*()` or `render()` functions
