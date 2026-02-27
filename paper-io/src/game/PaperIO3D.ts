@@ -71,8 +71,18 @@ export class PaperIO3D {
   private readonly uiSystem: UISystem;
 
   private touchPointerId: number | null = null;
-  private touchStartX = 0;
-  private touchStartY = 0;
+  private hasCursor = false;
+  private cursorClientX = 0;
+  private cursorClientY = 0;
+  private playerWorldX = 0;
+  private playerWorldY = 0;
+  private playerFacingX = 0;
+  private playerFacingY = 1;
+  private playerFacingYaw = 0;
+  private readonly pointerNdc = new THREE.Vector2();
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly boardPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly rayHit = new THREE.Vector3();
 
   constructor() {
     console.log("[PaperIO3D.constructor]", "Initializing Three.js Paper.io");
@@ -90,15 +100,15 @@ export class PaperIO3D {
       throw new Error("Could not create board texture context");
     }
     this.boardCtx = context;
-    this.boardCtx.imageSmoothingEnabled = false;
+    this.boardCtx.imageSmoothingEnabled = true;
     this.boardTexture = new THREE.CanvasTexture(this.boardCanvas);
     this.boardTexture.colorSpace = THREE.SRGBColorSpace;
-    this.boardTexture.magFilter = THREE.NearestFilter;
-    this.boardTexture.minFilter = THREE.NearestFilter;
+    this.boardTexture.magFilter = THREE.LinearFilter;
+    this.boardTexture.minFilter = THREE.LinearFilter;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color("#081223");
-    this.scene.fog = new THREE.Fog("#081223", 45, 120);
+    this.scene.background = new THREE.Color("#cfeae7");
+    this.scene.fog = new THREE.Fog("#cfeae7", 80, 190);
     this.camera = new THREE.PerspectiveCamera(56, 1, 0.1, 300);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -115,8 +125,8 @@ export class PaperIO3D {
 
     const boardMaterial = new THREE.MeshStandardMaterial({
       map: this.boardTexture,
-      roughness: 0.86,
-      metalness: 0.04,
+      roughness: 0.94,
+      metalness: 0.02,
     });
     this.boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(GRID_W, GRID_H), boardMaterial);
     this.boardMesh.rotation.x = -Math.PI / 2;
@@ -146,10 +156,10 @@ export class PaperIO3D {
   }
 
   private setupWorld(): void {
-    const hemi = new THREE.HemisphereLight("#9dbdff", "#080f1a", 0.75);
+    const hemi = new THREE.HemisphereLight("#ffffff", "#bfe3dd", 1.02);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight("#ffffff", 1.05);
+    const sun = new THREE.DirectionalLight("#fffef4", 0.72);
     sun.position.set(18, 28, 14);
     sun.castShadow = true;
     sun.shadow.mapSize.width = 1024;
@@ -165,9 +175,9 @@ export class PaperIO3D {
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(GRID_W + 2.6, 1.2, GRID_H + 2.6),
       new THREE.MeshStandardMaterial({
-        color: "#10253e",
-        roughness: 0.75,
-        metalness: 0.18,
+        color: "#b4d8d2",
+        roughness: 0.96,
+        metalness: 0.01,
       })
     );
     frame.position.set(0, -0.72, 0);
@@ -177,9 +187,9 @@ export class PaperIO3D {
     const underPlate = new THREE.Mesh(
       new THREE.CylinderGeometry(60, 70, 2.4, 48),
       new THREE.MeshStandardMaterial({
-        color: "#091523",
-        roughness: 0.92,
-        metalness: 0.02,
+        color: "#c5e3de",
+        roughness: 0.98,
+        metalness: 0,
       })
     );
     underPlate.position.set(0, -2, 0);
@@ -187,9 +197,9 @@ export class PaperIO3D {
     this.scene.add(underPlate);
 
     const glowMaterial = new THREE.MeshBasicMaterial({
-      color: "#1f3e66",
+      color: "#d8efea",
       transparent: true,
-      opacity: 0.25,
+      opacity: 0.4,
     });
     const glowRing = new THREE.Mesh(new THREE.RingGeometry(45, 54, 64), glowMaterial);
     glowRing.rotation.x = -Math.PI / 2;
@@ -249,8 +259,8 @@ export class PaperIO3D {
     window.addEventListener("keydown", (e) => this.onKeyDown(e));
     this.canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     this.canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
-    this.canvas.addEventListener("pointerup", () => this.onPointerUp());
-    this.canvas.addEventListener("pointerleave", () => this.onPointerUp());
+    this.canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
+    this.canvas.addEventListener("pointerleave", (e) => this.onPointerLeave(e));
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -277,16 +287,7 @@ export class PaperIO3D {
       return;
     }
 
-    let dir: Dir | null = null;
-    if (e.code === "ArrowUp" || e.code === "KeyW") dir = 0;
-    if (e.code === "ArrowRight" || e.code === "KeyD") dir = 1;
-    if (e.code === "ArrowDown" || e.code === "KeyS") dir = 2;
-    if (e.code === "ArrowLeft" || e.code === "KeyA") dir = 3;
-
-    if (dir !== null) {
-      e.preventDefault();
-      this.setPlayerDirection(dir);
-    }
+    // Movement is pointer-driven in any direction.
   }
 
   private onPointerDown(e: PointerEvent): void {
@@ -302,47 +303,87 @@ export class PaperIO3D {
       return;
     }
 
-    this.touchPointerId = e.pointerId;
-    this.touchStartX = e.clientX;
-    this.touchStartY = e.clientY;
+    if (this.isMobile) {
+      this.touchPointerId = e.pointerId;
+    }
+
+    this.cursorClientX = e.clientX;
+    this.cursorClientY = e.clientY;
+    this.hasCursor = true;
+    this.startPlayerMovement();
   }
 
   private onPointerMove(e: PointerEvent): void {
-    if (this.phase !== "playing") return;
-    if (this.touchPointerId === null || e.pointerId !== this.touchPointerId) return;
     if (this.uiSystem.isSettingsOpen()) return;
+    if (this.phase !== "playing") return;
 
-    const dx = e.clientX - this.touchStartX;
-    const dy = e.clientY - this.touchStartY;
-    const threshold = this.isMobile ? 18 : 22;
-    if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
-
-    let dir: Dir = 0;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      dir = dx > 0 ? 1 : 3;
-    } else {
-      dir = dy > 0 ? 2 : 0;
+    if (this.isMobile) {
+      if (this.touchPointerId === null || e.pointerId !== this.touchPointerId) return;
     }
 
-    this.setPlayerDirection(dir);
-    this.touchStartX = e.clientX;
-    this.touchStartY = e.clientY;
+    this.cursorClientX = e.clientX;
+    this.cursorClientY = e.clientY;
+    this.hasCursor = true;
+    this.startPlayerMovement();
   }
 
-  private onPointerUp(): void {
+  private onPointerUp(e: PointerEvent): void {
+    if (!this.isMobile) return;
+    if (this.touchPointerId === null || e.pointerId !== this.touchPointerId) return;
     this.touchPointerId = null;
+    this.hasCursor = false;
   }
 
-  private setPlayerDirection(dir: Dir): void {
-    if (!this.player || !this.player.alive) return;
-    if (this.playerMoving && dir === OPPOSITE[this.player.dir]) return;
-    this.player.nextDir = dir;
-    if (!this.playerMoving) {
-      this.playerMoving = true;
-      this.player.dir = dir;
-      this.playSfx("tap");
-      this.triggerHaptic("light");
+  private onPointerLeave(e: PointerEvent): void {
+    if (this.isMobile) {
+      if (this.touchPointerId !== null && e.pointerId === this.touchPointerId) {
+        this.touchPointerId = null;
+        this.hasCursor = false;
+      }
+      return;
     }
+
+    this.touchPointerId = null;
+    this.hasCursor = false;
+  }
+
+  private startPlayerMovement(): void {
+    if (!this.player || !this.player.alive || !this.hasCursor) return;
+
+    const target = this.screenPointToBoardPoint(this.cursorClientX, this.cursorClientY);
+    if (!target) return;
+
+    this.updatePlayerFacing(target.x, target.y);
+    if (this.playerMoving) return;
+    this.playerMoving = true;
+    this.playSfx("tap");
+    this.triggerHaptic("light");
+  }
+
+  private updatePlayerFacing(targetX: number, targetY: number): void {
+    const dx = targetX - this.playerWorldX;
+    const dy = targetY - this.playerWorldY;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.0001) return;
+    this.playerFacingX = dx / length;
+    this.playerFacingY = dy / length;
+    this.playerFacingYaw = Math.atan2(this.playerFacingX, this.playerFacingY);
+  }
+
+  private screenPointToBoardPoint(clientX: number, clientY: number): Cell | null {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+
+    this.pointerNdc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointerNdc, this.camera);
+
+    if (!this.raycaster.ray.intersectPlane(this.boardPlane, this.rayHit)) return null;
+
+    const edgePadding = 0.001;
+    const x = clamp(this.rayHit.x + GRID_W / 2, edgePadding, GRID_W - edgePadding);
+    const y = clamp(this.rayHit.z + GRID_H / 2, edgePadding, GRID_H - edgePadding);
+    return { x, y };
   }
 
   private saveSettings(): void {
@@ -386,10 +427,17 @@ export class PaperIO3D {
     this.grid.fill(0);
     this.trailGrid.fill(0);
     this.removeEntityMeshes();
+    this.hasCursor = false;
+    this.touchPointerId = null;
 
     const playerX = Math.floor(GRID_W * 0.5);
     const playerY = Math.floor(GRID_H * 0.5);
     this.player = this.createEntity(playerX, playerY, 1, "You", true);
+    this.playerWorldX = playerX + 0.5;
+    this.playerWorldY = playerY + 0.5;
+    this.playerFacingX = 0;
+    this.playerFacingY = 1;
+    this.playerFacingYaw = 0;
     this.spawnTerritory(playerX, playerY, 1, PLAYER_INIT_SIZE);
     this.createEntityMesh(this.player);
 
@@ -430,6 +478,8 @@ export class PaperIO3D {
     this.playerMoving = false;
     this.score = 0;
     this.displayScore = 0;
+    this.hasCursor = false;
+    this.touchPointerId = null;
     this.removeEntityMeshes();
     this.bots = [];
     this.audioSystem.stopBgMusic();
@@ -442,6 +492,8 @@ export class PaperIO3D {
     if (this.phase !== "playing") return;
     this.phase = "over";
     this.player.alive = false;
+    this.hasCursor = false;
+    this.touchPointerId = null;
     this.audioSystem.stopBgMusic();
     this.playSfx("death");
     this.triggerHaptic("error");
@@ -543,7 +595,7 @@ export class PaperIO3D {
 
     const world = this.entityToWorld(entity, 0);
     group.position.set(world.x, world.y, world.z);
-    group.rotation.y = dirToYaw(entity.dir);
+    group.rotation.y = entity.isPlayer ? this.playerFacingYaw : dirToYaw(entity.dir);
     this.scene.add(group);
     this.entityMeshes.set(entity.ownerIdx, group);
   }
@@ -585,7 +637,7 @@ export class PaperIO3D {
 
   private updateGameplay(dt: number): void {
     if (this.player.alive) {
-      this.moveEntity(this.player, dt, false);
+      this.movePlayerFreely(dt);
     }
 
     for (const bot of this.bots) {
@@ -603,6 +655,89 @@ export class PaperIO3D {
     this.displayScore = lerp(this.displayScore, this.score, clamp(dt * 7, 0, 1));
     this.uiSystem.setScore(this.displayScore.toFixed(1) + "%");
     this.updateHudText();
+  }
+
+  private movePlayerFreely(dt: number): void {
+    if (!this.player.alive || !this.playerMoving || !this.hasCursor) return;
+
+    const target = this.screenPointToBoardPoint(this.cursorClientX, this.cursorClientY);
+    if (!target) return;
+
+    this.updatePlayerFacing(target.x, target.y);
+
+    const dx = target.x - this.playerWorldX;
+    const dy = target.y - this.playerWorldY;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 0.0001) return;
+
+    const travel = Math.min(distance, MOVE_SPEED * dt);
+    const prevX = this.playerWorldX;
+    const prevY = this.playerWorldY;
+    const nextX = prevX + (dx / distance) * travel;
+    const nextY = prevY + (dy / distance) * travel;
+
+    if (nextX < 0 || nextX >= GRID_W || nextY < 0 || nextY >= GRID_H) {
+      this.killEntity(this.player, "out-of-bounds");
+      return;
+    }
+
+    this.playerWorldX = nextX;
+    this.playerWorldY = nextY;
+    this.advancePlayerThroughCells(prevX, prevY, nextX, nextY);
+  }
+
+  private advancePlayerThroughCells(prevX: number, prevY: number, nextX: number, nextY: number): void {
+    if (!this.player.alive) return;
+
+    const dx = nextX - prevX;
+    const dy = nextY - prevY;
+    const distance = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(distance / 0.1));
+
+    let lastCellX = this.player.cellX;
+    let lastCellY = this.player.cellY;
+    for (let step = 1; step <= steps && this.player.alive; step++) {
+      const t = step / steps;
+      const sampleX = prevX + dx * t;
+      const sampleY = prevY + dy * t;
+      const cellX = Math.floor(sampleX);
+      const cellY = Math.floor(sampleY);
+      if (cellX === lastCellX && cellY === lastCellY) continue;
+      if (!this.processEntityCellEntry(this.player, cellX, cellY)) break;
+      lastCellX = cellX;
+      lastCellY = cellY;
+    }
+  }
+
+  private processEntityCellEntry(entity: Entity, nextX: number, nextY: number): boolean {
+    if (!inBounds(nextX, nextY)) {
+      this.killEntity(entity, "out-of-bounds");
+      return false;
+    }
+
+    const trailOwner = this.trailGrid[idx(nextX, nextY)];
+    if (trailOwner !== 0) {
+      if (trailOwner === entity.ownerIdx) {
+        this.killEntity(entity, "self-trail");
+        return false;
+      }
+
+      const victim = this.getEntityByOwner(trailOwner);
+      if (victim && victim.alive) {
+        this.killEntity(victim, "tail-cut");
+        this.playSfx("kill");
+        if (entity.isPlayer) {
+          this.triggerHaptic("success");
+        }
+      }
+    }
+
+    if (!entity.alive) return false;
+
+    entity.cellX = nextX;
+    entity.cellY = nextY;
+    this.handleTrailAndCapture(entity);
+    return entity.alive;
   }
 
   private moveEntity(entity: Entity, dt: number, isBot: boolean): void {
@@ -625,33 +760,8 @@ export class PaperIO3D {
       const nextX = entity.cellX + DIR_DX[entity.dir];
       const nextY = entity.cellY + DIR_DY[entity.dir];
 
-      if (!inBounds(nextX, nextY)) {
-        this.killEntity(entity, "out-of-bounds");
-        break;
-      }
-
-      const trailOwner = this.trailGrid[idx(nextX, nextY)];
-      if (trailOwner !== 0) {
-        if (trailOwner === entity.ownerIdx) {
-          this.killEntity(entity, "self-trail");
-          break;
-        }
-
-        const victim = this.getEntityByOwner(trailOwner);
-        if (victim && victim.alive) {
-          this.killEntity(victim, "tail-cut");
-          this.playSfx("kill");
-          if (entity.isPlayer) {
-            this.triggerHaptic("success");
-          }
-        }
-      }
-
-      if (!entity.alive) break;
-
-      entity.cellX = nextX;
-      entity.cellY = nextY;
-      this.handleTrailAndCapture(entity);
+      const enteredCell = this.processEntityCellEntry(entity, nextX, nextY);
+      if (!enteredCell) break;
 
       if (isBot) {
         this.updateBotStateAfterStep(entity);
@@ -982,9 +1092,7 @@ export class PaperIO3D {
     }
 
     if (!this.playerMoving) {
-      this.uiSystem.setStatus(
-        this.isMobile ? "Swipe to launch your trail" : "Use arrow keys or WASD to launch your trail"
-      );
+      this.uiSystem.setStatus(this.isMobile ? "Touch and drag to move and start your trail" : "Move your cursor to start your trail");
       return;
     }
 
@@ -1011,13 +1119,18 @@ export class PaperIO3D {
       mesh.visible = true;
       const world = this.entityToWorld(entity, entity.moveProgress);
       mesh.position.set(world.x, world.y, world.z);
-      mesh.rotation.y = dirToYaw(entity.dir);
+      mesh.rotation.y = entity.isPlayer ? this.playerFacingYaw : dirToYaw(entity.dir);
       const pulse = 1 + Math.sin(t * 6 + entity.ownerIdx * 1.7) * 0.03;
       mesh.scale.set(pulse, pulse, pulse);
     }
   }
 
   private entityToWorld(entity: Entity, progress: number): THREE.Vector3 {
+    if (entity.isPlayer) {
+      this.tempVec.set(this.playerWorldX - GRID_W / 2, 0.42, this.playerWorldY - GRID_H / 2);
+      return this.tempVec;
+    }
+
     const fx = entity.cellX + DIR_DX[entity.dir] * progress;
     const fy = entity.cellY + DIR_DY[entity.dir] * progress;
     this.tempVec.set(fx - GRID_W / 2 + 0.5, 0.42, fy - GRID_H / 2 + 0.5);
@@ -1029,11 +1142,9 @@ export class PaperIO3D {
 
     if (this.phase === "playing" && this.player && this.player.alive) {
       const playerPos = this.entityToWorld(this.player, this.player.moveProgress);
-      const facingX = DIR_DX[this.player.dir];
-      const facingZ = DIR_DY[this.player.dir];
-      const desiredX = playerPos.x - facingX * 8.5;
+      const desiredX = playerPos.x;
       const desiredY = this.isMobile ? 14.4 : 13.6;
-      const desiredZ = playerPos.z - facingZ * 8.5 + 4;
+      const desiredZ = playerPos.z + (this.isMobile ? 12 : 11);
 
       this.camera.position.lerp(new THREE.Vector3(desiredX, desiredY, desiredZ), easing);
       this.cameraLookAt.lerp(new THREE.Vector3(playerPos.x, 0.15, playerPos.z), easing * 1.15);
@@ -1058,39 +1169,159 @@ export class PaperIO3D {
   private rebuildBoardTexture(): void {
     const ctx = this.boardCtx;
     const px = BOARD_CELL_PIXELS;
+    const textureW = this.boardCanvas.width;
+    const textureH = this.boardCanvas.height;
 
-    for (let y = 0; y < GRID_H; y++) {
-      for (let x = 0; x < GRID_W; x++) {
-        const i = idx(x, y);
-        const drawX = x * px;
-        const drawY = y * px;
-        const territoryOwner = this.grid[i];
-        const trailOwner = this.trailGrid[i];
+    ctx.clearRect(0, 0, textureW, textureH);
 
-        let fill = ((x + y) & 1) === 0 ? "#152035" : "#111a2c";
-        if (territoryOwner > 0) {
-          fill = COLORS[territoryOwner - 1].territory;
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, textureH);
+    baseGradient.addColorStop(0, "#d8efec");
+    baseGradient.addColorStop(0.62, "#d1ece8");
+    baseGradient.addColorStop(1, "#c8e7e2");
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, textureW, textureH);
+
+    // Soft wavy ribbons in the base map, similar to the reference look.
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let band = 0; band < 7; band++) {
+      const ratio = (band + 0.5) / 7;
+      const baseY = ratio * textureH;
+      ctx.strokeStyle = this.hexWithAlpha("#95c9c4", 0.16 + ratio * 0.05);
+      ctx.lineWidth = px * (0.42 + ratio * 0.1);
+      ctx.beginPath();
+      for (let sx = -px; sx <= textureW + px; sx += px) {
+        const wave =
+          Math.sin(sx * 0.020 + band * 1.43) * px * 1.45 +
+          Math.cos(sx * 0.010 - band * 0.81) * px * 0.72;
+        const sy = baseY + wave;
+        if (sx <= -px) {
+          ctx.moveTo(sx, sy);
+        } else {
+          ctx.lineTo(sx, sy);
         }
-        if (trailOwner > 0) {
-          fill = COLORS[trailOwner - 1].trail;
+      }
+      ctx.stroke();
+    }
+
+    // Fine deterministic variation to avoid a flat digital look.
+    for (let y = 0; y < GRID_H; y += 3) {
+      for (let x = 0; x < GRID_W; x += 3) {
+        const shade = this.cellShade[idx(x, y)];
+        if (Math.abs(shade) < 0.03) continue;
+        const alpha = Math.min(0.045, Math.abs(shade) * 0.32);
+        ctx.fillStyle = shade > 0 ? this.hexWithAlpha("#ffffff", alpha) : this.hexWithAlpha("#6ea8a0", alpha);
+        ctx.beginPath();
+        ctx.arc((x + 0.5) * px, (y + 0.5) * px, px * 0.95, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const drawDisc = (x: number, y: number, radius: number): void => {
+      ctx.beginPath();
+      ctx.arc((x + 0.5) * px, (y + 0.5) * px, radius, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    const isBoundaryCell = (ownerIdx: number, x: number, y: number): boolean => {
+      for (let dir: Dir = 0; dir < 4; dir = (dir + 1) as Dir) {
+        const nx = x + DIR_DX[dir];
+        const ny = y + DIR_DY[dir];
+        if (!inBounds(nx, ny) || this.grid[idx(nx, ny)] !== ownerIdx) {
+          return true;
         }
+      }
+      return false;
+    };
 
-        ctx.fillStyle = fill;
-        ctx.fillRect(drawX, drawY, px, px);
+    const strokeTrailLinks = (ownerIdx: number, strokeColor: string, lineWidth: number): void => {
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = lineWidth;
+      ctx.beginPath();
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (this.trailGrid[idx(x, y)] !== ownerIdx) continue;
+          const cx = (x + 0.5) * px;
+          const cy = (y + 0.5) * px;
+          if (x + 1 < GRID_W && this.trailGrid[idx(x + 1, y)] === ownerIdx) {
+            ctx.moveTo(cx, cy);
+            ctx.lineTo((x + 1.5) * px, cy);
+          }
+          if (y + 1 < GRID_H && this.trailGrid[idx(x, y + 1)] === ownerIdx) {
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx, (y + 1.5) * px);
+          }
+        }
+      }
+      ctx.stroke();
+    };
 
-        const shade = this.cellShade[i];
-        if (shade > 0) {
-          ctx.fillStyle = "rgba(255,255,255," + shade.toFixed(3) + ")";
-          ctx.fillRect(drawX, drawY, px, px);
-        } else if (shade < 0) {
-          ctx.fillStyle = "rgba(0,0,0," + (-shade).toFixed(3) + ")";
-          ctx.fillRect(drawX, drawY, px, px);
+    // Territories: filled soft blobs with darker outlines.
+    for (let ownerIdx = 1; ownerIdx <= COLORS.length; ownerIdx++) {
+      const theme = COLORS[ownerIdx - 1];
+      ctx.fillStyle = theme.territory;
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (this.grid[idx(x, y)] !== ownerIdx) continue;
+          drawDisc(x, y, px * 0.8);
+        }
+      }
+
+      ctx.strokeStyle = this.adjustHex(theme.territory, -0.18);
+      ctx.lineWidth = px * 0.22;
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (this.grid[idx(x, y)] !== ownerIdx) continue;
+          if (!isBoundaryCell(ownerIdx, x, y)) continue;
+          ctx.beginPath();
+          ctx.arc((x + 0.5) * px, (y + 0.5) * px, px * 0.78, 0, Math.PI * 2);
+          ctx.stroke();
         }
       }
     }
 
+    // Trails: rounded tubes with a soft underlay.
+    for (let ownerIdx = 1; ownerIdx <= COLORS.length; ownerIdx++) {
+      const trailColor = COLORS[ownerIdx - 1].trail;
+      strokeTrailLinks(ownerIdx, this.hexWithAlpha(trailColor, 0.35), px * 0.86);
+      strokeTrailLinks(ownerIdx, trailColor, px * 0.55);
+
+      ctx.fillStyle = trailColor;
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (this.trailGrid[idx(x, y)] !== ownerIdx) continue;
+          ctx.beginPath();
+          ctx.arc((x + 0.5) * px, (y + 0.5) * px, px * 0.29, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    ctx.globalAlpha = 1;
     this.boardTexture.needsUpdate = true;
     this.boardDirty = false;
+  }
+
+  private hexWithAlpha(hex: string, alpha: number): string {
+    const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+    const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    const a = clamp(alpha, 0, 1).toFixed(3);
+    return "rgba(" + r + ", " + g + ", " + b + ", " + a + ")";
+  }
+
+  private adjustHex(hex: string, amount: number): string {
+    const clean = hex.startsWith("#") ? hex.slice(1) : hex;
+    const full = clean.length === 3 ? clean.split("").map((c) => c + c).join("") : clean;
+    const r = clamp(Math.round(parseInt(full.slice(0, 2), 16) + amount * 255), 0, 255);
+    const g = clamp(Math.round(parseInt(full.slice(2, 4), 16) + amount * 255), 0, 255);
+    const b = clamp(Math.round(parseInt(full.slice(4, 6), 16) + amount * 255), 0, 255);
+    const rr = r.toString(16).padStart(2, "0");
+    const gg = g.toString(16).padStart(2, "0");
+    const bb = b.toString(16).padStart(2, "0");
+    return "#" + rr + gg + bb;
   }
 
   private playSfx(name: SfxName): void {

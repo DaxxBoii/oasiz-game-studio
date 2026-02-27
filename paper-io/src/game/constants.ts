@@ -14,7 +14,7 @@ export const BOT_VENTURE_MAX = 22;
 export const BOT_MAX_TRAIL = 22;
 export const BOT_RESPAWN_TIME = 1.6;
 export const CAMERA_LERP = 7;
-export const BOARD_CELL_PIXELS = 8;
+export const BOARD_CELL_PIXELS = 10;
 
 export const DIR_DX: Record<Dir, number> = { 0: 0, 1: 1, 2: 0, 3: -1 };
 export const DIR_DY: Record<Dir, number> = { 0: -1, 1: 0, 2: 1, 3: 0 };
@@ -25,31 +25,31 @@ export const CCW: Record<Dir, Dir> = { 0: 3, 1: 0, 2: 1, 3: 2 };
 export const COLORS: ColorTheme[] = [
   {
     name: "You",
-    territory: "#3f7cff",
-    trail: "#8ab0ff",
-    mesh: "#4c86ff",
-    accent: "#b9d0ff",
+    territory: "#f1d537",
+    trail: "#f2df83",
+    mesh: "#f0cc25",
+    accent: "#ffe98d",
   },
   {
     name: "Razor",
-    territory: "#ff5244",
-    trail: "#ff9d95",
-    mesh: "#ff5d4e",
-    accent: "#ffc7c1",
+    territory: "#2fc2cb",
+    trail: "#7fd9dd",
+    mesh: "#2bb3bc",
+    accent: "#b4eef1",
   },
   {
     name: "Blitz",
-    territory: "#35b970",
-    trail: "#84dfac",
-    mesh: "#46c57e",
-    accent: "#c6f7da",
+    territory: "#98d93d",
+    trail: "#bce779",
+    mesh: "#87cb31",
+    accent: "#dbf4b1",
   },
   {
     name: "Nova",
-    territory: "#bb5fff",
-    trail: "#e0afff",
-    mesh: "#c875ff",
-    accent: "#efd1ff",
+    territory: "#eb6e96",
+    trail: "#f6a9bf",
+    mesh: "#dc5f87",
+    accent: "#ffd2df",
   },
 ];
 
