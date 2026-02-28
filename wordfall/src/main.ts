@@ -37,10 +37,10 @@ const CONFIG = {
   WORD_CHAMFER_RADIUS: 8,
 
   // Special word probabilities
-  PROB_NORMAL: 0.92,
-  PROB_BOMB: 0.03,
-  PROB_FREEZE: 0.03,
-  PROB_SHRINK: 0.02,
+  PROB_NORMAL: 0.83,
+  PROB_BOMB: 0.05,
+  PROB_FREEZE: 0.06,
+  PROB_SHRINK: 0.06,
 
   // Effects
   FREEZE_DURATION: 5,
@@ -62,19 +62,32 @@ const CONFIG = {
 
   // Colors
   COLOR_NORMAL: {
-    bg: "rgba(255,255,255,0.92)",
-    text: "#0f1420",
-    glow: "rgba(255,255,255,0.25)",
+    bg: "#FFF3E0",
+    text: "#4E342E",
+    shadow: "#D4A373",
+    highlight: "#FFFFFF",
   },
-  COLOR_BOMB: { bg: "#ff3a4e", text: "#fff", glow: "rgba(255,58,78,0.5)" },
-  COLOR_FREEZE: { bg: "#06b6d4", text: "#fff", glow: "rgba(6,182,212,0.5)" },
+  COLOR_BOMB: { 
+    bg: "#FF5252", 
+    text: "#FFF", 
+    shadow: "#D32F2F", 
+    highlight: "#FF8A80" 
+  },
+  COLOR_FREEZE: { 
+    bg: "#4DD0E1", 
+    text: "#FFF", 
+    shadow: "#0097A7", 
+    highlight: "#B2EBF2" 
+  },
   COLOR_SHRINK: {
-    bg: "#c084fc",
-    text: "#fff",
-    glow: "rgba(192,132,252,0.5)",
+    bg: "#BA68C8",
+    text: "#FFF",
+    shadow: "#7B1FA2",
+    highlight: "#E1BEE7"
   },
-  COLOR_BUCKET: "rgba(255,255,255,0.04)",
-  COLOR_BUCKET_BORDER: "rgba(255,255,255,0.15)",
+  COLOR_BUCKET: "#3D2B1F",
+  COLOR_BUCKET_BORDER: "#5E3F38",
+  COLOR_BUCKET_SHADOW: "#2A1E17",
 };
 
 // ============= TYPE DEFINITIONS =============
@@ -248,6 +261,7 @@ class AudioManager {
   private initialized = false;
   private settings: Settings;
   private bgMusic: HTMLAudioElement;
+  private clickSound: HTMLAudioElement;
   private musicStarted = false;
 
   constructor(settings: Settings) {
@@ -255,6 +269,16 @@ class AudioManager {
     this.bgMusic = new Audio(new URL("./MOVE.mp3", import.meta.url).href);
     this.bgMusic.loop = true;
     this.bgMusic.volume = 0.25; // Default background volume
+
+    this.clickSound = new Audio(new URL("./click.mp3", import.meta.url).href);
+    this.clickSound.volume = 0.8;
+  }
+
+  playClick() {
+    if (this.settings.fx) {
+      this.clickSound.currentTime = 0;
+      this.clickSound.play().catch(() => {});
+    }
   }
 
   init() {
@@ -388,6 +412,11 @@ class AudioManager {
     osc.stop(now + 0.3);
   }
 
+  playThud() {
+    // Very soft, low click sound for blocks landing
+    this.playTone(80, 0.05, "sine", 0.05); 
+  }
+
   playGameOver() {
     [400, 350, 300, 200].forEach((freq, i) => {
       setTimeout(() => this.playTone(freq, 0.3, "sawtooth", 0.2), i * 150);
@@ -411,7 +440,6 @@ class WordfallGame {
   // Matter.js
   engine: Matter.Engine;
   world: Matter.World;
-  runner: Matter.Runner;
 
   // Systems
   particles: ParticleSystem;
@@ -463,7 +491,6 @@ class WordfallGame {
     });
     this.world = this.engine.world;
     this.engine.world.gravity.y = CONFIG.GRAVITY;
-    this.runner = Matter.Runner.create();
 
     this.particles = new ParticleSystem();
     this.shake = new ScreenShake();
@@ -489,15 +516,6 @@ class WordfallGame {
     this.updateSettingsUi();
 
     window.addEventListener("resize", () => this.resizeCanvas());
-
-    oasiz.emitScoreConfig({
-      anchors: [
-        { raw: 50, normalized: 100 },
-        { raw: 200, normalized: 300 },
-        { raw: 500, normalized: 600 },
-        { raw: 1500, normalized: 950 },
-      ],
-    });
 
     oasiz.onPause(() => {
       this.stopLoop();
@@ -619,7 +637,7 @@ class WordfallGame {
 
     const bucketWidth = Math.min(w * widthRatio, 500);
     // On mobile, keyboard can take up to 50% or more. Let's be aggressive.
-    const effectiveScreenHeight = this.isMobile ? h * 0.45 : h;
+    const effectiveScreenHeight = this.isMobile ? h * 0.52 : h;
     let bucketHeight = effectiveScreenHeight * heightRatio;
 
     if (!this.isMobile) {
@@ -627,8 +645,8 @@ class WordfallGame {
     }
 
     const bucketX = (w - bucketWidth) / 2;
-    // Start bucket lower on mobile (60px), centered on desktop
-    const bucketY = this.isMobile ? 60 : (h - bucketHeight) / 2;
+    // Start bucket lower on mobile to push it down towards the keyboard
+    const bucketY = this.isMobile ? 120 : (h - bucketHeight) / 2;
 
     const wallThickness = CONFIG.BUCKET_WALL_THICKNESS;
 
@@ -716,6 +734,7 @@ class WordfallGame {
 
     const triggerLightHaptic = () => {
       this.triggerHaptic("light");
+      this.audio.playClick();
     };
 
     startBtn?.addEventListener("click", () => {
@@ -742,11 +761,20 @@ class WordfallGame {
     settingsBtn?.addEventListener("click", () => {
       triggerLightHaptic();
       settingsModal?.classList.add("active");
+      
+      if (this.state.started && !this.state.gameOver) {
+        this.stopLoop();
+      }
     });
 
     settingsCloseBtn?.addEventListener("click", () => {
       triggerLightHaptic();
       settingsModal?.classList.remove("active");
+      
+      if (this.state.started && !this.state.gameOver) {
+        this.startLoop();
+        input.focus();
+      }
     });
 
     musicToggle?.addEventListener("click", () => {
@@ -825,8 +853,10 @@ class WordfallGame {
         }
       }
 
-      if (triggered && this.settings.haptics) {
-        oasiz.triggerHaptic("light");
+      if (triggered) {
+        if (this.settings.haptics) {
+          oasiz.triggerHaptic("light");
+        }
       }
     });
   }
@@ -836,9 +866,7 @@ class WordfallGame {
 
     this.audio.init();
     this.audio.startMusic();
-    oasiz.gameplayStart();
-
-    document.body.style.background = `radial-gradient(circle at center, hsl(190, 60%, 12%) 0%, hsl(190, 60%, 8%) 100%)`;
+    document.body.style.background = "#0a0e1a";
 
     // Clear all word bodies
     for (const word of this.words) {
@@ -855,9 +883,10 @@ class WordfallGame {
       CONFIG.SPAWN_INTERVAL_MAX,
     );
     this.engine.world.gravity.y = CONFIG.GRAVITY;
+    this.engine.timing.timeScale = 1;
 
-    // Start physics
-    Matter.Runner.run(this.runner, this.engine);
+    // Start game loop
+    this.startLoop();
 
     // Hide overlays, show HUD
     document.getElementById("startScreen")?.classList.add("hidden");
@@ -875,9 +904,7 @@ class WordfallGame {
   }
 
   showMenu() {
-    oasiz.gameplayStop();
-    // Stop physics
-    Matter.Runner.stop(this.runner);
+    this.stopLoop();
 
     // Clear words
     for (const word of this.words) {
@@ -898,8 +925,17 @@ class WordfallGame {
     }
   }
 
+  private lastDisplayedScore = 0;
+
   updateHUD() {
-    document.getElementById("score")!.textContent = this.state.score.toString();
+    const scoreEl = document.getElementById("score")!;
+    scoreEl.textContent = this.state.score.toString();
+    if (this.state.score !== this.lastDisplayedScore) {
+      this.lastDisplayedScore = this.state.score;
+      scoreEl.classList.remove("pop");
+      void scoreEl.offsetWidth;
+      scoreEl.classList.add("pop");
+    }
   }
 
   // Word spawning
@@ -980,6 +1016,15 @@ class WordfallGame {
   }
 
   // Input handling
+  private flashBuffer() {
+    const container = document.querySelector(".buffer-container");
+    if (container) {
+      container.classList.remove("flash");
+      void (container as HTMLElement).offsetWidth;
+      container.classList.add("flash");
+    }
+  }
+
   checkAutoMatch() {
     if (!this.typedBuffer) return;
 
@@ -989,6 +1034,7 @@ class WordfallGame {
       this.typedBuffer = "";
       (document.getElementById("typingInput") as HTMLInputElement).value = "";
       this.updateBufferDisplay();
+      this.flashBuffer();
     }
   }
 
@@ -1001,6 +1047,7 @@ class WordfallGame {
       this.typedBuffer = "";
       (document.getElementById("typingInput") as HTMLInputElement).value = "";
       this.updateBufferDisplay();
+      this.flashBuffer();
     }
   }
 
@@ -1252,10 +1299,8 @@ class WordfallGame {
 
     this.state.gameOver = true;
     this.stopLoop();
-    Matter.Runner.stop(this.runner);
     this.audio.playGameOver();
 
-    oasiz.gameplayStop();
     oasiz.submitScore(this.state.score);
     this.triggerHaptic("error");
 
@@ -1309,11 +1354,10 @@ class WordfallGame {
         1,
         this.state.survivalTime * CONFIG.DIFFICULTY_RAMP_RATE * speedFactor,
       );
-      // Dynamic background: dark cyan → deep crimson
-      const hue = 190 - ramp * 190;       // 190 → 0
-      const sat = 60 + ramp * 20;
-      const light = 8 + ramp * 4;
-      document.body.style.background = `radial-gradient(circle at center, hsl(${hue}, ${sat}%, ${light + 4}%) 0%, hsl(${hue}, ${sat}%, ${light}%) 100%)`;
+      const hue = 210 - ramp * 210;
+      const sat = 50 + ramp * 30;
+      const light = 6 + ramp * 3;
+      document.body.style.background = `hsl(${hue}, ${sat}%, ${light}%)`;
     }
 
     // Spawn words (not during freeze)
@@ -1398,8 +1442,11 @@ class WordfallGame {
     // Draw danger line
     this.renderDangerLine(ctx);
 
+    // Sort words by Y position so ones lower on the screen (closer to camera) are drawn on top
+    const sortedWords = [...this.words].sort((a, b) => a.body.position.y - b.body.position.y);
+
     // Draw words
-    for (const word of this.words) {
+    for (const word of sortedWords) {
       if (!word.exploding) {
         this.renderWord(ctx, word);
       }
@@ -1416,81 +1463,70 @@ class WordfallGame {
     const t = CONFIG.BUCKET_WALL_THICKNESS;
     const cr = CONFIG.BUCKET_CORNER_RADIUS;
 
-    // Draw bucket outline (U-shape with rounded bottom corners)
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + height - cr);
-    ctx.quadraticCurveTo(x, y + height, x + cr, y + height);
-    ctx.lineTo(x + width - cr, y + height);
-    ctx.quadraticCurveTo(x + width, y + height, x + width, y + height - cr);
-    ctx.lineTo(x + width, y);
+    const drawBucketPath = (offsetY: number = 0) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y + offsetY);
+      ctx.lineTo(x, y + height - cr + offsetY);
+      ctx.quadraticCurveTo(x, y + height + offsetY, x + cr, y + height + offsetY);
+      ctx.lineTo(x + width - cr, y + height + offsetY);
+      ctx.quadraticCurveTo(x + width, y + height + offsetY, x + width, y + height - cr + offsetY);
+      ctx.lineTo(x + width, y + offsetY);
+      ctx.lineTo(x + width - t, y + offsetY);
+      ctx.lineTo(x + width - t, y + height - cr - t + offsetY);
+      ctx.quadraticCurveTo(x + width - t, y + height - t + offsetY, x + width - t - cr, y + height - t + offsetY);
+      ctx.lineTo(x + t + cr, y + height - t + offsetY);
+      ctx.quadraticCurveTo(x + t, y + height - t + offsetY, x + t, y + height - t - cr + offsetY);
+      ctx.lineTo(x + t, y + offsetY);
+      ctx.closePath();
+    };
 
-    // Inner path
-    ctx.lineTo(x + width - t, y);
-    ctx.lineTo(x + width - t, y + height - cr - t);
-    ctx.quadraticCurveTo(
-      x + width - t,
-      y + height - t,
-      x + width - t - cr,
-      y + height - t,
-    );
-    ctx.lineTo(x + t + cr, y + height - t);
-    ctx.quadraticCurveTo(x + t, y + height - t, x + t, y + height - t - cr);
-    ctx.lineTo(x + t, y);
-    ctx.closePath();
+    // Draw solid shadow block (offset down)
+    drawBucketPath(6);
+    ctx.fillStyle = CONFIG.COLOR_BUCKET_SHADOW;
+    ctx.fill();
 
-    // Fill bucket walls
+    // Draw main bucket body
+    drawBucketPath(0);
     ctx.fillStyle = CONFIG.COLOR_BUCKET;
     ctx.fill();
 
-    // Bucket border
+    // Inner and outer border
     ctx.strokeStyle = CONFIG.COLOR_BUCKET_BORDER;
     ctx.lineWidth = 2;
     ctx.stroke();
-
   }
 
   renderDangerLine(ctx: CanvasRenderingContext2D) {
     const { innerLeft, innerRight, dangerLineY } = this.bucket;
     const inDanger = this.state.dangerGraceTimer > 0;
-    const pulse = inDanger ? 0.5 + Math.sin(Date.now() / 100) * 0.5 : 0.3;
+    const alpha = inDanger ? 0.9 : 0.3;
 
-    ctx.strokeStyle = "rgba(255, 71, 87, " + pulse + ")";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 8]);
+    // Physical looking danger line
+    ctx.fillStyle = `rgba(255, 82, 82, ${alpha})`;
+    ctx.fillRect(innerLeft, dangerLineY - 3, innerRight - innerLeft, 6);
+
+    // Caution stripes
+    ctx.save();
     ctx.beginPath();
-    ctx.moveTo(innerLeft, dangerLineY);
-    ctx.lineTo(innerRight, dangerLineY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Danger zone gradient
-    const dangerGradient = ctx.createLinearGradient(
-      0,
-      this.bucket.y,
-      0,
-      dangerLineY,
-    );
-    dangerGradient.addColorStop(0, "rgba(255, 71, 87, " + pulse * 0.2 + ")");
-    dangerGradient.addColorStop(1, "rgba(255, 71, 87, 0)");
-    ctx.fillStyle = dangerGradient;
-    ctx.fillRect(
-      innerLeft,
-      this.bucket.y,
-      innerRight - innerLeft,
-      dangerLineY - this.bucket.y,
-    );
+    ctx.rect(innerLeft, dangerLineY - 3, innerRight - innerLeft, 6);
+    ctx.clip();
+    
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
+    for (let i = 0; i < (innerRight - innerLeft); i += 20) {
+      ctx.beginPath();
+      ctx.moveTo(innerLeft + i, dangerLineY - 3);
+      ctx.lineTo(innerLeft + i + 10, dangerLineY - 3);
+      ctx.lineTo(innerLeft + i + 4, dangerLineY + 3);
+      ctx.lineTo(innerLeft + i - 6, dangerLineY + 3);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   renderWord(ctx: CanvasRenderingContext2D, word: WordData) {
     const colors = this.getWordColor(word.type);
     const pos = word.body.position;
     const angle = word.body.angle;
-
-    ctx.save();
-    ctx.translate(pos.x, pos.y);
-    ctx.rotate(angle);
-
     const w = word.width;
     const h = word.height;
     const cr = CONFIG.WORD_CHAMFER_RADIUS * word.scale;
@@ -1510,38 +1546,37 @@ class WordfallGame {
       ctx.closePath();
     };
 
-    // Drop shadow
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 3;
+    const shadowDepth = 6 * word.scale;
 
-    // Card background
+    // 1. Draw solid shadow block (offset down GLOBALLY)
+    ctx.save();
+    ctx.translate(pos.x, pos.y + shadowDepth);
+    ctx.rotate(angle);
+    ctx.fillStyle = colors.shadow || "rgba(0,0,0,0.5)";
+    roundRect(-w / 2, -h / 2, w, h, cr);
+    ctx.fill();
+    ctx.restore();
+
+    // 2. Draw main block body
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(angle);
+    
     ctx.fillStyle = colors.bg;
     roundRect(-w / 2, -h / 2, w, h, cr);
     ctx.fill();
 
-    // Subtle border
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = word.type === "normal"
-      ? "rgba(0,0,0,0.08)"
-      : `${colors.glow.replace(/[\d.]+\)$/, "0.6)")}`;
-    roundRect(-w / 2, -h / 2, w, h, cr);
+    // 3. Top edge highlight for bevel effect
+    ctx.strokeStyle = colors.highlight || "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + cr, -h / 2 + 1.5);
+    ctx.lineTo(w / 2 - cr, -h / 2 + 1.5);
     ctx.stroke();
-
-    // Colored glow for special words
-    if (word.type !== "normal") {
-      ctx.shadowColor = colors.glow;
-      ctx.shadowBlur = 18;
-      roundRect(-w / 2, -h / 2, w, h, cr);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
 
     // Text rendering with prefix highlighting
     const fontSize = (this.isMobile ? 20 : 18) * word.scale;
-    ctx.font = "700 " + fontSize + "px 'JetBrains Mono', monospace";
+    ctx.font = "800 " + fontSize + "px 'Nunito', sans-serif";
     ctx.textBaseline = "middle";
 
     const wordLower = word.text.toLowerCase();
@@ -1564,7 +1599,7 @@ class WordfallGame {
 
       // Draw matched part with highlight color
       ctx.textAlign = "left";
-      ctx.fillStyle = "#22c55e"; // Green highlight for matched letters
+      ctx.fillStyle = "#FF9F00";
       ctx.fillText(matchedPart, startX, 1);
 
       // Draw remaining part with normal color
@@ -1586,9 +1621,17 @@ class WordfallGame {
     this.lastTime = timestamp;
 
     this.update(dt);
+    
+    if (this.state.started && !this.state.gameOver) {
+      // Manual physics tick
+      Matter.Engine.update(this.engine, dt * 1000);
+    }
+
     this.render();
 
-    this.rafId = requestAnimationFrame((t) => this.gameLoop(t));
+    if (this.rafId !== 0) {
+      this.rafId = requestAnimationFrame((t) => this.gameLoop(t));
+    }
   }
 }
 
