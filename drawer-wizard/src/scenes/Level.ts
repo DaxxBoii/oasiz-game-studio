@@ -1030,7 +1030,7 @@ export default class Level extends Phaser.Scene {
 
         const s = getSettings();
         if (s.fx) {
-            this.sound.play('kill', { volume: 0.25 });
+            this.sound.play('kill', { volume: 0.20 });
         }
 
         if (enemy.dark) {
@@ -1177,7 +1177,7 @@ export default class Level extends Phaser.Scene {
     private popHead(wx: number, wy: number): void {
         const s = getSettings();
         if (s.fx) {
-            this.sound.play('kill', { volume: 0.25 });
+            this.sound.play('kill', { volume: 0.20 });
         }
 
         // Small flash
