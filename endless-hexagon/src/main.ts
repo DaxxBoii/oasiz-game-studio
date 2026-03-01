@@ -1,9 +1,8 @@
 import Phaser from "phaser";
-import { oasis } from "@oasiz/sdk";
+import { oasiz } from "@oasiz/sdk";
 import Scene from "./scenes/Scene";
 import Preload from "./scenes/Preload";
-
-(window as any).__oasiz = oasis;
+import { initUI } from "./ui";
 
 class Boot extends Phaser.Scene {
 
@@ -12,17 +11,17 @@ class Boot extends Phaser.Scene {
 	}
 
 	preload() {
-
 		this.load.pack("pack", "assets/preload-asset-pack.json");
 	}
 
 	create() {
-
 		this.scene.start("Preload");
 	}
 }
 
 window.addEventListener('load', function () {
+	// Initialize UI logic that handles SDK and DOM binding
+	initUI();
 
 	const game = new Phaser.Game({
 		width: 1280,

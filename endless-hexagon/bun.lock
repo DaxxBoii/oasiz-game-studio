@@ -5,7 +5,7 @@
     "": {
       "name": "phaser-editor-template-vite-ts",
       "dependencies": {
-        "@oasiz/sdk": "^1.0.0",
+        "@oasiz/sdk": "1.0.1",
         "@phaserjs/editor-scripts-base": "^1.0.0",
         "phaser": "3.80.1",
       },
@@ -74,7 +74,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@oasiz/sdk": ["@oasiz/sdk@1.0.0", "", {}, "sha512-dtOqihkMgg6VR/hjfI0W1VWZuE7XQORWr6AEj626J4LCCnw6dfgIJt6G5JS3FVA4ZCq7+hUAvrBVISFkhHaEOQ=="],
+    "@oasiz/sdk": ["@oasiz/sdk@1.0.1", "", {}, "sha512-kZaZlWQxePLIUiDO5qoC3/7wYPi6o1G6PHCcai7jC7lw0Lf8DXg+39OhYALEd2G2IdjkhgRyBTHjycz+tZXVwA=="],
 
     "@phaserjs/editor-scripts-base": ["@phaserjs/editor-scripts-base@1.0.0", "", {}, ""],
 

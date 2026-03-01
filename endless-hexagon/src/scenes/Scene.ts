@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { oasis } from '@oasiz/sdk';
+import { oasiz } from '@oasiz/sdk';
 
 interface Wall {
     distance: number;
@@ -149,6 +149,7 @@ export default class Scene extends Phaser.Scene {
             if (startActive) {
                 this.scoreContainer.setVisible(true);
                 this.gameState = 'SPAWNING';
+                this.loadAndPlayBgm();
             } else {
                 this.scoreContainer.setVisible(false); // Hide in Menu by default
                 this.gameState = 'MENU';
@@ -229,7 +230,7 @@ export default class Scene extends Phaser.Scene {
 
             // Expose Restart to Window
             (window as any).restartGame = () => {
-                this.scene.restart();
+                this.scene.restart({ startActive: true });
             };
             (window as any).pauseGame = () => {
                 this.scene.pause();
@@ -241,6 +242,11 @@ export default class Scene extends Phaser.Scene {
                 // If in MENU, just resume music and return (No countdown)
                 if (this.gameState === 'MENU') {
                     if ((window as any).platform?.musicEnabled && this.bgMusic && !this.bgMusic.isPlaying) this.bgMusic.resume();
+                    return;
+                }
+
+                // If game is over, don't resume gameplay
+                if (this.isGameOver) {
                     return;
                 }
 
@@ -269,21 +275,12 @@ export default class Scene extends Phaser.Scene {
                 }
             };
 
-            oasis.emitScoreConfig({
-                anchors: [
-                    { raw: 100, normalized: 100 },
-                    { raw: 500, normalized: 300 },
-                    { raw: 1500, normalized: 600 },
-                    { raw: 5000, normalized: 950 },
-                ],
-            });
-
-            oasis.onPause(() => {
+            oasiz.onPause(() => {
                 this.scene.pause();
                 if (this.bgMusic && this.bgMusic.isPlaying) this.bgMusic.pause();
             });
 
-            oasis.onResume(() => {
+            oasiz.onResume(() => {
                 this.scene.resume();
                 if (this.gameState === 'MENU') {
                     if ((window as any).platform?.musicEnabled && this.bgMusic && !this.bgMusic.isPlaying) this.bgMusic.resume();
@@ -923,7 +920,7 @@ export default class Scene extends Phaser.Scene {
                 }
 
                 if ((window as any).platform?.hapticsEnabled) {
-                    oasis.triggerHaptic("medium");
+                    oasiz.triggerHaptic("medium");
                 }
 
                 // Retro Pulse Effect
@@ -1208,10 +1205,10 @@ export default class Scene extends Phaser.Scene {
         this.cameras.main.flash(500, 255, 0, 0);
 
         if ((window as any).platform?.hapticsEnabled) {
-            oasis.triggerHaptic("error");
+            oasiz.triggerHaptic("error");
         }
 
-        oasis.submitScore(Math.floor(this.score));
+        oasiz.submitScore(Math.floor(this.score));
 
         // Show HTML UI
         if ((window as any).showGameOver) {
