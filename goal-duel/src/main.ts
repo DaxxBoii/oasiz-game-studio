@@ -920,6 +920,22 @@ class GoalDuelGame {
   private get goalH(): number {
     return this.settings.goalHeight;
   }
+  private get arenaCornerRadius(): number {
+    const maxFromGoalOpening = Math.max(64, this.fieldW * 0.5 - this.goalW * 0.5 - 24);
+    return clamp(this.fieldW * 0.1, 72, Math.min(150, maxFromGoalOpening));
+  }
+  private get arenaRightInset(): number {
+    return 10;
+  }
+  private get arenaLeftInnerX(): number {
+    return -this.fieldW * 0.5;
+  }
+  private get arenaRightInnerX(): number {
+    return this.fieldW * 0.5 - this.arenaRightInset;
+  }
+  private get goalCenterX(): number {
+    return -26;
+  }
 
   private playerCar!: Matter.Body;
   private botCar!: Matter.Body;
@@ -2757,7 +2773,14 @@ class GoalDuelGame {
     const w = this.fieldW;
     const h = this.fieldH;
     const goalHalf = this.goalW * 0.5;
+    const goalCenterX = this.goalCenterX;
+    const goalLeftX = goalCenterX - goalHalf;
+    const goalRightX = goalCenterX + goalHalf;
+    const goalDepth = this.settings.goalDepth;
     const wallT = 28;
+    const cornerR = this.arenaCornerRadius;
+    const leftInnerX = this.arenaLeftInnerX;
+    const rightInnerX = this.arenaRightInnerX;
 
     const wallOpts = {
       isStatic: true,
@@ -2770,46 +2793,92 @@ class GoalDuelGame {
       },
     };
 
-    // Left/right walls (full height)
-    const left = Bodies.rectangle(-w * 0.5 - wallT * 0.5, 0, wallT, h + 400, wallOpts);
-    const right = Bodies.rectangle(w * 0.5 + wallT * 0.5, 0, wallT, h + 400, wallOpts);
+    // Left/right walls (shortened so rounded corner walls can take over near the ends)
+    const sideWallHeight = Math.max(180, h - cornerR * 2);
+    const left = Bodies.rectangle(leftInnerX - wallT * 0.5, 0, wallT, sideWallHeight, wallOpts);
+    const right = Bodies.rectangle(rightInnerX + wallT * 0.5, 0, wallT, sideWallHeight, wallOpts);
 
-    // Top wall segments (goal opening in middle)
+    // Top wall segments (goal opening in middle, shortened for rounded corners)
+    const topLeftStartX = leftInnerX + cornerR;
+    const topLeftEndX = goalLeftX;
+    const topLeftSpan = Math.max(40, topLeftEndX - topLeftStartX);
     const topLeft = Bodies.rectangle(
-      -goalHalf - (w * 0.5 - goalHalf) * 0.5,
+      (topLeftStartX + topLeftEndX) * 0.5,
       -h * 0.5 - wallT * 0.5,
-      w * 0.5 - goalHalf,
+      topLeftSpan,
       wallT,
       wallOpts,
     );
+    const topRightStartX = goalRightX;
+    const topRightEndX = rightInnerX - cornerR;
+    const topRightSpan = Math.max(40, topRightEndX - topRightStartX);
     const topRight = Bodies.rectangle(
-      goalHalf + (w * 0.5 - goalHalf) * 0.5,
+      (topRightStartX + topRightEndX) * 0.5,
       -h * 0.5 - wallT * 0.5,
-      w * 0.5 - goalHalf,
+      topRightSpan,
       wallT,
       wallOpts,
     );
 
-    // Bottom wall segments
+    // Bottom wall segments (goal opening in middle, shortened for rounded corners)
+    const bottomLeftStartX = leftInnerX + cornerR;
+    const bottomLeftEndX = goalLeftX;
+    const bottomLeftSpan = Math.max(40, bottomLeftEndX - bottomLeftStartX);
     const botLeft = Bodies.rectangle(
-      -goalHalf - (w * 0.5 - goalHalf) * 0.5,
+      (bottomLeftStartX + bottomLeftEndX) * 0.5,
       h * 0.5 + wallT * 0.5,
-      w * 0.5 - goalHalf,
+      bottomLeftSpan,
       wallT,
       wallOpts,
     );
+    const bottomRightStartX = goalRightX;
+    const bottomRightEndX = rightInnerX - cornerR;
+    const bottomRightSpan = Math.max(40, bottomRightEndX - bottomRightStartX);
     const botRight = Bodies.rectangle(
-      goalHalf + (w * 0.5 - goalHalf) * 0.5,
+      (bottomRightStartX + bottomRightEndX) * 0.5,
       h * 0.5 + wallT * 0.5,
-      w * 0.5 - goalHalf,
+      bottomRightSpan,
       wallT,
       wallOpts,
     );
+
+    const buildCornerArc = (
+      cx: number,
+      cy: number,
+      startAngle: number,
+      endAngle: number,
+    ): Matter.Body[] => {
+      const bodies: Matter.Body[] = [];
+      const segmentCount = 7;
+      const centerlineRadius = cornerR + wallT * 0.5;
+      const delta = (endAngle - startAngle) / segmentCount;
+      for (let i = 0; i < segmentCount; i++) {
+        const a0 = startAngle + delta * i;
+        const a1 = a0 + delta;
+        const am = (a0 + a1) * 0.5;
+        const segLen = Math.max(14, centerlineRadius * Math.abs(delta) + 2);
+        const x = cx + Math.cos(am) * centerlineRadius;
+        const y = cy + Math.sin(am) * centerlineRadius;
+        bodies.push(
+          Bodies.rectangle(x, y, segLen, wallT, {
+            ...wallOpts,
+            angle: am + Math.PI * 0.5,
+          }),
+        );
+      }
+      return bodies;
+    };
+
+    const cornerArcWalls: Matter.Body[] = [
+      ...buildCornerArc(leftInnerX + cornerR, -h * 0.5 + cornerR, Math.PI, Math.PI * 1.5),
+      ...buildCornerArc(rightInnerX - cornerR, -h * 0.5 + cornerR, Math.PI * 1.5, Math.PI * 2),
+      ...buildCornerArc(rightInnerX - cornerR, h * 0.5 - cornerR, 0, Math.PI * 0.5),
+      ...buildCornerArc(leftInnerX + cornerR, h * 0.5 - cornerR, Math.PI * 0.5, Math.PI),
+    ];
 
     // Goal "back walls"
-    const goalDepth = this.settings.goalDepth;
-    const topBack = Bodies.rectangle(0, -h * 0.5 - goalDepth, this.goalW, wallT, wallOpts);
-    const bottomBack = Bodies.rectangle(0, h * 0.5 + goalDepth, this.goalW, wallT, wallOpts);
+    const topBack = Bodies.rectangle(goalCenterX, -h * 0.5 - goalDepth, this.goalW, wallT, wallOpts);
+    const bottomBack = Bodies.rectangle(goalCenterX, h * 0.5 + goalDepth, this.goalW, wallT, wallOpts);
 
     // Goal boundary walls (block cars but allow ball through)
     // These are invisible walls at the goal opening that only cars collide with
@@ -2826,7 +2895,7 @@ class GoalDuelGame {
     
     // Top goal boundary (at the goal opening)
     const topGoalBoundary = Bodies.rectangle(
-      0,
+      goalCenterX,
       -h * 0.5,
       this.goalW,
       wallT,
@@ -2835,7 +2904,7 @@ class GoalDuelGame {
     
     // Bottom goal boundary (at the goal opening)
     const bottomGoalBoundary = Bodies.rectangle(
-      0,
+      goalCenterX,
       h * 0.5,
       this.goalW,
       wallT,
@@ -2844,14 +2913,14 @@ class GoalDuelGame {
 
     // Goal sensors (top is opponent's goal, bottom is player's goal)
     this.topGoalSensor = Bodies.rectangle(
-      0,
+      goalCenterX,
       -h * 0.5 - goalDepth * 0.5,
       this.goalW - 10,
       goalDepth,
       { isStatic: true, isSensor: true, label: "goalTop" },
     );
     this.bottomGoalSensor = Bodies.rectangle(
-      0,
+      goalCenterX,
       h * 0.5 + goalDepth * 0.5,
       this.goalW - 10,
       goalDepth,
@@ -2929,6 +2998,7 @@ class GoalDuelGame {
       topRight,
       botLeft,
       botRight,
+      ...cornerArcWalls,
       topBack,
       bottomBack,
       topGoalBoundary,
@@ -5016,10 +5086,12 @@ class GoalDuelGame {
     const fieldH = this.fieldH;
     const cornerThreshold = 60; // Distance from corner to consider "stuck"
     const minSpeed = 2; // Minimum speed to consider ball moving
+    const leftInnerX = this.arenaLeftInnerX;
+    const rightInnerX = this.arenaRightInnerX;
     
     // Check if ball is near a corner (close to both X and Y boundaries)
-    const nearLeftWall = ballPos.x < -fieldW * 0.5 + cornerThreshold;
-    const nearRightWall = ballPos.x > fieldW * 0.5 - cornerThreshold;
+    const nearLeftWall = ballPos.x < leftInnerX + cornerThreshold;
+    const nearRightWall = ballPos.x > rightInnerX - cornerThreshold;
     const nearTopWall = ballPos.y < -fieldH * 0.5 + cornerThreshold;
     const nearBottomWall = ballPos.y > fieldH * 0.5 - cornerThreshold;
     
@@ -5089,10 +5161,13 @@ class GoalDuelGame {
     const fieldW = this.fieldW;
     const fieldH = this.fieldH;
     const goalW = this.goalW;
+    const goalCenterX = this.goalCenterX;
+    const leftInnerX = this.arenaLeftInnerX;
+    const rightInnerX = this.arenaRightInnerX;
     
     // Early exit: only check if ball is actually out of bounds (performance optimization)
-    const leftBound = -fieldW * 0.5 + ballRadius;
-    const rightBound = fieldW * 0.5 - ballRadius;
+    const leftBound = leftInnerX + ballRadius;
+    const rightBound = rightInnerX - ballRadius;
     const topBound = -fieldH * 0.5 + ballRadius;
     const bottomBound = fieldH * 0.5 - ballRadius;
     
@@ -5104,6 +5179,8 @@ class GoalDuelGame {
     
     // Goal openings (middle of top and bottom walls)
     const goalHalf = goalW * 0.5;
+    const cornerR = this.arenaCornerRadius;
+    const cornerReach = Math.max(8, cornerR - ballRadius);
     
     let newX = ballPos.x;
     let newY = ballPos.y;
@@ -5135,7 +5212,7 @@ class GoalDuelGame {
     // Check Y bounds (top/bottom walls, but allow through goal openings)
     if (ballPos.y < topBound) {
       // Check if ball is within goal opening horizontally
-      if (Math.abs(ballPos.x) < goalHalf) {
+      if (Math.abs(ballPos.x - goalCenterX) < goalHalf) {
         // Ball is in goal opening, allow it to go through (but limit depth)
         const maxGoalY = topBound - this.settings.goalDepth;
         if (ballPos.y < maxGoalY) {
@@ -5156,7 +5233,7 @@ class GoalDuelGame {
       }
     } else if (ballPos.y > bottomBound) {
       // Check if ball is within goal opening horizontally
-      if (Math.abs(ballPos.x) < goalHalf) {
+      if (Math.abs(ballPos.x - goalCenterX) < goalHalf) {
         // Ball is in goal opening, allow it to go through (but limit depth)
         const maxGoalY = bottomBound + this.settings.goalDepth;
         if (ballPos.y > maxGoalY) {
@@ -5175,6 +5252,43 @@ class GoalDuelGame {
         newVelX = newVelX * 0.85 + (Math.random() - 0.5) * 0.3; // Keep X velocity with randomness
         needsVelocityChange = true;
       }
+    }
+
+    // Rounded-corner correction: keep ball center inside quarter-arc field corners.
+    const projectFromRoundedCorner = (cx: number, cy: number): void => {
+      const dx = newX - cx;
+      const dy = newY - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= cornerReach || dist < 0.0001) return;
+
+      const invDist = 1 / dist;
+      const nx = dx * invDist;
+      const ny = dy * invDist;
+      newX = cx + nx * cornerReach;
+      newY = cy + ny * cornerReach;
+
+      // Remove outward velocity so the ball glides back into the field instead of sticking.
+      const outwardSpeed = newVelX * nx + newVelY * ny;
+      if (outwardSpeed > 0) {
+        newVelX -= nx * outwardSpeed * 1.2;
+        newVelY -= ny * outwardSpeed * 1.2;
+        needsVelocityChange = true;
+      }
+    };
+
+    const topCornerY = -fieldH * 0.5 + cornerR;
+    const bottomCornerY = fieldH * 0.5 - cornerR;
+    const leftCornerX = leftInnerX + cornerR;
+    const rightCornerX = rightInnerX - cornerR;
+
+    if (newX < leftCornerX && newY < topCornerY) {
+      projectFromRoundedCorner(leftCornerX, topCornerY);
+    } else if (newX > rightCornerX && newY < topCornerY) {
+      projectFromRoundedCorner(rightCornerX, topCornerY);
+    } else if (newX > rightCornerX && newY > bottomCornerY) {
+      projectFromRoundedCorner(rightCornerX, bottomCornerY);
+    } else if (newX < leftCornerX && newY > bottomCornerY) {
+      projectFromRoundedCorner(leftCornerX, bottomCornerY);
     }
     
     // Apply all changes at once (single physics update to avoid stuttering)
@@ -5274,12 +5388,14 @@ class GoalDuelGame {
     const fieldW = this.fieldW;
     const fieldH = this.fieldH;
     const margin = 50;
+    const leftInnerX = this.arenaLeftInnerX;
+    const rightInnerX = this.arenaRightInnerX;
     
     // Player car wall collision
-    if (Math.abs(playerPos.x) > fieldW * 0.5 - margin || Math.abs(playerPos.y) > fieldH * 0.5 - margin) {
+    if (playerPos.x < leftInnerX + margin || playerPos.x > rightInnerX - margin || Math.abs(playerPos.y) > fieldH * 0.5 - margin) {
       const velChange = Vector.magnitude(Vector.sub(playerVel, this.prevPlayerVel));
       if (velChange > 3) {
-        const normal = { x: Math.abs(playerPos.x) > fieldW * 0.5 - margin ? (playerPos.x > 0 ? -1 : 1) : 0,
+        const normal = { x: playerPos.x < leftInnerX + margin ? 1 : (playerPos.x > rightInnerX - margin ? -1 : 0),
                         y: Math.abs(playerPos.y) > fieldH * 0.5 - margin ? (playerPos.y > 0 ? -1 : 0) : 0 };
         if (normal.x !== 0 || normal.y !== 0) {
           this.spawnBumpParticle(playerPos.x, playerPos.y, normal, velChange);
@@ -5290,10 +5406,10 @@ class GoalDuelGame {
     }
     
     // Bot car wall collision
-    if (Math.abs(botPos.x) > fieldW * 0.5 - margin || Math.abs(botPos.y) > fieldH * 0.5 - margin) {
+    if (botPos.x < leftInnerX + margin || botPos.x > rightInnerX - margin || Math.abs(botPos.y) > fieldH * 0.5 - margin) {
       const velChange = Vector.magnitude(Vector.sub(botVel, this.prevBotVel));
       if (velChange > 3) {
-        const normal = { x: Math.abs(botPos.x) > fieldW * 0.5 - margin ? (botPos.x > 0 ? -1 : 1) : 0,
+        const normal = { x: botPos.x < leftInnerX + margin ? 1 : (botPos.x > rightInnerX - margin ? -1 : 0),
                         y: Math.abs(botPos.y) > fieldH * 0.5 - margin ? (botPos.y > 0 ? -1 : 0) : 0 };
         if (normal.x !== 0 || normal.y !== 0) {
           this.spawnBumpParticle(botPos.x, botPos.y, normal, velChange);
@@ -5372,12 +5488,6 @@ class GoalDuelGame {
           this.drawStadiumBG(ctx);
         } catch (err) {
           console.error("[Game.render] drawStadiumBG error:", err);
-        }
-        
-        try {
-          this.drawStadiumBounds(ctx);
-        } catch (err) {
-          console.error("[Game.render] drawStadiumBounds error:", err);
         }
         
         try {
@@ -5506,7 +5616,13 @@ class GoalDuelGame {
     const w = this.fieldW;
     const h = this.fieldH;
     const goalHalf = this.goalW * 0.5;
+    const goalCenterX = this.goalCenterX;
+    const goalLeftX = goalCenterX - goalHalf;
+    const goalRightX = goalCenterX + goalHalf;
     const goalDepth = this.settings.goalDepth;
+    const cornerR = this.arenaCornerRadius;
+    const leftInnerX = this.arenaLeftInnerX;
+    const rightInnerX = this.arenaRightInnerX;
 
     ctx.save();
     ctx.strokeStyle = "rgba(183, 255, 74, 0.6)";
@@ -5515,22 +5631,33 @@ class GoalDuelGame {
 
     // Field boundaries
     ctx.beginPath();
-    // Left wall
-    ctx.moveTo(-w * 0.5, -h * 0.5);
-    ctx.lineTo(-w * 0.5, h * 0.5);
-    // Right wall
-    ctx.moveTo(w * 0.5, -h * 0.5);
-    ctx.lineTo(w * 0.5, h * 0.5);
-    // Top wall (with goal opening)
-    ctx.moveTo(-w * 0.5, -h * 0.5);
-    ctx.lineTo(-goalHalf, -h * 0.5);
-    ctx.moveTo(goalHalf, -h * 0.5);
-    ctx.lineTo(w * 0.5, -h * 0.5);
-    // Bottom wall (with goal opening)
-    ctx.moveTo(-w * 0.5, h * 0.5);
-    ctx.lineTo(-goalHalf, h * 0.5);
-    ctx.moveTo(goalHalf, h * 0.5);
-    ctx.lineTo(w * 0.5, h * 0.5);
+    // Left/right walls (rounded corners omitted)
+    ctx.moveTo(leftInnerX, -h * 0.5 + cornerR);
+    ctx.lineTo(leftInnerX, h * 0.5 - cornerR);
+    ctx.moveTo(rightInnerX, -h * 0.5 + cornerR);
+    ctx.lineTo(rightInnerX, h * 0.5 - cornerR);
+
+    // Top wall (with goal opening and rounded outer corners)
+    ctx.moveTo(leftInnerX + cornerR, -h * 0.5);
+    ctx.lineTo(goalLeftX, -h * 0.5);
+    ctx.moveTo(goalRightX, -h * 0.5);
+    ctx.lineTo(rightInnerX - cornerR, -h * 0.5);
+
+    // Bottom wall (with goal opening and rounded outer corners)
+    ctx.moveTo(leftInnerX + cornerR, h * 0.5);
+    ctx.lineTo(goalLeftX, h * 0.5);
+    ctx.moveTo(goalRightX, h * 0.5);
+    ctx.lineTo(rightInnerX - cornerR, h * 0.5);
+
+    // Rounded corner arcs
+    ctx.moveTo(leftInnerX, -h * 0.5 + cornerR);
+    ctx.arc(leftInnerX + cornerR, -h * 0.5 + cornerR, cornerR, Math.PI, Math.PI * 1.5);
+    ctx.moveTo(rightInnerX - cornerR, -h * 0.5);
+    ctx.arc(rightInnerX - cornerR, -h * 0.5 + cornerR, cornerR, Math.PI * 1.5, Math.PI * 2);
+    ctx.moveTo(rightInnerX, h * 0.5 - cornerR);
+    ctx.arc(rightInnerX - cornerR, h * 0.5 - cornerR, cornerR, 0, Math.PI * 0.5);
+    ctx.moveTo(leftInnerX + cornerR, h * 0.5);
+    ctx.arc(leftInnerX + cornerR, h * 0.5 - cornerR, cornerR, Math.PI * 0.5, Math.PI);
     ctx.stroke();
 
     // Goal posts and depth
@@ -5541,31 +5668,31 @@ class GoalDuelGame {
     // Top goal
     ctx.beginPath();
     // Goal opening
-    ctx.moveTo(-goalHalf, -h * 0.5);
-    ctx.lineTo(goalHalf, -h * 0.5);
+    ctx.moveTo(goalLeftX, -h * 0.5);
+    ctx.lineTo(goalRightX, -h * 0.5);
     // Goal depth lines
-    ctx.moveTo(-goalHalf, -h * 0.5);
-    ctx.lineTo(-goalHalf, -h * 0.5 - goalDepth);
-    ctx.moveTo(goalHalf, -h * 0.5);
-    ctx.lineTo(goalHalf, -h * 0.5 - goalDepth);
+    ctx.moveTo(goalLeftX, -h * 0.5);
+    ctx.lineTo(goalLeftX, -h * 0.5 - goalDepth);
+    ctx.moveTo(goalRightX, -h * 0.5);
+    ctx.lineTo(goalRightX, -h * 0.5 - goalDepth);
     // Back wall
-    ctx.moveTo(-goalHalf, -h * 0.5 - goalDepth);
-    ctx.lineTo(goalHalf, -h * 0.5 - goalDepth);
+    ctx.moveTo(goalLeftX, -h * 0.5 - goalDepth);
+    ctx.lineTo(goalRightX, -h * 0.5 - goalDepth);
     ctx.stroke();
 
     // Bottom goal
     ctx.beginPath();
     // Goal opening
-    ctx.moveTo(-goalHalf, h * 0.5);
-    ctx.lineTo(goalHalf, h * 0.5);
+    ctx.moveTo(goalLeftX, h * 0.5);
+    ctx.lineTo(goalRightX, h * 0.5);
     // Goal depth lines
-    ctx.moveTo(-goalHalf, h * 0.5);
-    ctx.lineTo(-goalHalf, h * 0.5 + goalDepth);
-    ctx.moveTo(goalHalf, h * 0.5);
-    ctx.lineTo(goalHalf, h * 0.5 + goalDepth);
+    ctx.moveTo(goalLeftX, h * 0.5);
+    ctx.lineTo(goalLeftX, h * 0.5 + goalDepth);
+    ctx.moveTo(goalRightX, h * 0.5);
+    ctx.lineTo(goalRightX, h * 0.5 + goalDepth);
     // Back wall
-    ctx.moveTo(-goalHalf, h * 0.5 + goalDepth);
-    ctx.lineTo(goalHalf, h * 0.5 + goalDepth);
+    ctx.moveTo(goalLeftX, h * 0.5 + goalDepth);
+    ctx.lineTo(goalRightX, h * 0.5 + goalDepth);
     ctx.stroke();
 
     ctx.restore();
