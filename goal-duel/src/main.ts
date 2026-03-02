@@ -1201,34 +1201,6 @@ class GoalDuelGame {
     });
     this.resize();
     window.addEventListener("resize", () => this.resize());
-    
-    // Lock orientation to landscape on mobile devices (for iOS app embedding)
-    if (this._isMobile) {
-      // Try to lock orientation to landscape
-      if (screen.orientation && (screen.orientation as any).lock) {
-        (screen.orientation as any).lock('landscape').catch((err: any) => {
-          console.log('[Game] Could not lock orientation:', err);
-        });
-      } else if ((screen as any).lockOrientation) {
-        (screen as any).lockOrientation('landscape');
-      } else if ((screen as any).mozLockOrientation) {
-        (screen as any).mozLockOrientation('landscape');
-      } else if ((screen as any).msLockOrientation) {
-        (screen as any).msLockOrientation('landscape');
-      }
-      
-      // The HTML script handles viewport rotation, we just need to ensure resize is called
-      const handleOrientationChange = () => {
-        setTimeout(() => {
-          this.resize();
-        }, 100);
-      };
-      
-      window.addEventListener('orientationchange', handleOrientationChange);
-      window.addEventListener('resize', () => {
-        this.resize();
-      });
-    }
 
     this.setState("MENU", true);
 
@@ -2576,18 +2548,6 @@ class GoalDuelGame {
       
       let normalizedX = clamp(px / maxRadius, -1, 1);
       let normalizedY = clamp(py / maxRadius, -1, 1);
-      
-      // In portrait mode, rotate joystick input 90° clockwise to match rotated game
-      // Game is rotated 90° clockwise, so input needs to be rotated 90° clockwise
-      // BUT: skip rotation in LOCAL_2P mode (normal landscape layout)
-      const isPortrait = window.matchMedia('(orientation: portrait)').matches;
-      if (isPortrait && this.matchMode !== "LOCAL_2P") {
-        // Rotate 90° clockwise: (x, y) -> (y, -x)
-        const rotatedX = normalizedY;
-        const rotatedY = -normalizedX;
-        normalizedX = rotatedX;
-        normalizedY = rotatedY;
-      }
       
       // Calculate the desired direction angle from joystick input
       // Reverse Y to fix direction mapping (down=up), keep X normal (left=left, right=right)
@@ -3995,15 +3955,6 @@ class GoalDuelGame {
     // Use normalized values for input
     let normalizedX = finalVx;
     let normalizedY = finalVy;
-    
-    // In portrait mode, rotate joystick input 90° clockwise to match rotated game
-    const isPortrait = window.matchMedia('(orientation: portrait)').matches;
-    if (isPortrait && this.matchMode !== "LOCAL_2P") {
-      const rotatedX = normalizedY;
-      const rotatedY = -normalizedX;
-      normalizedX = rotatedX;
-      normalizedY = rotatedY;
-    }
     
     // Calculate the desired direction angle from joystick input
     const desiredAngle = Math.atan2(normalizedY, normalizedX);
@@ -5977,4 +5928,3 @@ class GoalDuelGame {
 }
 
 new GoalDuelGame();
-
