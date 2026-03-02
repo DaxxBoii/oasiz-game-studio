@@ -134,7 +134,7 @@ export class Game {
         if (modelPromise) {
           const playerId = i;
           modelPromise.then((loadedModel) => {
-            if (this.running && this.players[playerId]?.alive) {
+            if (this.running && this.players[playerId]?.alive && loadedModel.children.length > 0) {
               this.renderer.replaceAvatarBody(playerId, loadedModel);
             }
           });

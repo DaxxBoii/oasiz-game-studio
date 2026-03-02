@@ -53,13 +53,15 @@ export const SKINS: SkinDef[] = [
     type: 'model' as const,
     color: a.color,
     colorStr: a.colorStr,
-    modelDir: `/assets/Animals/${a.folder}/`,
+    modelDir: `Animals/${a.folder}/`,
     modelFile: a.file,
-    previewUrl: `/assets/Animals/${a.folder}/${a.file}.png`,
+    previewUrl: `Animals/${a.folder}/${a.file}.png`,
     unlockedByDefault: a.unlockScore === 0,
     unlockScore: a.unlockScore,
   })),
 ];
+
+const ASSETS = 'assets/';
 
 export class SkinSystem {
   private textures: Map<string, THREE.Texture> = new Map();
@@ -67,8 +69,6 @@ export class SkinSystem {
   private modelLoadPromises: Map<string, Promise<THREE.Group>> = new Map();
   private unlockedSkins: Set<string> = new Set();
   private textureLoader = new THREE.TextureLoader();
-  private objLoader = new OBJLoader();
-  private mtlLoader = new MTLLoader();
 
   constructor() {
     this.loadUnlockState();
@@ -119,7 +119,7 @@ export class SkinSystem {
   private preloadAssets(): void {
     for (const skin of SKINS) {
       if (skin.type === 'texture' && skin.textureUrl) {
-        const tex = this.textureLoader.load(skin.textureUrl);
+        const tex = this.textureLoader.load(ASSETS + skin.textureUrl);
         tex.magFilter = THREE.NearestFilter;
         tex.minFilter = THREE.NearestMipmapLinearFilter;
         tex.colorSpace = THREE.SRGBColorSpace;
@@ -136,26 +136,33 @@ export class SkinSystem {
     if (existing) return existing;
 
     const promise = new Promise<THREE.Group>((resolve) => {
-      const dir = skin.modelDir!;
+      const dir = ASSETS + skin.modelDir!;
       const file = skin.modelFile!;
 
-      this.mtlLoader.setPath(dir);
-      this.mtlLoader.load(file + '.mtl', (materials) => {
+      let loadedObj: THREE.Group | null = null;
+      const manager = new THREE.LoadingManager();
+      manager.onLoad = () => {
+        if (loadedObj) {
+          this.normalizeModel(loadedObj);
+          this.models.set(skin.id, loadedObj);
+          resolve(loadedObj);
+        }
+      };
+
+      const mtlLoader = new MTLLoader(manager);
+      mtlLoader.setPath(dir);
+      mtlLoader.setResourcePath(dir);
+      mtlLoader.load(file + '.mtl', (materials) => {
         materials.preload();
-        const loader = new OBJLoader();
+        const loader = new OBJLoader(manager);
         loader.setMaterials(materials);
         loader.setPath(dir);
         loader.load(file + '.obj', (obj) => {
-          this.normalizeModel(obj);
-          this.models.set(skin.id, obj);
-          console.log('[SkinSystem] Loaded model:', skin.id);
-          resolve(obj);
+          loadedObj = obj;
         }, undefined, () => {
-          console.log('[SkinSystem] OBJ load failed, trying without MTL:', skin.id);
           this.loadObjWithTexture(skin, resolve);
         });
       }, undefined, () => {
-        console.log('[SkinSystem] MTL load failed, trying OBJ with texture:', skin.id);
         this.loadObjWithTexture(skin, resolve);
       });
     });
@@ -165,7 +172,7 @@ export class SkinSystem {
   }
 
   private loadObjWithTexture(skin: SkinDef, resolve: (g: THREE.Group) => void): void {
-    const dir = skin.modelDir!;
+    const dir = ASSETS + skin.modelDir!;
     const file = skin.modelFile!;
     const loader = new OBJLoader();
     loader.setPath(dir);
@@ -184,7 +191,6 @@ export class SkinSystem {
       this.models.set(skin.id, obj);
       resolve(obj);
     }, undefined, () => {
-      console.log('[SkinSystem] Failed to load model entirely:', skin.id);
       const fallback = new THREE.Group();
       this.models.set(skin.id, fallback);
       resolve(fallback);
@@ -230,7 +236,13 @@ export class SkinSystem {
   }
 
   getModelAsync(skinId: string): Promise<THREE.Group> | null {
-    return this.modelLoadPromises.get(skinId) ?? null;
+    const existing = this.modelLoadPromises.get(skinId);
+    if (existing) return existing;
+    const skin = this.getSkin(skinId);
+    if (skin && skin.type === 'model') {
+      return this.loadModel(skin);
+    }
+    return null;
   }
 
   isUnlocked(skinId: string): boolean {
@@ -275,5 +287,19 @@ export class SkinSystem {
 
   getModelSkins(): SkinDef[] {
     return SKINS.filter(s => s.type === 'model');
+  }
+
+  getPreviewUrl(skin: SkinDef): string | null {
+    if (!skin.previewUrl) return null;
+    return ASSETS + skin.previewUrl;
+  }
+
+  getTextureUrl(skin: SkinDef): string | null {
+    if (!skin.textureUrl) return null;
+    return ASSETS + skin.textureUrl;
+  }
+
+  whenAssetsReady(): Promise<void> {
+    return Promise.resolve();
   }
 }

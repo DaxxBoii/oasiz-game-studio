@@ -22,6 +22,7 @@ export class Menu {
   private previewScene: THREE.Scene | null = null;
   private previewCamera: THREE.PerspectiveCamera | null = null;
   private previewCache: Map<string, string> = new Map();
+  private previewRendererUnavailable = false;
 
   constructor(skinSystem: SkinSystem) {
     this.skinSystem = skinSystem;
@@ -75,31 +76,52 @@ export class Menu {
 
     this.refreshShop();
     this.updatePreview();
+    this.skinSystem.whenAssetsReady().then(() => {
+      this.previewCache.clear();
+      this.refreshShop();
+      this.updatePreview();
+    });
   }
 
   private initPreviewRenderer(): void {
-    if (this.previewRenderer) return;
+    if (this.previewRenderer || this.previewRendererUnavailable) return;
 
     const size = 128;
-    this.previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.previewRenderer.setSize(size, size);
-    this.previewRenderer.setPixelRatio(2);
-    this.previewRenderer.setClearColor(0x000000, 0);
+    try {
+      // Mobile browsers can return blank toDataURL snapshots unless drawing buffer is preserved.
+      this.previewRenderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'low-power',
+      });
+      this.previewRenderer.setSize(size, size);
+      this.previewRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      this.previewRenderer.setClearColor(0x000000, 0);
 
-    this.previewScene = new THREE.Scene();
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
-    this.previewScene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(2, 4, 3);
-    this.previewScene.add(dir);
+      this.previewScene = new THREE.Scene();
+      const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+      this.previewScene.add(ambient);
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(2, 4, 3);
+      this.previewScene.add(dir);
 
-    this.previewCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 10);
-    this.previewCamera.position.set(1.2, 1.0, 1.2);
-    this.previewCamera.lookAt(0, 0.2, 0);
+      this.previewCamera = new THREE.PerspectiveCamera(35, 1, 0.1, 10);
+      this.previewCamera.position.set(1.2, 1.0, 1.2);
+      this.previewCamera.lookAt(0, 0.2, 0);
+    } catch {
+      this.previewRendererUnavailable = true;
+      this.previewRenderer = null;
+      this.previewScene = null;
+      this.previewCamera = null;
+    }
   }
 
   private renderModelPreview(model: THREE.Group): string {
     this.initPreviewRenderer();
+    if (!this.previewRenderer || !this.previewScene || !this.previewCamera) {
+      return '';
+    }
     const scene = this.previewScene!;
     const camera = this.previewCamera!;
     const renderer = this.previewRenderer!;
@@ -126,9 +148,12 @@ export class Menu {
     const model = this.skinSystem.getModel(skin.id);
     if (model && model.children.length > 0) {
       const url = this.renderModelPreview(model);
-      this.previewCache.set(skin.id, url);
-      return url;
+      if (url) {
+        this.previewCache.set(skin.id, url);
+        return url;
+      }
     }
+
     return null;
   }
 
@@ -174,6 +199,12 @@ export class Menu {
           img.className = 'skin-preview model-preview';
           img.src = previewUrl;
           img.alt = skin.name;
+          img.onerror = () => {
+            const fallback = document.createElement('div');
+            fallback.className = 'skin-preview model-preview-placeholder';
+            fallback.style.background = skin.colorStr;
+            img.replaceWith(fallback);
+          };
           btn.appendChild(img);
         } else {
           const placeholder = document.createElement('div');
@@ -184,8 +215,9 @@ export class Menu {
           const modelPromise = this.skinSystem.getModelAsync(skin.id);
           if (modelPromise) {
             modelPromise.then((model) => {
-              if (model.children.length > 0) {
-                const url = this.renderModelPreview(model);
+              if (model.children.length === 0) return;
+              const url = this.renderModelPreview(model);
+              if (url) {
                 this.previewCache.set(skin.id, url);
                 const img = document.createElement('img');
                 img.className = 'skin-preview model-preview';
@@ -199,8 +231,11 @@ export class Menu {
       } else {
         const img = document.createElement('img');
         img.className = 'skin-preview';
-        img.src = skin.textureUrl ?? '';
+        img.src = this.skinSystem.getTextureUrl(skin) ?? '';
         img.alt = skin.name;
+        img.onerror = () => {
+          img.remove();
+        };
         btn.appendChild(img);
       }
 
@@ -253,13 +288,21 @@ export class Menu {
       } else {
         preview.style.background = skin.colorStr;
         preview.style.borderRadius = '6px';
-        const modelPromise = this.skinSystem.getModelAsync(skin.id);
-        if (modelPromise) {
-          modelPromise.then(() => this.updatePreview());
+        // Only wait for the model if it hasn't loaded yet
+        if (!this.skinSystem.getModel(skin.id)) {
+          const modelPromise = this.skinSystem.getModelAsync(skin.id);
+          if (modelPromise) {
+            modelPromise.then(() => this.updatePreview());
+          }
         }
       }
     } else if (skin.type === 'texture' && skin.textureUrl) {
-      preview.style.background = 'url(' + skin.textureUrl + ') center/cover';
+      const textureUrl = this.skinSystem.getTextureUrl(skin);
+      if (textureUrl) {
+        preview.style.background = 'url(' + textureUrl + ') center/cover';
+      } else {
+        preview.style.background = skin.colorStr;
+      }
       preview.style.borderRadius = '6px';
     } else {
       preview.style.background = skin.colorStr;
