@@ -3024,6 +3024,8 @@ class GoalDuelGame {
     }
     
     this.pendingMode = mode;
+    this.elCountryStage.classList.add("hidden");
+    this.elCarStage.classList.add("hidden");
     this.elSearchingResult.classList.add("hidden");
     
     // Build scroller items first
@@ -3377,7 +3379,7 @@ class GoalDuelGame {
       // Try to reset state but don't force menu transition
       try {
         if (this.state !== "MENU" && this.state !== "SEARCHING") {
-          this.state = "MENU";
+          this.setState("MENU", true);
         }
       } catch (stateErr) {
         console.error("[Game] Failed to reset state:", stateErr);
@@ -3730,6 +3732,9 @@ class GoalDuelGame {
         (settingsCard as HTMLElement).style.display = "none";
       }
       this.elSearchingOverlay.classList.add("hidden");
+      this.elSearchingResult.classList.add("hidden");
+      this.elCountryStage.classList.add("hidden");
+      this.elCarStage.classList.add("hidden");
       // Music is already playing; just ensure AudioContext is alive
       if (!instant) {
         this.audio.ensure();
@@ -3741,7 +3746,10 @@ class GoalDuelGame {
       this.elHudPills.classList.add("hidden");
       this.elGameplayBg.classList.add("hidden");
       this.elMobileControls.classList.add("hidden");
+      this.elCountryStage.classList.add("hidden");
+      this.elCarStage.classList.add("hidden");
       this.elSearchingOverlay.classList.remove("hidden");
+      this.elSearchingResult.classList.add("hidden");
       // Music continues playing
     } else if (s === "PLAYING" || s === "GOAL") {
       this.elStart.classList.add("hidden");
@@ -3750,6 +3758,9 @@ class GoalDuelGame {
       this.elHudPills.classList.remove("hidden");
       this.elGameplayBg.classList.remove("hidden");
       this.elSearchingOverlay.classList.add("hidden");
+      this.elSearchingResult.classList.add("hidden");
+      this.elCountryStage.classList.add("hidden");
+      this.elCarStage.classList.add("hidden");
       // Show mobile controls when playing (same logic as settings - always show if playing)
       this.elMobileControls.classList.remove("hidden");
       // Update mobile controls visibility to show/hide player 2 controls based on match mode
@@ -3761,6 +3772,10 @@ class GoalDuelGame {
       this.elHudPills.classList.add("hidden");
       this.elGameplayBg.classList.add("hidden");
       this.elMobileControls.classList.add("hidden");
+      this.elSearchingOverlay.classList.add("hidden");
+      this.elSearchingResult.classList.add("hidden");
+      this.elCountryStage.classList.add("hidden");
+      this.elCarStage.classList.add("hidden");
       this.elPhysicsPanel?.classList.add("hidden");
       this.elUIPanel?.classList.add("hidden");
       const youWon = this.playerScore > this.botScore;
