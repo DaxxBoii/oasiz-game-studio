@@ -1305,7 +1305,7 @@ class GoalDuelGame {
       carMaxSpeedBoost: 25,
       carForce: 0.0099,
       carForceBoost: 0.01,
-      carTurnRate: 0.08,
+      carTurnRate: 0.24,
       carFriction: 0.01,
       carFrictionAir: 0.02,
       carRestitution: 0.4,
@@ -1972,7 +1972,7 @@ class GoalDuelGame {
       { key: "carMaxSpeedBoost", label: "Car Max Speed (Boost)", desc: "Boost max speed", min: 6, max: 25, step: 0.1, format: (v: number) => v.toFixed(1) },
       { key: "carForce", label: "Car Force", desc: "Normal acceleration", min: 0.001, max: 0.01, step: 0.0001, format: (v: number) => v.toFixed(4) },
       { key: "carForceBoost", label: "Car Force (Boost)", desc: "Boost acceleration", min: 0.001, max: 0.01, step: 0.0001, format: (v: number) => v.toFixed(4) },
-      { key: "carTurnRate", label: "Car Turn Rate", desc: "Steering responsiveness", min: 0.01, max: 0.2, step: 0.01, format: (v: number) => v.toFixed(2) },
+      { key: "carTurnRate", label: "Car Turn Rate", desc: "Steering responsiveness", min: 0.01, max: 0.45, step: 0.01, format: (v: number) => v.toFixed(2) },
       { key: "carFriction", label: "Car Friction", desc: "Ground friction", min: 0, max: 0.1, step: 0.001, format: (v: number) => v.toFixed(3) },
       { key: "carFrictionAir", label: "Car Air Friction", desc: "Air resistance", min: 0, max: 0.5, step: 0.01, format: (v: number) => v.toFixed(2) },
       { key: "carRestitution", label: "Car Restitution", desc: "Bounce factor", min: 0, max: 1, step: 0.01, format: (v: number) => v.toFixed(2) },
@@ -4363,7 +4363,8 @@ class GoalDuelGame {
     }
 
     const steer = clamp(input.steer, -1, 1);
-    Body.setAngularVelocity(body, lerp(body.angularVelocity, steer * turnRate, clamp(dt * 10, 0, 1)));
+    const steerResponse = 30;
+    Body.setAngularVelocity(body, lerp(body.angularVelocity, steer * turnRate, clamp(dt * steerResponse, 0, 1)));
 
     // Clamp speed (cache calculations)
     if (speed > maxSpeed) {
@@ -4371,10 +4372,36 @@ class GoalDuelGame {
       Body.setVelocity(body, { x: vel.x * scale, y: vel.y * scale });
     }
 
-    // Small sideways damping for "car feel"
     const right = { x: -fwd.y, y: fwd.x };
+    // Pivot assist: when steering hard, bleed speed quickly so the car can "turn on a dime".
+    if (Math.abs(steer) > 0.55 && Math.abs(thr) > 0.15 && speed > 1.2) {
+      const pivotStrength = clamp((Math.abs(steer) - 0.55) / 0.45, 0, 1);
+      const forwardSpeed = body.velocity.x * fwd.x + body.velocity.y * fwd.y;
+      const sideSpeedRaw = body.velocity.x * right.x + body.velocity.y * right.y;
+
+      const forwardDamping = 1 - pivotStrength * 0.6;
+      const sideDamping = 1 - pivotStrength * 0.85;
+      const nextForward = forwardSpeed * forwardDamping;
+      const nextSide = sideSpeedRaw * sideDamping;
+
+      Body.setVelocity(body, {
+        x: fwd.x * nextForward + right.x * nextSide,
+        y: fwd.y * nextForward + right.y * nextSide,
+      });
+
+      // Extra reverse impulse while hard-turning at speed to enable quick direction flips.
+      if (forwardSpeed > 0.6 && Math.abs(steer) > 0.8) {
+        const reverseAssistForce = forceMag * 0.9 * pivotStrength;
+        Body.applyForce(body, body.position, {
+          x: -fwd.x * reverseAssistForce,
+          y: -fwd.y * reverseAssistForce,
+        });
+      }
+    }
+
+    // Stronger sideways damping for tighter, less arc-heavy handling
     const sideSpeed = body.velocity.x * right.x + body.velocity.y * right.y;
-    const damp = 0.22;
+    const damp = 0.58;
     const vx = body.velocity.x - right.x * sideSpeed * damp;
     const vy = body.velocity.y - right.y * sideSpeed * damp;
     Body.setVelocity(body, { x: vx, y: vy });
