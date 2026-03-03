@@ -75,7 +75,6 @@ export class Game {
       if (this.settingsOpen && this.running && !this.gameOver) {
         this.paused = true;
       }
-      this.audio.triggerHaptic('light');
     });
 
     settingsModal?.addEventListener('click', (e) => {
