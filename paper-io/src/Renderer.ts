@@ -5,7 +5,7 @@ import { type TerritoryGrid } from './Territory.ts';
 const TERRITORY_Y = 0.03;
 const TERRITORY_HEIGHT = 0.14;
 const TRAIL_Y = 0.22;
-const CELL_SIZE = 0.15;
+const CELL_SIZE = 0.25;
 const BORDER_WIDTH = 1.0;
 
 export class Renderer {
@@ -319,25 +319,25 @@ export class Renderer {
       });
     }
 
-    // Compute world-space bounding box from grid bounds with padding
-    const [bMinX, bMinZ] = grid.toWorld(bounds.minC, bounds.minR);
-    const [bMaxX, bMaxZ] = grid.toWorld(bounds.maxC, bounds.maxR);
+    // Sample directly from the territory grid's own cell coordinates to avoid
+    // alignment mismatches that leave residual enemy color fragments.
+    const pad = 2;
+    const gMinC = Math.max(0, bounds.minC - pad);
+    const gMaxC = Math.min(grid.size - 1, bounds.maxC + pad);
+    const gMinR = Math.max(0, bounds.minR - pad);
+    const gMaxR = Math.min(grid.size - 1, bounds.maxR + pad);
 
-    let minX = Math.floor(bMinX / CELL_SIZE) * CELL_SIZE - CELL_SIZE * 2;
-    let minZ = Math.floor(bMinZ / CELL_SIZE) * CELL_SIZE - CELL_SIZE * 2;
-    let maxX = Math.ceil(bMaxX / CELL_SIZE) * CELL_SIZE + CELL_SIZE * 2;
-    let maxZ = Math.ceil(bMaxZ / CELL_SIZE) * CELL_SIZE + CELL_SIZE * 2;
+    const cols = gMaxC - gMinC + 1;
+    const rows = gMaxR - gMinR + 1;
 
-    const cols = Math.round((maxX - minX) / CELL_SIZE) + 1;
-    const rows = Math.round((maxZ - minZ) / CELL_SIZE) + 1;
+    const [minX, minZ] = grid.toWorld(gMinC, gMinR);
 
-    // Read ownership directly from the shared grid -- zero overlap guaranteed
     const field = new Uint8Array(cols * rows);
     for (let r = 0; r < rows; r++) {
-      const wz = minZ + r * CELL_SIZE;
+      const gr = gMinR + r;
       for (let c = 0; c < cols; c++) {
-        const wx = minX + c * CELL_SIZE;
-        if (grid.isOwnedBy(wx, wz, id)) {
+        const gc = gMinC + c;
+        if (grid.data[gr * grid.size + gc] === id) {
           field[r * cols + c] = 1;
         }
       }
