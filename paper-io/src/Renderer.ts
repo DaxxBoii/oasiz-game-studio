@@ -245,6 +245,28 @@ export class Renderer {
     if (avatar) avatar.visible = false;
   }
 
+  showAvatar(id: number): void {
+    const avatar = this.avatars.get(id);
+    if (avatar) avatar.visible = true;
+  }
+
+  updateAvatarLabel(id: number, name: string): void {
+    const avatar = this.avatars.get(id);
+    if (!avatar) return;
+    const oldLabel = avatar.getObjectByName('label');
+    if (oldLabel) {
+      avatar.remove(oldLabel);
+      if (oldLabel instanceof THREE.Sprite && oldLabel.material instanceof THREE.SpriteMaterial) {
+        oldLabel.material.map?.dispose();
+        oldLabel.material.dispose();
+      }
+    }
+    const label = this.createTextSprite(name);
+    label.position.y = 1.1;
+    label.name = 'label';
+    avatar.add(label);
+  }
+
   setRingColor(id: number, color: number): void {
     const avatar = this.avatars.get(id);
     if (!avatar) return;

@@ -72,6 +72,19 @@ export const SPAWN_POINTS = (() => {
 
 export const PLAYER_NAMES = ['You', 'Bot 1', 'Bot 2', 'Bot 3', 'Bot 4', 'Bot 5'];
 
+export const BOT_NAMES = [
+  'Ace', 'Blaze', 'Cleo', 'Dash', 'Echo',
+  'Finn', 'Glow', 'Hawk', 'Iris', 'Jade',
+  'Knox', 'Luna', 'Milo', 'Nova', 'Onyx',
+  'Pike', 'Quinn', 'Raze', 'Sage', 'Trix',
+  'Ursa', 'Vex', 'Wren', 'Xeno', 'Yuki',
+  'Zara', 'Bolt', 'Chip', 'Dex', 'Eve',
+  'Flux', 'Grit', 'Hex', 'Ivy', 'Jett',
+  'Koda', 'Lynx', 'Mars', 'Nyx', 'Opal',
+  'Pixel', 'Rook', 'Sky', 'Thor', 'Uma',
+  'Volt', 'Wolf', 'Zed', 'Rex', 'Kai',
+];
+
 // ─── Vec2 helpers ───
 export interface Vec2 {
   x: number;
