@@ -1,5 +1,5 @@
 // ─── Map ───
-export const MAP_SIZE = 60;
+export const MAP_SIZE = 120;
 export const MAP_HALF = MAP_SIZE / 2;
 export const MAP_RADIUS = MAP_HALF; // circular arena radius
 export const PLAYER_SPEED = 10; // units per second
